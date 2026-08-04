@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AgentDeck</string>
+    <string name="tab_sessions">会话</string>
+    <string name="tab_store">商店</string>
+    <string name="tab_models">模型</string>
+    <string name="tab_settings">设置</string>
+    <string name="enter_session">进入</string>
+    <string name="edit_card">编辑</string>
+    <string name="termux_missing">未检测到 Termux，请先安装 F-Droid 版 Termux</string>
+    <string name="launch_failed">启动失败</string>
+    <string name="ready">可启动</string>
+    <string name="not_ready">未就绪</string>
+</resources>

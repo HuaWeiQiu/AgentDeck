@@ -1,0 +1,41 @@
+id: recipe_codex
+name: Codex CLI
+description: OpenAI Codex CLI，运行在 proot-distro Ubuntu 内；启动后进入 Codex 聊天 TUI。
+priority: p0
+detect:
+  runtime: ubuntu
+  distro: ubuntu
+  commands:
+    - command -v codex
+version_command: codex --version
+depends_on:
+  - recipe_proot_ubuntu
+install:
+  runtime: ubuntu
+  distro: ubuntu
+  steps:
+    - name: ensure_workdir
+      shell: |
+        set -euo pipefail
+        mkdir -p /root/projects/default
+    - name: install_codex
+      shell: |
+        set -euo pipefail
+        # 包名以安装时官方文档为准；失败时由 App 展示日志
+        if command -v npm >/dev/null 2>&1; then
+          npm install -g @openai/codex || npm install -g codex
+        else
+          echo "npm not found; install Node in ubuntu first" >&2
+          exit 1
+        fi
+post_install:
+  - write_wrapper: codex-ubuntu
+  - ensure_termux_dir: ~/.agentdeck/wrappers
+  - ensure_termux_dir: ~/.agentdeck/run
+uninstall:
+  runtime: ubuntu
+  distro: ubuntu
+  shell: |
+    npm uninstall -g @openai/codex 2>/dev/null || true
+    npm uninstall -g codex 2>/dev/null || true
+launch_template: tpl_codex_ubuntu

@@ -1,0 +1,40 @@
+id: recipe_proot_ubuntu
+name: proot-distro + Ubuntu
+description: Termux 内安装 proot-distro 与 ubuntu 发行版，供 Codex 等 CLI 在完整用户态 Linux 中运行。
+priority: p0
+detect:
+  runtime: termux
+  commands:
+    - command -v proot-distro
+  distro_installed:
+    manager: proot-distro
+    name: ubuntu
+install:
+  runtime: termux
+  steps:
+    - name: install_proot_distro
+      shell: |
+        set -euo pipefail
+        pkg update -y
+        pkg install -y proot-distro
+    - name: install_ubuntu
+      shell: |
+        set -euo pipefail
+        if ! proot-distro list 2>/dev/null | grep -qi ubuntu; then
+          proot-distro install ubuntu
+        fi
+    - name: baseline_packages
+      shell: |
+        set -euo pipefail
+        proot-distro login ubuntu -- bash -lc '
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y ca-certificates curl git
+        '
+uninstall:
+  runtime: termux
+  shell: |
+    echo "Refusing to auto-remove ubuntu distro by default (data loss risk)."
+    echo "Manual: proot-distro remove ubuntu"
+    exit 1
