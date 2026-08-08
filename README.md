@@ -2,7 +2,7 @@
 
 AgentDeck 是 Android 上的 Agent CLI 启动台。它负责检查环境、安装受验证的 CLI、管理启动卡片，并通过 Termux 打开真实交互会话；它不重写 Codex 的 Agent 循环，也不在 App 内伪造终端。
 
-当前仓库版本为 `0.1.1` 开发基线。GitHub 已发布的 `v0.1.0` 仍是早期骨架，`0.1.1` 尚未推送或发布。
+当前测试预发布版本为 [`v0.1.1`](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.1)。它用于真实 Android + F-Droid Termux 验收，附带 debug 签名 APK，不是正式签名的稳定版。`v0.1.0` 是早期骨架。
 
 ## 当前能力
 
@@ -33,7 +33,7 @@ AgentDeck 不接收、存储或传递密钥；动态工作区和 CLI 参数不�
 ## 真机使用
 
 1. 安装 [F-Droid Termux](https://f-droid.org/packages/com.termux/)（包名 `com.termux`）。
-2. 构建并安装 AgentDeck debug APK，或使用后续经过签名的 Release APK。
+2. 下载并安装 `v0.1.1` 的测试 APK，或自行构建 debug APK。
 3. 首次启动在 Doctor 中授予 `RUN_COMMAND` 权限。
 4. 在 Termux 启用外部调用：
 
@@ -80,9 +80,9 @@ AgentDeck/
 
 ## 发布状态
 
-- 已发布：[v0.1.0](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.0)（早期骨架）
-- 本地开发基线：`0.1.1`
-- 正式发布前阻塞项：真实 Android + F-Droid Termux 安装、回调、登录、命名会话和迁移验收；正式签名配置。
+- 早期骨架：[v0.1.0](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.0)
+- 测试预发布：[v0.1.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.1)（debug 签名）
+- 转为稳定版前的阻塞项：真实 Android + F-Droid Termux 安装、回调、登录、命名会话和迁移验收；正式签名配置。
 
 ## 贡献与安全
 
