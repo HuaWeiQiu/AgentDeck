@@ -13,6 +13,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -20,6 +21,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.ui.models.ModelsScreen
 import com.agentdeck.app.ui.sessions.SessionsScreen
 import com.agentdeck.app.ui.settings.SettingsScreen
@@ -33,14 +35,17 @@ private data class Tab(
 
 private val tabs = listOf(
     Tab("sessions", "会话", Icons.Filled.Home),
-    Tab("store", "商店", Icons.Filled.Extension),
-    Tab("models", "模型", Icons.Filled.SmartToy),
+    Tab("store", "工具", Icons.Filled.Extension),
+    Tab("models", "配置", Icons.Filled.SmartToy),
     Tab("settings", "设置", Icons.Filled.Settings),
 )
 
 @Composable
 fun AgentDeckRoot() {
     val navController = rememberNavController()
+    val startDestination = remember {
+        if (ServiceLocator.onboarding.shouldOpenDoctor()) "settings" else "sessions"
+    }
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
 
@@ -68,7 +73,7 @@ fun AgentDeckRoot() {
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = "sessions",
+            startDestination = startDestination,
             modifier = Modifier.padding(padding),
         ) {
             composable("sessions") { SessionsScreen() }

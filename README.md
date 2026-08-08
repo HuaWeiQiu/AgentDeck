@@ -1,33 +1,41 @@
 # AgentDeck
 
-安卓上的 **Agent CLI 启动台**（轻量 Termux 启动器）。
+AgentDeck 是 Android 上的 Agent CLI 启动台。它负责检查环境、安装受验证的 CLI、管理启动卡片，并通过 Termux 打开真实交互会话；它不重写 Codex 的 Agent 循环，也不在 App 内伪造终端。
 
-用卡片管理 Codex / Claude 等 CLI，一点就进会话；不是自研聊天输入框，而是拉起真 CLI（例如 Codex 聊天 TUI）。
+当前仓库版本为 `0.1.1` 开发基线。GitHub 已发布的 `v0.1.0` 仍是早期骨架，`0.1.1` 尚未推送或发布。
 
-## 能做什么
+## 当前能力
 
-- **会话卡片**：一键进入预设 Agent 会话  
-- **Codex 启动链**：Termux → `proot-distro login ubuntu` → 工作目录 → `codex`  
-- **模型配置**：OpenAI 兼容（任意 Base URL）+ Anthropic；API Key 加密存储  
-- **商店**：按配方安装 proot Ubuntu、Codex 等（在 Termux 里执行）  
-- **设置**：检测 Termux、复制 `allow-external-apps` 与 wrapper 安装脚本  
+- 通过 F-Droid Termux `RUN_COMMAND` 打开和复用命名会话。
+- 真实 Doctor 检测 Termux、权限、`allow-external-apps`、proot、Ubuntu、Codex、登录状态和 wrapper。
+- 严格解析 APK 内 YAML 配方，按依赖执行“探测、安装、再验证”。
+- 新安装固定使用 `ubuntu:24.04` 和 Codex CLI `0.147.0`。
+- Codex arm64/x86_64 官方二进制使用固定 SHA-256 校验。
+- 会话卡片支持新建、编辑、启停、删除和兼容 Profile 选择。
+- Profile 删除时保留卡片并自动解除绑定；数据库迁移不使用破坏性回退。
+- API Key、OAuth token 和 CLI 登录信息始终由 CLI 自己管理。
 
-## 截图 / 形态
+Claude Code 目前只是 P1 规划项，不提供安装或启动入口。Profile 绑定当前用于类型约束和本地引用，不会改写 Codex `config.toml`。
 
-当前为 **MVP 骨架**：
+## 运行边界
 
-| 决策 | 说明 |
-|---|---|
-| 形态 | A · 轻量启动器（会话跑在 Termux，不自研 Agent 循环） |
-| 运行时 | 必须安装 **Termux**（推荐 F-Droid 版） |
-| P0 CLI | **Codex**（跑在 Ubuntu proot 内） |
-| 交互 | 卡片 → 进入 CLI 聊天界面（非 App 自绘大输入框） |
+```text
+AgentDeck
+  -> explicit RUN_COMMAND Intent
+F-Droid Termux
+  -> fixed codex-ubuntu.sh + argv
+proot-distro ubuntu
+  -> codex TUI
+```
 
-## 真机使用（最短路径）
+AgentDeck 不接收、存储或传递密钥；动态工作区和 CLI 参数不会拼入 shell 源码。详细决策见 [Termux 执行边界](docs/ADR-0001-TERMUX-EXECUTION-BOUNDARY.md)、[结果与 Doctor](docs/ADR-0002-TERMUX-RESULTS-AND-DOCTOR.md)、[受验证配方](docs/ADR-0003-VERIFIED-RECIPES.md) 和 [CLI adapter/数据完整性](docs/ADR-0004-CLI-ADAPTERS-AND-USER-DATA.md)。与 Termux 官方生态的取舍及待补能力见 [参考项目与缺口分析](docs/REFERENCE_PROJECTS.md)。
 
-1. 安装 [F-Droid Termux](https://f-droid.org/packages/com.termux/)（包名 `com.termux`）  
-2. 安装本仓库 [Release](https://github.com/HuaWeiQiu/AgentDeck/releases) 中的 APK  
-3. 在 Termux 执行（设置页也可复制）：
+## 真机使用
+
+1. 安装 [F-Droid Termux](https://f-droid.org/packages/com.termux/)（包名 `com.termux`）。
+2. 构建并安装 AgentDeck debug APK，或使用后续经过签名的 Release APK。
+3. 首次启动在 Doctor 中授予 `RUN_COMMAND` 权限。
+4. 在 Termux 启用外部调用：
 
 ```bash
 mkdir -p ~/.termux
@@ -36,63 +44,58 @@ grep -q '^allow-external-apps=true$' ~/.termux/termux.properties 2>/dev/null || 
 termux-reload-settings
 ```
 
-4. 打开 AgentDeck → **模型** 填写 API Key / Base URL  
-5. **商店** 安装「proot-distro + Ubuntu」，再装 Codex  
-6. **会话** 点 Codex → **进入**  
+5. 在“工具”中安装 Ubuntu 基础环境和 Codex。
+6. 在 Termux/Ubuntu 的 Codex 中完成官方登录，再运行 Doctor。
+7. 在“会话”中创建或打开 Codex 卡片。
 
-## 下载
+发布前仍需按 [真机发布清单](docs/RELEASE_CHECKLIST.md) 完成 F-Droid Termux 端到端验证。本轮本地开发环境没有连接 Android 设备，因此自动化通过不等同于真机验收。
 
-- 最新安装包：[Releases](https://github.com/HuaWeiQiu/AgentDeck/releases)  
-- 当前骨架版本：`v0.1.0`（debug 签名，包名 `com.agentdeck.app.debug`）  
+## 本地验证
 
-> 仅用于开发/尝鲜；正式版需改为 release 签名与正式包名。
+依赖 JDK 17、Android SDK platform/build-tools 36：
+
+```bash
+export JAVA_HOME="/path/to/jdk-17"
+./scripts/verify-release.sh
+```
+
+该命令会检查配方与 APK assets、wrapper 同步，运行 JVM 单测，构建 debug APK，并执行 Android Lint。
+
+产物：
+
+- `android/app/build/outputs/apk/debug/app-debug.apk`
+- `android/app/build/reports/lint-results-debug.html`
 
 ## 仓库结构
 
 ```text
 AgentDeck/
-  docs/DESIGN.md     # 完整设计文档
-  recipes/           # CLI / 环境安装配方
-  wrappers/          # Termux 启动包装脚本模板
-  android/           # Kotlin + Jetpack Compose 工程
+  android/          Kotlin + Jetpack Compose 应用
+  recipes/          受版本控制的安装/验证配方
+  wrappers/         固定 Termux 启动入口
+  docs/              设计、ADR、发布清单
+  scripts/           本地发布前验证
+  .github/           Android CI 与依赖更新
 ```
 
-## 本地构建
+## 发布状态
 
-依赖：JDK 17+、Android SDK。在 `android/local.properties` 配置：
+- 已发布：[v0.1.0](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.0)（早期骨架）
+- 本地开发基线：`0.1.1`
+- 正式发布前阻塞项：真实 Android + F-Droid Termux 安装、回调、登录、命名会话和迁移验收；正式签名配置。
 
-```properties
-sdk.dir=/你的/Android/sdk路径
-```
+## 贡献与安全
 
-```bash
-export JAVA_HOME="/path/to/jdk-17"
-cd android
-./gradlew :app:assembleDebug
-# 产物：app/build/outputs/apk/debug/app-debug.apk
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
+贡献前运行 `./scripts/verify-release.sh`，并阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告，不要在公开 Issue 中粘贴凭据或私人日志。
 
-更细的模块说明见 [android/README.md](android/README.md)。
+## 许可证
 
-## 文档
+Copyright 2026 HuaWeiQiu。按 [Apache License 2.0](LICENSE) 开源。
 
-- [设计文档](docs/DESIGN.md) — 产品决策、数据模型、启动链、MVP 范围  
+## 上游参考
 
-## 进度
-
-| 阶段 | 状态 |
-|---|---|
-| 产品设计 | 已完成 |
-| Android 骨架（四 Tab + Termux 启动） | 已完成，可编译 |
-| 真机联调 / 商店完整日志 / 深度环境探测 | 进行中 |
-| 内嵌终端（形态 B） | 未开始 |
-
-## 许可
-
-尚未单独声明许可证；默认保留作者权利。若要开源协议（MIT/Apache-2.0 等）可再补。
-
-## 相关链接
-
-- 仓库：https://github.com/HuaWeiQiu/AgentDeck  
-- Termux：https://github.com/termux/termux-app  
+- [Termux RUN_COMMAND Intent](https://github.com/termux/termux-app/wiki/RUN_COMMAND-Intent)
+- [Termux:Widget](https://github.com/termux/termux-widget)
+- [Termux:Tasker](https://github.com/termux/termux-tasker)
+- [proot-distro](https://github.com/termux/proot-distro)
+- [OpenAI Codex](https://github.com/openai/codex)

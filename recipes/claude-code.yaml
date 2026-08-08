@@ -1,22 +1,9 @@
+schema_version: 1
 id: recipe_claude_code
 name: Claude Code
-description: Anthropic Claude Code CLI（P1）。同样可用卡片启动；是否进 ubuntu 取决于配方模板。
+description: Claude Code 适配仍在 P1 规划中，暂不提供未经验证的安装入口。
 priority: p1
-detect:
-  runtime: termux
-  commands:
-    - command -v claude
-version_command: claude --version
+version: planned
+available: false
 depends_on: []
-install:
-  runtime: termux
-  steps:
-    - name: install_claude
-      shell: |
-        set -euo pipefail
-        # 安装命令以实现时官方文档为准
-        npm install -g @anthropic-ai/claude-code
-launch_template: tpl_claude_termux
-notes:
-  - P1：可增加 ubuntu 内安装变体
-  - 模型注入：ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL
+timeout_minutes: 10

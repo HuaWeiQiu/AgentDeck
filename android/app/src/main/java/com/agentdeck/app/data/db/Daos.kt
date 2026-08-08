@@ -1,10 +1,18 @@
 package com.agentdeck.app.data.db
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface AppMetadataDao {
+    @Query("SELECT value FROM app_metadata WHERE `key` = :key LIMIT 1")
+    suspend fun getValue(key: String): String?
+
+    @Upsert
+    suspend fun upsert(entity: AppMetadataEntity)
+}
 
 @Dao
 interface ProviderProfileDao {
@@ -14,7 +22,7 @@ interface ProviderProfileDao {
     @Query("SELECT * FROM provider_profiles WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): ProviderProfileEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entity: ProviderProfileEntity)
 
     @Query("DELETE FROM provider_profiles WHERE id = :id")
@@ -32,7 +40,7 @@ interface AgentCardDao {
     @Query("SELECT * FROM agent_cards WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): AgentCardEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entity: AgentCardEntity)
 
     @Query("DELETE FROM agent_cards WHERE id = :id")
@@ -40,4 +48,7 @@ interface AgentCardDao {
 
     @Query("SELECT COUNT(*) FROM agent_cards")
     suspend fun count(): Int
+
+    @Query("SELECT COUNT(*) FROM agent_cards WHERE profileId = :profileId")
+    suspend fun countByProfileId(profileId: String): Int
 }

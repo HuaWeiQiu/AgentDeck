@@ -1,23 +1,24 @@
 package com.agentdeck.app.data.repo
 
-import android.content.Context
+import android.content.res.AssetManager
+import androidx.room.withTransaction
 import com.agentdeck.app.data.db.AgentCardEntity
+import com.agentdeck.app.data.db.AppMetadataEntity
 import com.agentdeck.app.data.db.AppDatabase
 import com.agentdeck.app.data.db.ProviderProfileEntity
-import com.agentdeck.app.data.secure.SecureKeyStore
 import com.agentdeck.app.domain.model.AgentCard
+import com.agentdeck.app.domain.model.AgentRecipe
 import com.agentdeck.app.domain.model.PathNamespace
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.ProviderType
-import com.agentdeck.app.domain.model.RecipeSummary
+import com.agentdeck.app.domain.profiles.ProfileInputValidator
+import com.agentdeck.app.domain.recipe.RecipeCatalog
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import org.yaml.snakeyaml.Yaml
 import java.util.UUID
 
 class ProfileRepository(
     private val db: AppDatabase,
-    private val keyStore: SecureKeyStore,
 ) {
     fun observeProfiles(): Flow<List<ProviderProfile>> =
         db.providerProfileDao().observeAll().map { list -> list.map { it.toDomain() } }
@@ -31,12 +32,15 @@ class ProfileRepository(
         type: ProviderType,
         baseUrl: String,
         defaultModel: String,
-        apiKey: String?,
-    ): ProviderProfile {
+    ): ProviderProfile = db.withTransaction {
+        ProfileInputValidator.validate(name, baseUrl, defaultModel).getOrThrow()
         val id = existingId ?: "prof_${UUID.randomUUID().toString().take(8)}"
-        val keyRef = "keystore:$id"
-        if (!apiKey.isNullOrBlank()) {
-            keyStore.put(keyRef, apiKey.trim())
+        val existing = existingId?.let { db.providerProfileDao().getById(it) }
+        require(existingId == null || existing != null) { "要编辑的 CLI 配置不存在" }
+        if (existing != null && existing.type != type.name) {
+            require(db.agentCardDao().countByProfileId(existing.id) == 0) {
+                "该配置仍被卡片引用，解除绑定后才能更改 Provider 类型"
+            }
         }
         val profile = ProviderProfile(
             id = id,
@@ -44,21 +48,17 @@ class ProfileRepository(
             type = type,
             baseUrl = baseUrl.trim(),
             defaultModel = defaultModel.trim(),
-            keyRef = keyRef,
+            createdAtEpochMs = existing?.createdAtEpochMs ?: System.currentTimeMillis(),
         )
         db.providerProfileDao().upsert(ProviderProfileEntity.from(profile))
-        return profile
+        profile
     }
 
-    suspend fun deleteProfile(id: String) {
-        val existing = db.providerProfileDao().getById(id)
-        if (existing != null) {
-            keyStore.delete(existing.keyRef)
-            db.providerProfileDao().delete(id)
-        }
+    suspend fun deleteProfile(id: String): Int = db.withTransaction {
+        val affectedCards = db.agentCardDao().countByProfileId(id)
+        db.providerProfileDao().delete(id)
+        affectedCards
     }
-
-    fun getApiKey(profile: ProviderProfile): String? = keyStore.get(profile.keyRef)
 
     suspend fun ensureSeedProfiles() {
         if (db.providerProfileDao().count() > 0) return
@@ -68,7 +68,6 @@ class ProfileRepository(
             type = ProviderType.OPENAI_COMPATIBLE,
             baseUrl = "https://api.openai.com/v1",
             defaultModel = "gpt-5",
-            apiKey = null,
         )
         saveProfile(
             existingId = "prof_anthropic_demo",
@@ -76,7 +75,6 @@ class ProfileRepository(
             type = ProviderType.ANTHROPIC,
             baseUrl = "https://api.anthropic.com",
             defaultModel = "claude-sonnet-4-20250514",
-            apiKey = null,
         )
     }
 }
@@ -100,6 +98,7 @@ class CardRepository(
 
     suspend fun ensureSeedCards() {
         if (db.agentCardDao().count() > 0) return
+        val defaultProfileId = db.providerProfileDao().getById("prof_openai_demo")?.id
         saveCard(
             AgentCard(
                 id = "card_codex_default",
@@ -107,7 +106,7 @@ class CardRepository(
                 icon = "codex",
                 recipeId = "recipe_codex",
                 templateId = "tpl_codex_ubuntu",
-                profileId = "prof_openai_demo",
+                profileId = defaultProfileId,
                 termuxSessionName = "agentdeck-codex-default",
                 workspaceNamespace = PathNamespace.UBUNTU,
                 workspacePath = "/root/projects/default",
@@ -115,52 +114,55 @@ class CardRepository(
                 innerBin = "codex",
             ),
         )
-        saveCard(
-            AgentCard(
-                id = "card_claude_default",
-                name = "Claude Code",
-                icon = "claude",
-                recipeId = "recipe_claude_code",
-                templateId = "tpl_claude_termux",
-                profileId = "prof_anthropic_demo",
-                termuxSessionName = "agentdeck-claude-default",
-                workspaceNamespace = PathNamespace.TERMUX,
-                workspacePath = "/data/data/com.termux/files/home",
-                distro = "ubuntu",
-                innerBin = "claude",
-            ),
-        )
+    }
+}
+
+class InitialDataSeeder(
+    private val db: AppDatabase,
+    private val profiles: ProfileRepository,
+    private val cards: CardRepository,
+) {
+    suspend fun ensureInitialData() = db.withTransaction {
+        if (db.appMetadataDao().getValue(INITIAL_SEED_KEY) == "true") return@withTransaction
+        profiles.ensureSeedProfiles()
+        cards.ensureSeedCards()
+        db.appMetadataDao().upsert(AppMetadataEntity(INITIAL_SEED_KEY, "true"))
+    }
+
+    companion object {
+        private const val INITIAL_SEED_KEY = "initial_seed_completed"
     }
 }
 
 class RecipeRepository(
-    private val context: Context,
-) {
-    fun loadRecipes(): List<RecipeSummary> {
-        val yaml = Yaml()
-        val am = context.assets
-        val names = am.list("recipes")?.filter { it.endsWith(".yaml") || it.endsWith(".yml") }
+    private val assets: AssetManager,
+) : RecipeCatalog {
+    private val cachedRecipes: List<AgentRecipe> by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        val names = assets.list("recipes")?.filter { it.endsWith(".yaml") || it.endsWith(".yml") }
             ?: emptyList()
-        return names.mapNotNull { file ->
-            runCatching {
-                am.open("recipes/$file").use { input ->
-                    @Suppress("UNCHECKED_CAST")
-                    val map = yaml.load<Map<String, Any?>>(input) ?: return@use null
-                    val depends = (map["depends_on"] as? List<*>)?.mapNotNull { it?.toString() }
-                        ?: emptyList()
-                    RecipeSummary(
-                        id = map["id"]?.toString() ?: file,
-                        name = map["name"]?.toString() ?: file,
-                        description = map["description"]?.toString().orEmpty(),
-                        priority = map["priority"]?.toString() ?: "p1",
-                        dependsOn = depends,
-                    )
+        require(names.isNotEmpty()) { "APK 中没有配方资源" }
+        names.sorted().map { file ->
+            assets.open("recipes/$file").use { input ->
+                RecipeParser.parse(input, "recipes/$file")
+            }
+        }.also { recipes ->
+            val byId = recipes.associateBy { it.id }
+            require(byId.size == recipes.size) { "APK 配方包含重复 ID" }
+            recipes.forEach { recipe ->
+                val missing = recipe.dependsOn.filterNot(byId::containsKey)
+                require(missing.isEmpty()) {
+                    "配方 ${recipe.id} 缺少依赖: ${missing.joinToString()}"
                 }
-            }.getOrNull()
-        }.sortedBy { it.priority }
+            }
+        }.sortedWith(compareBy<AgentRecipe> { it.priority }.thenBy { it.name })
     }
 
-    fun readWrapperAsset(name: String): String {
-        return context.assets.open("wrappers/$name").bufferedReader().use { it.readText() }
+    override fun loadRecipes(): List<AgentRecipe> = cachedRecipes
+
+    override fun readWrapperAsset(name: String): String {
+        require(name.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))) {
+            "wrapper 资源名无效"
+        }
+        return assets.open("wrappers/$name").bufferedReader().use { it.readText() }
     }
 }

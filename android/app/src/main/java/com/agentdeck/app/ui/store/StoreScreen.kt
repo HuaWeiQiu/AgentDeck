@@ -1,6 +1,5 @@
 package com.agentdeck.app.ui.store
 
-import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,32 +8,34 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.agentdeck.app.di.ServiceLocator
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.agentdeck.app.domain.model.RecipeSummary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StoreScreen() {
-    val recipes = remember { ServiceLocator.recipes.loadRecipes() }
-    val installer = ServiceLocator.installer
-    val context = LocalContext.current
+fun StoreScreen(
+    vm: StoreViewModel = viewModel(),
+) {
+    val state by vm.state.collectAsState()
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("商店") }) },
+        topBar = { TopAppBar(title = { Text("环境与工具") }) },
     ) { padding ->
         LazyColumn(
             modifier = Modifier
@@ -43,48 +44,78 @@ fun StoreScreen() {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item {
-                Text(
-                    "骨架阶段：安装会打开 Termux 执行配方脚本。请先完成设置页环境检查。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            items(state.recipes, key = { it.id }) { recipe ->
+                RecipeCard(
+                    recipe = recipe,
+                    install = state.installs[recipe.id] ?: RecipeInstallUiState(),
+                    enabled = recipe.available && state.activeRecipeId == null,
+                    onInstall = { vm.install(recipe.id) },
                 )
-            }
-            items(recipes, key = { it.id }) { recipe ->
-                RecipeCard(recipe) {
-                    val result = installer.install(recipe.id)
-                    val msg = result.exceptionOrNull()?.message
-                        ?: "已在 Termux 启动安装：${recipe.name}"
-                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                }
             }
         }
     }
 }
 
 @Composable
-private fun RecipeCard(recipe: RecipeSummary, onInstall: () -> Unit) {
+private fun RecipeCard(
+    recipe: RecipeSummary,
+    install: RecipeInstallUiState,
+    enabled: Boolean,
+    onInstall: () -> Unit,
+) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Text(recipe.name, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
-            Text(
-                recipe.description,
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Text(recipe.description, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(4.dp))
             Text(
-                "优先级 ${recipe.priority.uppercase()}" +
+                "${recipe.version} · 优先级 ${recipe.priority.uppercase()}" +
                     if (recipe.dependsOn.isNotEmpty()) {
                         " · 依赖：${recipe.dependsOn.joinToString()}"
                     } else {
                         ""
                     },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (install.status != InstallStatus.IDLE) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    install.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = when (install.status) {
+                        InstallStatus.FAILED -> MaterialTheme.colorScheme.error
+                        InstallStatus.SUCCEEDED -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
             Spacer(Modifier.height(12.dp))
-            Button(onClick = onInstall) { Text("安装 / 修复") }
+            Button(
+                onClick = onInstall,
+                enabled = enabled,
+            ) {
+                if (install.status == InstallStatus.INSTALLING) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.size(8.dp))
+                }
+                Text(
+                    if (!recipe.available) {
+                        "计划中"
+                    } else {
+                        when (install.status) {
+                            InstallStatus.INSTALLING -> "安装中"
+                            InstallStatus.SUCCEEDED -> "重新验证"
+                            InstallStatus.FAILED -> "重试"
+                            InstallStatus.IDLE -> "安装 / 修复"
+                        }
+                    },
+                )
+            }
         }
     }
 }

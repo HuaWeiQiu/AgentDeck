@@ -3,9 +3,10 @@ package com.agentdeck.app.di
 import android.content.Context
 import com.agentdeck.app.data.db.AppDatabase
 import com.agentdeck.app.data.repo.CardRepository
+import com.agentdeck.app.data.repo.InitialDataSeeder
+import com.agentdeck.app.data.repo.OnboardingRepository
 import com.agentdeck.app.data.repo.ProfileRepository
 import com.agentdeck.app.data.repo.RecipeRepository
-import com.agentdeck.app.data.secure.SecureKeyStore
 import com.agentdeck.app.data.termux.AndroidTermuxGateway
 import com.agentdeck.app.data.termux.TermuxGateway
 import com.agentdeck.app.domain.env.EnvironmentProbe
@@ -24,7 +25,11 @@ object ServiceLocator {
         private set
     lateinit var cards: CardRepository
         private set
+    lateinit var seeder: InitialDataSeeder
+        private set
     lateinit var recipes: RecipeRepository
+        private set
+    lateinit var onboarding: OnboardingRepository
         private set
     lateinit var envProbe: EnvironmentProbe
         private set
@@ -32,20 +37,18 @@ object ServiceLocator {
         private set
     lateinit var installer: RecipeInstaller
         private set
-    lateinit var keyStore: SecureKeyStore
-        private set
-
     fun init(context: Context) {
         if (initialized) return
         synchronized(this) {
             if (initialized) return
             val app = context.applicationContext
             val db = AppDatabase.get(app)
-            keyStore = SecureKeyStore(app)
             termux = AndroidTermuxGateway(app)
-            profiles = ProfileRepository(db, keyStore)
+            profiles = ProfileRepository(db)
             cards = CardRepository(db)
-            recipes = RecipeRepository(app)
+            seeder = InitialDataSeeder(db, profiles, cards)
+            recipes = RecipeRepository(app.assets)
+            onboarding = OnboardingRepository(app)
             envProbe = EnvironmentProbe(termux)
             launcher = LaunchInteractor(cards, profiles, recipes, termux)
             installer = RecipeInstaller(termux, recipes)

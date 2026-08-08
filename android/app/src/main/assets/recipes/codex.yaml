@@ -1,41 +1,54 @@
+schema_version: 1
 id: recipe_codex
 name: Codex CLI
-description: OpenAI Codex CLI，运行在 proot-distro Ubuntu 内；启动后进入 Codex 聊天 TUI。
+description: 在 Ubuntu 内安装并校验 OpenAI 官方 Codex CLI 独立二进制。
 priority: p0
-detect:
-  runtime: ubuntu
-  distro: ubuntu
-  commands:
-    - command -v codex
-version_command: codex --version
+version: "0.147.0"
+available: true
 depends_on:
   - recipe_proot_ubuntu
+timeout_minutes: 15
+wrapper_asset: codex-ubuntu.sh
 install:
-  runtime: ubuntu
-  distro: ubuntu
-  steps:
-    - name: ensure_workdir
-      shell: |
-        set -euo pipefail
-        mkdir -p /root/projects/default
-    - name: install_codex
-      shell: |
-        set -euo pipefail
-        # 包名以安装时官方文档为准；失败时由 App 展示日志
-        if command -v npm >/dev/null 2>&1; then
-          npm install -g @openai/codex || npm install -g codex
-        else
-          echo "npm not found; install Node in ubuntu first" >&2
-          exit 1
-        fi
-post_install:
-  - write_wrapper: codex-ubuntu
-  - ensure_termux_dir: ~/.agentdeck/wrappers
-  - ensure_termux_dir: ~/.agentdeck/run
-uninstall:
-  runtime: ubuntu
-  distro: ubuntu
-  shell: |
-    npm uninstall -g @openai/codex 2>/dev/null || true
-    npm uninstall -g codex 2>/dev/null || true
-launch_template: tpl_codex_ubuntu
+  runtime: termux
+  script: |
+    set -euo pipefail
+    proot-distro login ubuntu -- /usr/bin/env bash -c '
+      set -euo pipefail
+      version="0.147.0"
+      case "$(uname -m)" in
+        aarch64|arm64)
+          target="aarch64-unknown-linux-musl"
+          sha256="eb677c80f666b1ab8b4b1d083b66e8d614b1281d960bb6f9fd8ca98f58b38b90"
+          ;;
+        x86_64|amd64)
+          target="x86_64-unknown-linux-musl"
+          sha256="0246e2e773834e07f0fb5249ed6ebad12e4591e608f8c7bb97dd6a9690544c36"
+          ;;
+        *)
+          echo "Unsupported architecture: $(uname -m)" >&2
+          exit 2
+          ;;
+      esac
+      archive="codex-${target}.tar.gz"
+      url="https://github.com/openai/codex/releases/download/rust-v${version}/${archive}"
+      temp_dir="$(mktemp -d)"
+      trap "rm -rf -- \"${temp_dir}\"" EXIT
+      curl --fail --location --retry 3 --output "${temp_dir}/${archive}" "${url}"
+      printf "%s  %s\n" "${sha256}" "${temp_dir}/${archive}" | sha256sum --check --status
+      tar -xzf "${temp_dir}/${archive}" -C "${temp_dir}"
+      install -m 0755 "${temp_dir}/codex-${target}" /usr/local/bin/codex
+      mkdir -p /root/projects/default
+      codex --version | grep -Eq "(^|[[:space:]])0[.]147[.]0($|[[:space:]])"
+    '
+    echo "Codex 0.147.0 二进制已安装并通过 SHA-256 校验"
+verify:
+  runtime: termux
+  script: |
+    set -euo pipefail
+    test -x "$HOME/.agentdeck/wrappers/codex-ubuntu.sh"
+    proot-distro login ubuntu -- /usr/bin/env bash -c '
+      set -euo pipefail
+      command -v codex >/dev/null
+      codex --version | grep -Eq "(^|[[:space:]])0[.]147[.]0($|[[:space:]])"
+    '

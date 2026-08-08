@@ -1,11 +1,19 @@
 package com.agentdeck.app.data.db
 
 import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.PathNamespace
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.ProviderType
+
+@Entity(tableName = "app_metadata")
+data class AppMetadataEntity(
+    @PrimaryKey val key: String,
+    val value: String,
+)
 
 @Entity(tableName = "provider_profiles")
 data class ProviderProfileEntity(
@@ -14,7 +22,6 @@ data class ProviderProfileEntity(
     val type: String,
     val baseUrl: String,
     val defaultModel: String,
-    val keyRef: String,
     val createdAtEpochMs: Long,
 ) {
     fun toDomain(): ProviderProfile = ProviderProfile(
@@ -23,7 +30,6 @@ data class ProviderProfileEntity(
         type = ProviderType.valueOf(type),
         baseUrl = baseUrl,
         defaultModel = defaultModel,
-        keyRef = keyRef,
         createdAtEpochMs = createdAtEpochMs,
     )
 
@@ -34,13 +40,23 @@ data class ProviderProfileEntity(
             type = domain.type.name,
             baseUrl = domain.baseUrl,
             defaultModel = domain.defaultModel,
-            keyRef = domain.keyRef,
             createdAtEpochMs = domain.createdAtEpochMs,
         )
     }
 }
 
-@Entity(tableName = "agent_cards")
+@Entity(
+    tableName = "agent_cards",
+    foreignKeys = [
+        ForeignKey(
+            entity = ProviderProfileEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["profileId"],
+            onDelete = ForeignKey.SET_NULL,
+        ),
+    ],
+    indices = [Index("profileId")],
+)
 data class AgentCardEntity(
     @PrimaryKey val id: String,
     val name: String,

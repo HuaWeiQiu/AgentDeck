@@ -1,40 +1,44 @@
+schema_version: 1
 id: recipe_proot_ubuntu
 name: proot-distro + Ubuntu
-description: Termux 内安装 proot-distro 与 ubuntu 发行版，供 Codex 等 CLI 在完整用户态 Linux 中运行。
+description: 在 Termux 中准备固定为 Ubuntu 24.04 的 Codex 运行基础环境。
 priority: p0
-detect:
-  runtime: termux
-  commands:
-    - command -v proot-distro
-  distro_installed:
-    manager: proot-distro
-    name: ubuntu
+version: "ubuntu:24.04"
+available: true
+depends_on: []
+timeout_minutes: 30
 install:
   runtime: termux
-  steps:
-    - name: install_proot_distro
-      shell: |
-        set -euo pipefail
-        pkg update -y
-        pkg install -y proot-distro
-    - name: install_ubuntu
-      shell: |
-        set -euo pipefail
-        if ! proot-distro list 2>/dev/null | grep -qi ubuntu; then
-          proot-distro install ubuntu
-        fi
-    - name: baseline_packages
-      shell: |
-        set -euo pipefail
-        proot-distro login ubuntu -- bash -lc '
-          set -euo pipefail
-          export DEBIAN_FRONTEND=noninteractive
-          apt-get update
-          apt-get install -y ca-certificates curl git
-        '
-uninstall:
+  script: |
+    set -euo pipefail
+    pkg update -y
+    pkg install -y proot-distro
+    if proot-distro login ubuntu -- /usr/bin/env true >/dev/null 2>&1; then
+      installed_version="$(proot-distro login ubuntu -- /usr/bin/env bash -c '. /etc/os-release && printf "%s" "$VERSION_ID"')"
+      if [[ "$installed_version" != "24.04" ]]; then
+        echo "现有 ubuntu 为 ${installed_version:-unknown}；AgentDeck 不会自动删除数据，请手动迁移到 ubuntu:24.04" >&2
+        exit 3
+      fi
+    else
+      proot-distro install ubuntu:24.04 --name ubuntu
+    fi
+    proot-distro login ubuntu -- /usr/bin/env bash -c '
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y ca-certificates curl git
+    '
+    echo "Ubuntu 基础环境已准备"
+verify:
   runtime: termux
-  shell: |
-    echo "Refusing to auto-remove ubuntu distro by default (data loss risk)."
-    echo "Manual: proot-distro remove ubuntu"
-    exit 1
+  script: |
+    set -euo pipefail
+    command -v proot-distro >/dev/null
+    proot-distro login ubuntu -- /usr/bin/env bash -c '
+      set -euo pipefail
+      test "$(. /etc/os-release && printf "%s" "$ID")" = "ubuntu"
+      test "$(. /etc/os-release && printf "%s" "$VERSION_ID")" = "24.04"
+      command -v curl >/dev/null
+      command -v sha256sum >/dev/null
+      command -v tar >/dev/null
+    '

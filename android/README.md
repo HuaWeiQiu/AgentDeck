@@ -1,52 +1,62 @@
-# AgentDeck Android 工程
+# AgentDeck Android
 
-轻量 Termux 启动器（Kotlin + Jetpack Compose）。
+Kotlin + Jetpack Compose 客户端，负责卡片/配置管理、环境 Doctor、受验证配方安装和 Termux 会话启动。
 
-## 环境要求
+## 工具链
 
-- JDK 17+
-- Android SDK（`compileSdk 36` / `minSdk 26`）
-- 在 `local.properties` 中设置 `sdk.dir=...`（该文件已 gitignore，勿提交）
+- JDK 17
+- Android Gradle Plugin 8.10.1
+- Gradle 8.11.1
+- `compileSdk 36` / `targetSdk 36` / `minSdk 26`
 
-## 构建与安装
+Gradle 8.11.1 是 AGP 8.10.1 的已验证组合。Core 1.18 / Lifecycle 2.10 是 SDK 36 兼容线。Lint 会提示更新 Gradle 及升级到 Core 1.19 / Lifecycle 2.11，但后一组依赖要求 `compileSdk 37` 和 Android Gradle Plugin 9.1；整套工具链迁移不属于 0.1.1。
+
+在未配置全局 Android SDK 时，将本机路径写入未跟踪的 `local.properties`：
+
+```properties
+sdk.dir=/path/to/android-sdk
+```
+
+## 构建
+
+建议从仓库根目录运行完整验证：
 
 ```bash
-export JAVA_HOME="/path/to/jdk-17"
+./scripts/verify-release.sh
+```
+
+或只运行 Android 任务：
+
+```bash
 cd android
-./gradlew :app:assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
-| 项 | 值 |
+| 项目 | 值 |
 |---|---|
-| Debug 包名 | `com.agentdeck.app.debug` |
-| 版本名 | `0.1.0-skeleton` |
+| Debug application ID | `com.agentdeck.app.debug` |
+| 版本 | `0.1.1-debug`（`versionCode=2`） |
 | APK | `app/build/outputs/apk/debug/app-debug.apk` |
+| Lint | `app/build/reports/lint-results-debug.html` |
 
-## 已实现模块
+## 模块
 
-| 模块 | 说明 |
+| 模块 | 责任 |
 |---|---|
-| 会话 | Codex / Claude 种子卡片；「进入」→ Termux `RUN_COMMAND` |
-| 商店 | 读取 assets 配方 YAML；在 Termux 执行安装脚本 |
-| 模型 | OpenAI 兼容 + Anthropic；Key 加密存储 |
-| 设置 | Termux 检测、复制 allow-external-apps / wrapper 脚本 |
-| 启动链 | Codex：`proot-distro login ubuntu` → `codex` |
+| `data/termux` | `RUN_COMMAND` Intent、命名会话和后台结果回调 |
+| `domain/env` | Doctor 固定探测协议与状态映射 |
+| `domain/recipe` + `domain/install` | 严格配方、依赖排序、安装后验证 |
+| `domain/launch` | CLI adapter、固定 executable 与 argv 生成 |
+| `domain/cards` | 卡片编辑规则和 Profile 类型约束 |
+| `data/db` | Room v3、Profile 外键和一次性初始化状态 |
+| `ui` | 会话、工具、CLI 配置、设置四个工作面 |
 
-## 真机前置
+## 数据与凭据
 
-1. 安装 **F-Droid** 版 Termux（`com.termux`）  
-2. 开启 `allow-external-apps=true`  
-3. 授予 App 的 `RUN_COMMAND` 权限  
-4. 商店安装 Ubuntu 与 Codex  
-5. 模型页配置 API  
+Room 只保存卡片和非敏感 Profile 元数据（名称、Provider 类型、Base URL、默认模型）。AgentDeck 不保存 API Key 或 OAuth token；登录由 Codex 等 CLI 自己完成。
 
-## 代码包结构
+数据库升级链为 v1→v2→v3：v2 移除旧 `keyRef`，v3 增加 Profile 外键与一次性播种标记。禁止添加 `fallbackToDestructiveMigration()`。
 
-```text
-com.agentdeck.app
-  ui/        Compose 四 Tab
-  domain/    启动、环境探测、安装
-  data/      Room、KeyStore、TermuxGateway
-  di/        ServiceLocator
-```
+## 真机限制
+
+JVM 测试可以验证 Intent 契约、解析、命令边界和迁移 SQL，但不能证明 OEM Android、F-Droid Termux、proot 网络下载或 Codex TUI 的实际行为。发布前必须执行 [RELEASE_CHECKLIST.md](../docs/RELEASE_CHECKLIST.md)。
