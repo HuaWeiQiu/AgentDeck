@@ -62,22 +62,35 @@ class ProfileRepository(
 
     suspend fun ensureSeedProfiles() {
         if (db.providerProfileDao().count() > 0) return
-        saveProfile(
-            existingId = "prof_openai_demo",
-            name = "OpenAI Compatible",
-            type = ProviderType.OPENAI_COMPATIBLE,
-            baseUrl = "https://api.openai.com/v1",
-            defaultModel = "gpt-5",
-        )
-        saveProfile(
-            existingId = "prof_anthropic_demo",
-            name = "Anthropic",
-            type = ProviderType.ANTHROPIC,
-            baseUrl = "https://api.anthropic.com",
-            defaultModel = "claude-sonnet-4-20250514",
-        )
+        defaultSeedProfiles(System.currentTimeMillis()).forEach { profile ->
+            ProfileInputValidator.validate(
+                profile.name,
+                profile.baseUrl,
+                profile.defaultModel,
+            ).getOrThrow()
+            db.providerProfileDao().upsert(ProviderProfileEntity.from(profile))
+        }
     }
 }
+
+internal fun defaultSeedProfiles(createdAtEpochMs: Long): List<ProviderProfile> = listOf(
+    ProviderProfile(
+        id = "prof_openai_demo",
+        name = "OpenAI Compatible",
+        type = ProviderType.OPENAI_COMPATIBLE,
+        baseUrl = "https://api.openai.com/v1",
+        defaultModel = "gpt-5",
+        createdAtEpochMs = createdAtEpochMs,
+    ),
+    ProviderProfile(
+        id = "prof_anthropic_demo",
+        name = "Anthropic",
+        type = ProviderType.ANTHROPIC,
+        baseUrl = "https://api.anthropic.com",
+        defaultModel = "claude-sonnet-4-20250514",
+        createdAtEpochMs = createdAtEpochMs,
+    ),
+)
 
 class CardRepository(
     private val db: AppDatabase,

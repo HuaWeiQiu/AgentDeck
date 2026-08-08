@@ -9,7 +9,7 @@ Kotlin + Jetpack Compose 客户端，负责卡片/配置管理、环境 Doctor�
 - Gradle 8.11.1
 - `compileSdk 36` / `targetSdk 36` / `minSdk 26`
 
-Gradle 8.11.1 是 AGP 8.10.1 的已验证组合。Core 1.18 / Lifecycle 2.10 是 SDK 36 兼容线。Lint 会提示更新 Gradle 及升级到 Core 1.19 / Lifecycle 2.11，但后一组依赖要求 `compileSdk 37` 和 Android Gradle Plugin 9.1；整套工具链迁移不属于 0.1.1。
+Gradle 8.11.1 是 AGP 8.10.1 的已验证组合。Core 1.18 / Lifecycle 2.10 是 SDK 36 兼容线。Lint 会提示更新 Gradle 及升级到 Core 1.19 / Lifecycle 2.11，但后一组依赖要求 `compileSdk 37` 和 Android Gradle Plugin 9.1；整套工具链迁移不属于 0.1.x。
 
 在未配置全局 Android SDK 时，将本机路径写入未跟踪的 `local.properties`：
 
@@ -35,7 +35,7 @@ cd android
 | 项目 | 值 |
 |---|---|
 | Debug application ID | `com.agentdeck.app.debug` |
-| 版本 | `0.1.1-debug`（`versionCode=2`） |
+| 版本 | `0.1.2-debug`（`versionCode=3`） |
 | APK | `app/build/outputs/apk/debug/app-debug.apk` |
 | Lint | `app/build/reports/lint-results-debug.html` |
 

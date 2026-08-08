@@ -2,6 +2,14 @@
 
 All notable changes to AgentDeck are documented in this file.
 
+## 0.1.2 - 2026-08-09
+
+### Fixed
+
+- Fresh installs now insert default Profiles through a dedicated seed path instead of the edit-only API.
+- Initial data failures are logged without terminating the entire Android process.
+- Verified cold start, repeat start, default data, `RUN_COMMAND`, Termux external calls, Ubuntu, and Codex detection on Android 16 / iQOO Neo8.
+
 ## 0.1.1 - 2026-08-08
 
 ### Added

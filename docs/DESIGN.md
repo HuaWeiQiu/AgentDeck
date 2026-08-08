@@ -1,4 +1,4 @@
-# AgentDeck 设计文档（0.1.1 基线）
+# AgentDeck 设计文档（0.1.2 基线）
 
 > 状态：P0 Android 实现、自动化验证和发布文档已落地；等待真实 Android + F-Droid Termux 验收
 > 平台：Android
@@ -115,7 +115,7 @@ Termux shell
 
 ## 4. 信息架构（UI）
 
-本节以产品目标态描述信息架构。0.1.1 已实现四个 Tab、卡片/Profile CRUD、配方安装结果和 Doctor；会话历史、安装日志、导入导出等明确列在 P1，不应按当前能力理解。
+本节以产品目标态描述信息架构。0.1.x 已实现四个 Tab、卡片/Profile CRUD、配方安装结果和 Doctor；会话历史、安装日志、导入导出等明确列在 P1，不应按当前能力理解。
 
 ### 4.1 底部导航（4 Tab）
 
@@ -140,14 +140,14 @@ Termux shell
 
 - MVP：拉起 Termux，附着到命名 session，执行启动包装脚本
 - 用户看到的是 **Codex 聊天 TUI**（不是 App 自绘 Chat）
-- App 用短提示确认启动请求已交给 Termux；0.1.1 不追踪会话运行状态
+- App 用短提示确认启动请求已交给 Termux；0.1.x 不追踪会话运行状态
 
 **编辑卡片页**
 
 - 名称、CLI 类型、启停状态
 - 工作区目录（`cwd`，在 Ubuntu 内路径或 Termux 路径，需标明命名空间）
 - 绑定模型 Profile
-- 启动模板由所选 CLI adapter 固定；0.1.1 不开放自定义脚本、env 或额外参数编辑
+- 启动模板由所选 CLI adapter 固定；0.1.x 不开放自定义脚本、env 或额外参数编辑
 
 ### 4.3 工具 Tab
 
@@ -329,7 +329,7 @@ set -euo pipefail
    - background = false（前台会话）
    - shell create mode = `no-shell-with-name`
 4. Termux 创建或切换到同名会话，并打开 UI
-5. 0.1.1 不记录会话状态；会话历史与运行状态属于 P1
+5. 0.1.x 不记录会话状态；会话历史与运行状态属于 P1
 ```
 
 ### 6.3 Termux Intent 约定
@@ -401,7 +401,7 @@ app/
   main/assets/    内置配方和 wrapper
 ```
 
-### 8.1 关键边界（0.1.1）
+### 8.1 关键边界（0.1.x）
 
 ```kotlin
 interface TermuxGateway {
@@ -425,7 +425,7 @@ interface CliAdapter {
 
 ## 9. MVP 范围拆分
 
-### P0（0.1.1 已实现）
+### P0（0.1.x 已实现）
 
 1. Compose 四 Tab、卡片 CRUD、Profile CRUD 与底部导航
 2. Room v3、非破坏迁移、Profile 外键与一次性初始化
@@ -525,7 +525,7 @@ AgentDeck/
 1. 在真实 Android + F-Droid Termux 上完成 `docs/RELEASE_CHECKLIST.md`
 2. 验证 v0.1.0 APK 数据升级到 Room v3
 3. 验证 arm64 Ubuntu/Codex 下载、SHA-256、登录和 TUI
-4. 配置正式 release 签名并发布 `v0.1.1`
+4. 配置正式 release 签名，并在真机清单通过后发布稳定版
 
 ---
 
