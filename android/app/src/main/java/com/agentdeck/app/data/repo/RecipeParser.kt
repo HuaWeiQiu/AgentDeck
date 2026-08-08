@@ -44,12 +44,31 @@ object RecipeParser {
         val wrapperAsset = root.optionalString("wrapper_asset", sourceName)?.also { asset ->
             require(asset.matches(ASSET_PATTERN)) { "$sourceName 的 wrapper_asset 无效" }
         }
+        val additionalWrapperAssets = root.optionalStringList(
+            "additional_wrapper_assets",
+            sourceName,
+        ).also { assets ->
+            require(assets.distinct().size == assets.size) {
+                "$sourceName 的 additional_wrapper_assets 包含重复资源"
+            }
+            assets.forEach { asset ->
+                require(asset.matches(ASSET_PATTERN)) {
+                    "$sourceName 的 additional_wrapper_assets 包含无效资源"
+                }
+                require(asset != wrapperAsset) {
+                    "$sourceName 的 wrapper 资源重复: $asset"
+                }
+            }
+        }
         if (available) {
             requireNotNull(install) { "$sourceName 可安装但缺少 install" }
             requireNotNull(verify) { "$sourceName 可安装但缺少 verify" }
         } else {
-            require(install == null && verify == null && wrapperAsset == null) {
-                "$sourceName 不可安装时不能声明 install、verify 或 wrapper_asset"
+            require(
+                install == null && verify == null && wrapperAsset == null &&
+                    additionalWrapperAssets.isEmpty(),
+            ) {
+                "$sourceName 不可安装时不能声明 install、verify 或 wrapper 资源"
             }
         }
 
@@ -70,6 +89,7 @@ object RecipeParser {
             install = install,
             verify = verify,
             wrapperAsset = wrapperAsset,
+            additionalWrapperAssets = additionalWrapperAssets,
         )
     }
 
@@ -146,6 +166,7 @@ object RecipeParser {
         "install",
         "verify",
         "wrapper_asset",
+        "additional_wrapper_assets",
     )
     private val COMMAND_KEYS = setOf("runtime", "script")
     private val ID_PATTERN = Regex("[a-z0-9][a-z0-9_-]{0,63}")

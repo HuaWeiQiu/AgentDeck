@@ -1,6 +1,6 @@
 # AgentDeck Android
 
-Kotlin + Jetpack Compose 客户端，负责卡片/配置管理、环境 Doctor、受验证配方安装和 Termux 会话启动。
+Kotlin + Jetpack Compose 客户端，负责对话/Profile 管理、统一环境设置、受验证配方安装、Codex app-server 原生聊天和 Termux 终端兜底。
 
 ## 工具链
 
@@ -9,7 +9,7 @@ Kotlin + Jetpack Compose 客户端，负责卡片/配置管理、环境 Doctor�
 - Gradle 8.11.1
 - `compileSdk 36` / `targetSdk 36` / `minSdk 26`
 
-Gradle 8.11.1 是 AGP 8.10.1 的已验证组合。Core 1.18 / Lifecycle 2.10 是 SDK 36 兼容线。Lint 会提示更新 Gradle 及升级到 Core 1.19 / Lifecycle 2.11，但后一组依赖要求 `compileSdk 37` 和 Android Gradle Plugin 9.1；整套工具链迁移不属于 0.1.x。
+Gradle 8.11.1 是 AGP 8.10.1 的已验证组合。Core 1.18 / Lifecycle 2.10 是 SDK 36 兼容线。Markdown renderer 固定为 0.28.0，以匹配 Kotlin 2.0.21；新版本要求 Kotlin 2.2+，其中当前版本还要求 `compileSdk 37`。Lint 会提示这些可用升级，但整套工具链迁移不属于 0.1.x。
 
 在未配置全局 Android SDK 时，将本机路径写入未跟踪的 `local.properties`：
 
@@ -35,7 +35,7 @@ cd android
 | 项目 | 值 |
 |---|---|
 | Debug application ID | `com.agentdeck.app.debug` |
-| 版本 | `0.1.2-debug`（`versionCode=3`） |
+| 版本 | `0.1.3-debug`（`versionCode=4`） |
 | APK | `app/build/outputs/apk/debug/app-debug.apk` |
 | Lint | `app/build/reports/lint-results-debug.html` |
 
@@ -44,12 +44,15 @@ cd android
 | 模块 | 责任 |
 |---|---|
 | `data/termux` | `RUN_COMMAND` Intent、命名会话和后台结果回调 |
+| `data/chat` | 本地桥启动、一次性 token 鉴权、双向 JSON-RPC 与对话/thread 映射 |
 | `domain/env` | Doctor 固定探测协议与状态映射 |
+| `domain/setup` | 全局设置状态、唯一下一步动作和可恢复安装进度 |
+| `domain/chat` | Thread/Turn/Item 到移动聊天时间线的协议映射 |
 | `domain/recipe` + `domain/install` | 严格配方、依赖排序、安装后验证 |
 | `domain/launch` | CLI adapter、固定 executable 与 argv 生成 |
 | `domain/cards` | 卡片编辑规则和 Profile 类型约束 |
 | `data/db` | Room v3、Profile 外键和一次性初始化状态 |
-| `ui` | 会话、工具、CLI 配置、设置四个工作面 |
+| `ui` | 对话列表、原生聊天、工具、CLI 配置和设置工作面 |
 
 ## 数据与凭据
 
@@ -59,4 +62,4 @@ Room 只保存卡片和非敏感 Profile 元数据（名称、Provider 类型、
 
 ## 真机限制
 
-JVM 测试可以验证 Intent 契约、解析、命令边界和迁移 SQL，但不能证明 OEM Android、F-Droid Termux、proot 网络下载或 Codex TUI 的实际行为。发布前必须执行 [RELEASE_CHECKLIST.md](../docs/RELEASE_CHECKLIST.md)。
+JVM 测试可以验证 Intent 契约、协议解析、真实本机 app-server 冒烟、命令边界和迁移 SQL，但不能证明 OEM Android、F-Droid Termux、proot 网络下载或回环桥在真机上的实际行为。发布前必须执行 [RELEASE_CHECKLIST.md](../docs/RELEASE_CHECKLIST.md)。

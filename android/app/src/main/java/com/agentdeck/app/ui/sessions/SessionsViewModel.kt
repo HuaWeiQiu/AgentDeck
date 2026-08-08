@@ -8,9 +8,9 @@ import com.agentdeck.app.domain.cards.CardEditor
 import com.agentdeck.app.domain.launch.CliAdapterDescriptor
 import com.agentdeck.app.domain.launch.CliAdapterRegistry
 import com.agentdeck.app.domain.model.AgentCard
-import com.agentdeck.app.domain.model.LaunchResult
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.RecipeSummary
+import com.agentdeck.app.domain.setup.SetupState
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -19,7 +19,6 @@ import java.util.UUID
 class SessionsViewModel : ViewModel() {
     private val cardsRepo = ServiceLocator.cards
     private val profilesRepo = ServiceLocator.profiles
-    private val launcher = ServiceLocator.launcher
     private val recipesRepo = ServiceLocator.recipes
     private val adapters = CliAdapterRegistry.default
 
@@ -34,7 +33,7 @@ class SessionsViewModel : ViewModel() {
     val profiles: StateFlow<List<ProviderProfile>> = profilesRepo.observeProfiles()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    suspend fun launch(cardId: String): LaunchResult = launcher.launch(cardId)
+    val setupState: StateFlow<SetupState> = ServiceLocator.setup.state
 
     fun newDraft(): CardDraft? = availableAdapters.firstOrNull()?.let { descriptor ->
         CardDraft(
@@ -64,6 +63,11 @@ class SessionsViewModel : ViewModel() {
     fun isRecipeAvailable(recipeId: String): Boolean =
         recipes.firstOrNull { it.id == recipeId }?.available == true
 
+    fun adapterDisplayName(recipeId: String): String =
+        adapters.forRecipe(recipeId)?.descriptor?.displayName
+            ?: recipes.firstOrNull { it.id == recipeId }?.name
+            ?: "CLI"
+
     suspend fun save(draft: CardDraft): Result<AgentCard> = runCatching {
         require(isRecipeAvailable(draft.recipeId)) { "该 CLI 配方尚未开放" }
         val adapter = requireNotNull(adapters.forRecipe(draft.recipeId)) { "缺少 CLI adapter" }
@@ -81,5 +85,6 @@ class SessionsViewModel : ViewModel() {
     suspend fun delete(cardId: String): Result<Unit> = runCatching {
         requireNotNull(cardsRepo.getCard(cardId)) { "卡片不存在" }
         cardsRepo.deleteCard(cardId)
+        ServiceLocator.conversationLinks.clearThreadId(cardId)
     }
 }

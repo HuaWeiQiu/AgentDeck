@@ -2,6 +2,32 @@
 
 All notable changes to AgentDeck are documented in this file.
 
+## 0.1.3 - 2026-08-09
+
+### Added
+
+- Native Codex chat backed by the official app-server Thread/Turn/Item protocol, with history resume, Markdown, streaming deltas, stop, structured activity rows, and command/file/permission approvals.
+- An authenticated single-client loopback bridge for the stable app-server stdio transport; its high-entropy token is never persisted by AgentDeck.
+- A single recoverable setup coordinator with contextual actions, install stages, duplicate-install locking, and automatic rescans after returning to the app.
+
+### Fixed
+
+- The app now opens the conversation hub once Termux can be called; Codex login remains actionable but no longer hides the session entry behind Doctor.
+- Conversation cards now enter the native transcript; Termux TUI is an explicit fallback action inside the conversation.
+- Codex setup now preserves compatible CLI versions, updates versions below 0.147.0, and leaves `~/.codex` provider/auth data untouched.
+- Native chat disables interactive startup update prompts; Codex updates stay inside AgentDeck's visible setup flow.
+- Resuming a thread now interrupts persisted `inProgress` turns left by a disconnected bridge, so later messages do not wait forever.
+- Per-conversation bridge leases now replace orphaned app-server processes before reconnecting, preventing concurrent rollout writers after Android process death.
+- PRoot sessions use the official `externalSandbox` policy while retaining app-server approvals, avoiding incompatible nested bubblewrap execution.
+- Ubuntu setup now repairs and verifies the apt package prerequisites needed before Codex detection or download.
+- Codex downloads now try the normal IPv4/IPv6 path first and fall back to IPv4 when Android/proot dual-stack routing cannot reach GitHub.
+- Large GitHub assets are downloaded in verified-length ranges; connection, stall, and transfer limits now fail predictably instead of appearing to hang indefinitely.
+- Fresh Codex installation allows up to 30 minutes and explains the dependency check before any download begins.
+
+### Design
+
+- Applied the Thread/Turn/Item, mobile transcript, stable conversation mapping, inline approval, and terminal-fallback patterns found in Codex app-server, Happier, CloudCLI, cdesktop, and Termux.
+
 ## 0.1.2 - 2026-08-09
 
 ### Fixed

@@ -13,8 +13,8 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.1.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -77,6 +77,8 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.yaml:snakeyaml:2.3")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.28.0")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20260719")
 }

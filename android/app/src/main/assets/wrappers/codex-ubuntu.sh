@@ -57,5 +57,12 @@ if ! command -v "$inner_bin" >/dev/null 2>&1; then
   echo "agentdeck: $inner_bin not found inside distro" >&2
   exit 127
 fi
+if [[ "$inner_bin" == "codex" ]]; then
+  exec "$inner_bin" \
+    -c check_for_update_on_startup=false \
+    --sandbox danger-full-access \
+    --ask-for-approval on-request \
+    "$@"
+fi
 exec "$inner_bin" "$@"
 ' agentdeck "$INNER_CWD" "$INNER_BIN" "$@"

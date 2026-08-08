@@ -74,6 +74,7 @@ data class AgentRecipe(
     val install: RecipeCommand?,
     val verify: RecipeCommand?,
     val wrapperAsset: String?,
+    val additionalWrapperAssets: List<String> = emptyList(),
 ) {
     val summary: RecipeSummary
         get() = RecipeSummary(
@@ -113,6 +114,20 @@ data class EnvironmentReport(
         get() = checks.firstOrNull { it.id == "termux_installed" }?.ok == true
 
     fun check(id: String): EnvironmentCheck? = checks.firstOrNull { it.id == id }
+
+    val canLaunchSessions: Boolean
+        get() {
+            val launchIds = setOf(
+                "termux_installed",
+                "termux_run_command_permission",
+                "allow_external_apps",
+                "proot_distro",
+                "ubuntu_installed",
+                "codex_installed",
+                "codex_wrapper",
+            )
+            return launchIds.all { id -> check(id)?.ok == true }
+        }
 
     val allCriticalOk: Boolean
         get() {

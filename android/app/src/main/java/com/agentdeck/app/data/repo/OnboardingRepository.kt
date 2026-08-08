@@ -10,7 +10,7 @@ class OnboardingRepository(context: Context) {
     fun shouldOpenDoctor(): Boolean = !preferences.getBoolean(KEY_DOCTOR_COMPLETED, false)
 
     fun record(report: EnvironmentReport) {
-        if (report.allCriticalOk) {
+        if (report.canLaunchSessions) {
             preferences.edit { putBoolean(KEY_DOCTOR_COMPLETED, true) }
         }
     }

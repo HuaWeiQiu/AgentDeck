@@ -36,15 +36,20 @@ internal object DoctorOutputParser {
     private const val MAX_DETAIL_LENGTH = 240
 }
 
+interface EnvironmentScanner {
+    fun initialReport(): EnvironmentReport
+    suspend fun scan(): EnvironmentReport
+    fun allowExternalAppsFixCommand(): String
+    fun errorReport(message: String): EnvironmentReport
+}
+
 @SuppressLint("SdCardPath")
 class EnvironmentProbe(
     private val termux: TermuxGateway,
-) {
-    fun initialReport(): EnvironmentReport = preflightReport(EnvironmentCheckStatus.UNKNOWN)
+) : EnvironmentScanner {
+    override fun initialReport(): EnvironmentReport = preflightReport(EnvironmentCheckStatus.UNKNOWN)
 
-    fun checkingReport(): EnvironmentReport = preflightReport(EnvironmentCheckStatus.CHECKING)
-
-    suspend fun scan(): EnvironmentReport {
+    override suspend fun scan(): EnvironmentReport {
         val preflight = preflightReport(EnvironmentCheckStatus.CHECKING)
         if (preflight.check("termux_installed")?.ok != true ||
             preflight.check("termux_run_command_permission")?.ok != true
@@ -65,7 +70,7 @@ class EnvironmentProbe(
                 if (!commandResult.commandSucceeded) {
                     failedShellReport(
                         "Doctor 退出码 ${commandResult.exitCode}: " +
-                            commandResult.stderr.trim().take(160),
+                            commandResult.stderr.ifBlank { commandResult.stdout }.trim().takeLast(160),
                     )
                 } else if (commandResult.outputWasTruncated) {
                     failedShellReport("Doctor 输出被 Termux 截断，请重新检测")
@@ -79,7 +84,7 @@ class EnvironmentProbe(
         )
     }
 
-    fun allowExternalAppsFixCommand(): String = """
+    override fun allowExternalAppsFixCommand(): String = """
         mkdir -p ~/.termux
         if ! grep -q '^allow-external-apps=true$' ~/.termux/termux.properties 2>/dev/null; then
           printf '\nallow-external-apps=true\n' >> ~/.termux/termux.properties
@@ -87,7 +92,7 @@ class EnvironmentProbe(
         termux-reload-settings
     """.trimIndent()
 
-    fun errorReport(message: String): EnvironmentReport = failedShellReport(message)
+    override fun errorReport(message: String): EnvironmentReport = failedShellReport(message)
 
     private fun preflightReport(shellStatus: EnvironmentCheckStatus): EnvironmentReport {
         val installed = termux.isTermuxInstalled()
@@ -151,12 +156,12 @@ class EnvironmentProbe(
                     id = definition.id,
                     label = definition.label,
                     status = if (allowExternalApps) {
-                        EnvironmentCheckStatus.ACTION_REQUIRED
+                        EnvironmentCheckStatus.ERROR
                     } else {
                         EnvironmentCheckStatus.BLOCKED
                     },
                     detail = if (allowExternalApps) {
-                        "$safeMessage；请确认 allow-external-apps=true、Termux 版本和设置"
+                        "$safeMessage；请重试检测或检查 Termux 运行状态"
                     } else {
                         "Doctor 无法运行，等待 Termux 集成恢复"
                     },
@@ -188,7 +193,7 @@ class EnvironmentProbe(
             CheckDefinition("proot_distro", "proot-distro"),
             CheckDefinition("ubuntu_installed", "Ubuntu"),
             CheckDefinition("codex_installed", "Codex CLI"),
-            CheckDefinition("codex_authenticated", "Codex 登录"),
+            CheckDefinition("codex_authenticated", "Codex 认证"),
             CheckDefinition("codex_wrapper", "Codex 启动 wrapper"),
         )
 
@@ -206,32 +211,106 @@ class EnvironmentProbe(
               emit allow_external_apps action_required "需要在 Termux 配置中启用并重载设置"
             fi
 
-            if [[ -x "${'$'}HOME/.agentdeck/wrappers/codex-ubuntu.sh" ]]; then
-              emit codex_wrapper ready "wrapper 已安装"
+            missing_wrapper=0
+            for wrapper in \
+              codex-ubuntu.sh \
+              codex-app-server-start.sh \
+              codex-app-server-bridge.py; do
+              if [[ ! -x "${'$'}HOME/.agentdeck/wrappers/${'$'}wrapper" ]]; then
+                missing_wrapper=${'$'}((missing_wrapper + 1))
+              fi
+            done
+            if [[ "${'$'}missing_wrapper" -eq 0 ]] &&
+              grep -Fq 'check_for_update_on_startup=false' "${'$'}HOME/.agentdeck/wrappers/codex-ubuntu.sh" &&
+              grep -Fq -- '--sandbox danger-full-access' "${'$'}HOME/.agentdeck/wrappers/codex-ubuntu.sh" &&
+              grep -Fq -- '--ask-for-approval on-request' "${'$'}HOME/.agentdeck/wrappers/codex-ubuntu.sh" &&
+              grep -Fq -- '--instance-key' "${'$'}HOME/.agentdeck/wrappers/codex-app-server-start.sh" &&
+              grep -Fq 'check_for_update_on_startup=false' "${'$'}HOME/.agentdeck/wrappers/codex-app-server-bridge.py" &&
+              grep -Fq 'write_lease' "${'$'}HOME/.agentdeck/wrappers/codex-app-server-bridge.py"; then
+              emit codex_wrapper ready "Native Chat 启动组件已安装"
+            elif [[ "${'$'}missing_wrapper" -eq 0 ]]; then
+              emit codex_wrapper action_required "需要更新 Native Chat 启动组件"
             else
-              emit codex_wrapper action_required "需要安装 codex-ubuntu.sh"
+              emit codex_wrapper action_required "需要补齐 ${'$'}missing_wrapper 个启动组件"
             fi
 
             if command -v proot-distro >/dev/null 2>&1; then
               emit proot_distro ready "proot-distro 已安装"
-              ubuntu_output="${'$'}(proot-distro login ubuntu -- /usr/bin/env bash -c '
-                if command -v codex >/dev/null 2>&1; then
+              ubuntu_output="${'$'}(proot-distro login ubuntu -- /usr/bin/env bash -lc '
+                set +e
+                os_id="${'$'}(. /etc/os-release 2>/dev/null; printf "%s" "${'$'}{ID:-unknown}")"
+                os_version="${'$'}(. /etc/os-release 2>/dev/null; printf "%s" "${'$'}{VERSION_ID:-unknown}")"
+                os_id="${'$'}(printf "%s" "${'$'}os_id" | tr "\t\r\n" "   " | cut -c 1-40)"
+                os_version="${'$'}(printf "%s" "${'$'}os_version" | tr "\t\r\n" "   " | cut -c 1-40)"
+
+                if [[ "${'$'}os_id" != "ubuntu" || "${'$'}os_version" != "24.04" ]]; then
+                  printf "ubuntu_installed\taction_required\t需要 Ubuntu 24.04，当前为 %s %s\n" "${'$'}os_id" "${'$'}os_version"
+                  printf "codex_installed\tblocked\t先准备 Ubuntu 24.04\n"
+                  printf "codex_authenticated\tblocked\t先准备 Ubuntu 24.04\n"
+                  exit 0
+                fi
+
+                missing_dependencies=0
+                for dependency in curl git gzip python3 sha256sum tar; do
+                  command -v "${'$'}dependency" >/dev/null 2>&1 || missing_dependencies=${'$'}((missing_dependencies + 1))
+                done
+                [[ -s /etc/ssl/certs/ca-certificates.crt ]] || missing_dependencies=${'$'}((missing_dependencies + 1))
+                if [[ "${'$'}missing_dependencies" -eq 0 ]]; then
+                  printf "ubuntu_installed\tready\tUbuntu 24.04 与基础依赖可用\n"
+                else
+                  printf "ubuntu_installed\taction_required\tUbuntu 24.04 缺少 %s 项基础依赖\n" "${'$'}missing_dependencies"
+                fi
+
+                codex_path="${'$'}(command -v codex 2>/dev/null || true)"
+                version=""
+                version_supported=0
+                if [[ -n "${'$'}codex_path" ]]; then
                   version="${'$'}(codex --version 2>/dev/null | head -n 1 | tr "\t\r\n" "   " | cut -c 1-160)"
-                  [[ -n "${'$'}version" ]] || version="codex 已安装"
-                  printf "codex_installed\tready\t%s\n" "${'$'}version"
-                  if codex login status >/dev/null 2>&1; then
-                    printf "codex_authenticated\tready\t已登录\n"
-                  else
-                    printf "codex_authenticated\taction_required\t需要运行 codex login\n"
+                  if [[ "${'$'}version" =~ ([0-9]+)[.]([0-9]+)[.]([0-9]+) ]]; then
+                    major="${'$'}{BASH_REMATCH[1]}"
+                    minor="${'$'}{BASH_REMATCH[2]}"
+                    patch="${'$'}{BASH_REMATCH[3]}"
+                    if ((major > 0 || minor > 147 || (minor == 147 && patch >= 0))); then
+                      version_supported=1
+                    fi
                   fi
+                fi
+                if [[ -n "${'$'}codex_path" && -n "${'$'}version" && "${'$'}version_supported" -eq 1 ]]; then
+                  printf "codex_installed\tready\t%s\n" "${'$'}version"
+
+                  if codex login status >/dev/null 2>&1; then
+                    printf "codex_authenticated\tready\tCodex 已确认认证状态\n"
+                  elif [[ -n "${'$'}{OPENAI_API_KEY:-}" || -n "${'$'}{CODEX_ACCESS_TOKEN:-}" ]]; then
+                    printf "codex_authenticated\tready\t已检测到认证环境变量\n"
+                  else
+                    auth_probe=""
+                    if command -v python3 >/dev/null 2>&1; then
+                      auth_probe="${'$'}(
+                        python3 -c "import os,pathlib,tomllib; home=pathlib.Path(os.environ.get(\"CODEX_HOME\", pathlib.Path.home() / \".codex\")); path=home / \"config.toml\"; data=tomllib.loads(path.read_text()) if path.is_file() else {}; provider=str(data.get(\"model_provider\", \"openai\")); info=data.get(\"model_providers\", {}).get(provider, {}); env_key=info.get(\"env_key\") if isinstance(info, dict) else None; ready=(isinstance(env_key, str) and bool(os.environ.get(env_key))) or (isinstance(info, dict) and bool(info) and not env_key and info.get(\"requires_openai_auth\") is not True); print(\"ready\" if ready else \"configured\" if path.is_file() or (home / \"auth.json\").is_file() else \"missing\")" 2>/dev/null
+                      )" || auth_probe=""
+                    fi
+
+                    if [[ "${'$'}auth_probe" == "ready" ]]; then
+                      printf "codex_authenticated\tready\t已检测到可用 Provider 配置\n"
+                    elif [[ "${'$'}auth_probe" == "configured" || -s "${'$'}{CODEX_HOME:-${'$'}HOME/.codex}/config.toml" || -s "${'$'}{CODEX_HOME:-${'$'}HOME/.codex}/auth.json" ]]; then
+                      printf "codex_authenticated\taction_required\t已发现 Codex 配置，但没有可用凭据\n"
+                    else
+                      printf "codex_authenticated\taction_required\t未检测到登录或 API Key 配置\n"
+                    fi
+                  fi
+                elif [[ -n "${'$'}codex_path" && -n "${'$'}version" ]]; then
+                  printf "codex_installed\taction_required\t需要 Codex 0.147.0 或更高版本，当前为 %s\n" "${'$'}version"
+                  printf "codex_authenticated\tblocked\t先更新 Codex CLI\n"
+                elif [[ -n "${'$'}codex_path" ]]; then
+                  printf "codex_installed\taction_required\tUbuntu 内的 codex 无法正常执行\n"
+                  printf "codex_authenticated\tblocked\t先修复 Codex CLI\n"
                 else
                   printf "codex_installed\taction_required\tUbuntu 内未找到 codex\n"
-                  printf "codex_authenticated\tblocked\t先安装 Codex\n"
+                  printf "codex_authenticated\tblocked\t先安装 Codex CLI\n"
                 fi
               ' 2>/dev/null)"
               ubuntu_exit="${'$'}?"
               if [[ "${'$'}ubuntu_exit" -eq 0 ]]; then
-                emit ubuntu_installed ready "Ubuntu 可用"
                 printf '%s\n' "${'$'}ubuntu_output"
               else
                 emit ubuntu_installed action_required "未找到可用的 Ubuntu"

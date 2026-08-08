@@ -1,13 +1,51 @@
 package com.agentdeck.app.domain.launch
 
 import com.agentdeck.app.domain.model.AgentCard
+import com.agentdeck.app.domain.model.LaunchResult
 import com.agentdeck.app.domain.model.PathNamespace
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LaunchCommandFactoryTest {
+    @Test
+    fun `successful command opens Termux in foreground`() {
+        var opened = false
+
+        val result = foregroundLaunchResult(Result.success(Unit)) {
+            opened = true
+            true
+        }
+
+        assertTrue(opened)
+        assertSame(LaunchResult.Success, result)
+    }
+
+    @Test
+    fun `foreground launch reports when Termux cannot be opened`() {
+        val result = foregroundLaunchResult(Result.success(Unit)) { false }
+
+        assertEquals(
+            "命令已发送，但无法打开 Termux，请从桌面手动打开",
+            (result as LaunchResult.Failed).message,
+        )
+    }
+
+    @Test
+    fun `failed command does not try to open Termux`() {
+        var openAttempts = 0
+
+        val result = foregroundLaunchResult(Result.failure(IllegalStateException("命令失败"))) {
+            openAttempts += 1
+            true
+        }
+
+        assertEquals(0, openAttempts)
+        assertEquals("命令失败", (result as LaunchResult.Failed).message)
+    }
+
     @Test
     fun `codex values remain separate arguments`() {
         val workspace = "/root/project with space/'quoted'; \$(touch nope)"

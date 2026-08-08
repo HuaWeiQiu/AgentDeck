@@ -2,10 +2,9 @@ package com.agentdeck.app.ui.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -16,12 +15,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.agentdeck.app.di.ServiceLocator
+import com.agentdeck.app.ui.chat.ChatScreen
 import com.agentdeck.app.ui.models.ModelsScreen
 import com.agentdeck.app.ui.sessions.SessionsScreen
 import com.agentdeck.app.ui.settings.SettingsScreen
@@ -34,9 +36,8 @@ private data class Tab(
 )
 
 private val tabs = listOf(
-    Tab("sessions", "会话", Icons.Filled.Home),
+    Tab("sessions", "对话", Icons.AutoMirrored.Filled.Chat),
     Tab("store", "工具", Icons.Filled.Extension),
-    Tab("models", "配置", Icons.Filled.SmartToy),
     Tab("settings", "设置", Icons.Filled.Settings),
 )
 
@@ -44,29 +45,40 @@ private val tabs = listOf(
 fun AgentDeckRoot() {
     val navController = rememberNavController()
     val startDestination = remember {
-        if (ServiceLocator.onboarding.shouldOpenDoctor()) "settings" else "sessions"
+        resolveStartDestination(
+            termuxInstalled = ServiceLocator.termux.isTermuxInstalled(),
+            runCommandPermissionGranted = ServiceLocator.termux.hasRunCommandPermission(),
+            setupPreviouslyCompleted = !ServiceLocator.onboarding.shouldOpenDoctor(),
+        )
     }
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
+    val navigateTopLevel: (String) -> Unit = { route ->
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        ServiceLocator.setup.scan()
+    }
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                tabs.forEach { tab ->
-                    NavigationBarItem(
-                        selected = currentRoute == tab.route,
-                        onClick = {
-                            navController.navigate(tab.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label) },
-                    )
+            if (currentRoute in tabs.map { it.route } || currentRoute == "models") {
+                NavigationBar {
+                    tabs.forEach { tab ->
+                        NavigationBarItem(
+                            selected = currentRoute == tab.route ||
+                                (tab.route == "settings" && currentRoute == "models"),
+                            onClick = { navigateTopLevel(tab.route) },
+                            icon = { Icon(tab.icon, contentDescription = tab.label) },
+                            label = { Text(tab.label) },
+                        )
+                    }
                 }
             }
         },
@@ -76,10 +88,43 @@ fun AgentDeckRoot() {
             startDestination = startDestination,
             modifier = Modifier.padding(padding),
         ) {
-            composable("sessions") { SessionsScreen() }
-            composable("store") { StoreScreen() }
+            composable("sessions") {
+                SessionsScreen(
+                    onOpenSetup = { navigateTopLevel("store") },
+                    onOpenChat = { cardId -> navController.navigate("chat/$cardId") },
+                )
+            }
+            composable("store") {
+                StoreScreen(
+                    onReady = { navigateTopLevel("sessions") },
+                )
+            }
             composable("models") { ModelsScreen() }
-            composable("settings") { SettingsScreen() }
+            composable("settings") {
+                SettingsScreen(
+                    onOpenSetup = { navigateTopLevel("store") },
+                    onOpenProfiles = { navController.navigate("models") },
+                )
+            }
+            composable("chat/{cardId}") { entry ->
+                val cardId = entry.arguments?.getString("cardId").orEmpty()
+                ChatScreen(
+                    cardId = cardId,
+                    onBack = navController::navigateUp,
+                )
+            }
         }
     }
+}
+
+internal fun resolveStartDestination(
+    termuxInstalled: Boolean,
+    runCommandPermissionGranted: Boolean,
+    setupPreviouslyCompleted: Boolean,
+): String = if (
+    termuxInstalled && runCommandPermissionGranted && setupPreviouslyCompleted
+) {
+    "sessions"
+} else {
+    "store"
 }

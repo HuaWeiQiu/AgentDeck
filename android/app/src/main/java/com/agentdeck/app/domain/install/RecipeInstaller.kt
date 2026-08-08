@@ -10,6 +10,28 @@ import com.agentdeck.app.domain.model.RecipeRuntime
 import com.agentdeck.app.domain.recipe.RecipeCatalog
 import com.agentdeck.app.domain.recipe.RecipeDependencyResolver
 
+enum class InstallPhase {
+    PROBING,
+    INSTALLING,
+    VERIFYING,
+    COMPLETE,
+}
+
+data class RecipeInstallProgress(
+    val recipeId: String,
+    val recipeName: String,
+    val recipeIndex: Int,
+    val recipeCount: Int,
+    val phase: InstallPhase,
+)
+
+interface RecipeInstallation {
+    suspend fun install(
+        recipeId: String,
+        onProgress: (RecipeInstallProgress) -> Unit = {},
+    ): Result<String>
+}
+
 internal object RecipeInstallResultInterpreter {
     fun interpret(result: TermuxCommandResult): Result<String> {
         if (!result.commandSucceeded) {
@@ -39,18 +61,22 @@ internal object RecipeInstallResultInterpreter {
 class RecipeInstaller(
     private val termux: TermuxGateway,
     private val recipes: RecipeCatalog,
-) {
-    suspend fun install(recipeId: String): Result<String> {
+) : RecipeInstallation {
+    override suspend fun install(
+        recipeId: String,
+        onProgress: (RecipeInstallProgress) -> Unit,
+    ): Result<String> {
         val catalog = recipes.loadRecipes()
         val ordered = RecipeDependencyResolver.resolve(catalog, recipeId).getOrElse { error ->
             return Result.failure(error)
         }
         val target = ordered.last()
 
-        for (recipe in ordered) {
+        for ((index, recipe) in ordered.withIndex()) {
             if (!recipe.available) {
                 return Result.failure(IllegalStateException("${recipe.name} 尚未开放安装"))
             }
+            onProgress(recipe.progress(index, ordered.size, InstallPhase.PROBING))
             val verifyCommand = requireNotNull(recipe.verify)
             val before = execute(recipe, verifyCommand, "probe", VERIFY_TIMEOUT_MILLIS)
                 .getOrElse { error ->
@@ -58,15 +84,19 @@ class RecipeInstaller(
                         IllegalStateException("无法检测 ${recipe.name}: ${error.message}", error),
                     )
                 }
-            if (before.commandSucceeded) continue
+            if (before.commandSucceeded) {
+                onProgress(recipe.progress(index, ordered.size, InstallPhase.COMPLETE))
+                continue
+            }
 
             val installCommand = requireNotNull(recipe.install)
             val installScript = buildInstallScript(recipe, installCommand.script).getOrElse { error ->
                 return Result.failure(error)
             }
+            onProgress(recipe.progress(index, ordered.size, InstallPhase.INSTALLING))
             val installed = execute(
                 recipe = recipe,
-                command = installCommand.copy(script = installScript),
+                command = installCommand.copy(script = withInstallLock(installScript)),
                 purpose = "install",
                 timeoutMillis = recipe.timeoutMinutes * 60_000L,
             ).getOrElse { error ->
@@ -78,6 +108,7 @@ class RecipeInstaller(
                 return Result.failure(IllegalStateException("${recipe.name}: ${error.message}", error))
             }
 
+            onProgress(recipe.progress(index, ordered.size, InstallPhase.VERIFYING))
             val after = execute(recipe, verifyCommand, "verify", VERIFY_TIMEOUT_MILLIS)
                 .getOrElse { error ->
                     return Result.failure(
@@ -92,9 +123,10 @@ class RecipeInstaller(
                     },
                 )
             }
+            onProgress(recipe.progress(index, ordered.size, InstallPhase.COMPLETE))
         }
 
-        return Result.success("${target.name} ${target.version} 已安装并验证")
+        return Result.success("${target.name} 已可用并验证")
     }
 
     private suspend fun execute(
@@ -115,21 +147,84 @@ class RecipeInstaller(
     }
 
     private fun buildInstallScript(recipe: AgentRecipe, script: String): Result<String> = runCatching {
-        val wrapperAsset = recipe.wrapperAsset ?: return@runCatching script
-        val body = recipes.readWrapperAsset(wrapperAsset).trimEnd()
-        require(body.lineSequence().none { it == WRAPPER_HEREDOC_MARKER }) {
-            "wrapper 内容与安装分隔符冲突"
+        val wrapperAssets = listOfNotNull(recipe.wrapperAsset) + recipe.additionalWrapperAssets
+        if (wrapperAssets.isEmpty()) return@runCatching script
+        val bodies = wrapperAssets.associateWith { asset ->
+            recipes.readWrapperAsset(asset).trimEnd().also { body ->
+                require(body.lineSequence().none { it == WRAPPER_HEREDOC_MARKER }) {
+                    "wrapper 内容与安装分隔符冲突"
+                }
+                require(body.startsWith("#!/")) { "$asset 缺少 shebang" }
+            }
         }
-        require(body.startsWith("#!/")) { "wrapper 缺少 shebang" }
         buildString {
             appendLine(script.trimEnd())
             appendLine("mkdir -p \"${'$'}HOME/.agentdeck/wrappers\"")
-            appendLine("cat > \"${'$'}HOME/.agentdeck/wrappers/$wrapperAsset\" <<'$WRAPPER_HEREDOC_MARKER'")
-            appendLine(body)
-            appendLine(WRAPPER_HEREDOC_MARKER)
-            appendLine("chmod 700 \"${'$'}HOME/.agentdeck/wrappers/$wrapperAsset\"")
+            bodies.forEach { (asset, body) ->
+                appendLine("cat > \"${'$'}HOME/.agentdeck/wrappers/$asset\" <<'$WRAPPER_HEREDOC_MARKER'")
+                appendLine(body)
+                appendLine(WRAPPER_HEREDOC_MARKER)
+                appendLine("chmod 700 \"${'$'}HOME/.agentdeck/wrappers/$asset\"")
+            }
         }.trimEnd()
     }
+
+    private fun withInstallLock(script: String): String = """
+        set -euo pipefail
+        agentdeck_root="${'$'}HOME/.agentdeck"
+        agentdeck_lock="${'$'}agentdeck_root/install.lock"
+        mkdir -p "${'$'}agentdeck_root"
+
+        acquire_agentdeck_lock() {
+          if mkdir "${'$'}agentdeck_lock" 2>/dev/null; then
+            printf '%s\n' "${'$'}${'$'}" > "${'$'}agentdeck_lock/pid"
+            return 0
+          fi
+
+          if [[ -L "${'$'}agentdeck_lock" ]]; then
+            echo "AgentDeck 安装锁路径异常，请检查 ${'$'}agentdeck_lock" >&2
+            return 75
+          fi
+
+          existing_pid="${'$'}(cat "${'$'}agentdeck_lock/pid" 2>/dev/null || true)"
+          if [[ "${'$'}existing_pid" =~ ^[0-9]+${'$'} ]] && kill -0 "${'$'}existing_pid" 2>/dev/null; then
+            echo "另一个 AgentDeck 安装任务仍在运行（PID ${'$'}existing_pid）" >&2
+            return 75
+          fi
+
+          stale_lock="${'$'}agentdeck_root/install.lock.stale.${'$'}${'$'}"
+          if ! mv "${'$'}agentdeck_lock" "${'$'}stale_lock" 2>/dev/null; then
+            echo "安装锁状态已变化，请稍后重试" >&2
+            return 75
+          fi
+          rm -f -- "${'$'}stale_lock/pid"
+          rmdir -- "${'$'}stale_lock" 2>/dev/null || {
+            echo "陈旧安装锁包含未知内容，请检查 ${'$'}stale_lock" >&2
+            return 75
+          }
+          mkdir "${'$'}agentdeck_lock" 2>/dev/null || {
+            echo "另一个 AgentDeck 安装任务刚刚启动" >&2
+            return 75
+          }
+          printf '%s\n' "${'$'}${'$'}" > "${'$'}agentdeck_lock/pid"
+        }
+
+        release_agentdeck_lock() {
+          current_pid="${'$'}(cat "${'$'}agentdeck_lock/pid" 2>/dev/null || true)"
+          if [[ "${'$'}current_pid" == "${'$'}${'$'}" ]]; then
+            rm -f -- "${'$'}agentdeck_lock/pid"
+            rmdir -- "${'$'}agentdeck_lock" 2>/dev/null || true
+          fi
+        }
+
+        acquire_agentdeck_lock
+        trap release_agentdeck_lock EXIT
+        trap 'exit 129' HUP
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+
+        ${script.trimEnd()}
+    """.trimIndent()
 
     private fun sessionName(recipeId: String, purpose: String): String {
         val raw = "agentdeck-$purpose-$recipeId"
@@ -145,3 +240,15 @@ class RecipeInstaller(
         private const val WRAPPER_HEREDOC_MARKER = "AGENTDECK_WRAPPER_EOF"
     }
 }
+
+private fun AgentRecipe.progress(
+    index: Int,
+    count: Int,
+    phase: InstallPhase,
+) = RecipeInstallProgress(
+    recipeId = id,
+    recipeName = name,
+    recipeIndex = index,
+    recipeCount = count,
+    phase = phase,
+)

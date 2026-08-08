@@ -1,54 +1,150 @@
 schema_version: 1
 id: recipe_codex
 name: Codex CLI
-description: 在 Ubuntu 内安装并校验 OpenAI 官方 Codex CLI 独立二进制。
+description: 检测 Ubuntu 内现有 Codex CLI；缺失、损坏或版本过低时安装并校验官方独立二进制。
 priority: p0
 version: "0.147.0"
 available: true
 depends_on:
   - recipe_proot_ubuntu
-timeout_minutes: 15
+timeout_minutes: 30
 wrapper_asset: codex-ubuntu.sh
+additional_wrapper_assets:
+  - codex-app-server-start.sh
+  - codex-app-server-bridge.py
 install:
   runtime: termux
   script: |
     set -euo pipefail
-    proot-distro login ubuntu -- /usr/bin/env bash -c '
+    if existing_codex="$(proot-distro login ubuntu -- /usr/bin/env bash -c '
       set -euo pipefail
-      version="0.147.0"
-      case "$(uname -m)" in
-        aarch64|arm64)
-          target="aarch64-unknown-linux-musl"
-          sha256="eb677c80f666b1ab8b4b1d083b66e8d614b1281d960bb6f9fd8ca98f58b38b90"
-          ;;
-        x86_64|amd64)
-          target="x86_64-unknown-linux-musl"
-          sha256="0246e2e773834e07f0fb5249ed6ebad12e4591e608f8c7bb97dd6a9690544c36"
-          ;;
-        *)
-          echo "Unsupported architecture: $(uname -m)" >&2
-          exit 2
-          ;;
-      esac
-      archive="codex-${target}.tar.gz"
-      url="https://github.com/openai/codex/releases/download/rust-v${version}/${archive}"
-      temp_dir="$(mktemp -d)"
-      trap "rm -rf -- \"${temp_dir}\"" EXIT
-      curl --fail --location --retry 3 --output "${temp_dir}/${archive}" "${url}"
-      printf "%s  %s\n" "${sha256}" "${temp_dir}/${archive}" | sha256sum --check --status
-      tar -xzf "${temp_dir}/${archive}" -C "${temp_dir}"
-      install -m 0755 "${temp_dir}/codex-${target}" /usr/local/bin/codex
-      mkdir -p /root/projects/default
-      codex --version | grep -Eq "(^|[[:space:]])0[.]147[.]0($|[[:space:]])"
-    '
-    echo "Codex 0.147.0 二进制已安装并通过 SHA-256 校验"
+      command -v codex >/dev/null
+      version_output="$(codex --version)"
+      if [[ "$version_output" =~ ([0-9]+)[.]([0-9]+)[.]([0-9]+) ]]; then
+        major="${BASH_REMATCH[1]}"
+        minor="${BASH_REMATCH[2]}"
+        patch="${BASH_REMATCH[3]}"
+        if ((major > 0 || minor > 147 || (minor == 147 && patch >= 0))); then
+          printf "%s\n" "$version_output"
+          exit 0
+        fi
+      fi
+      exit 1
+    ')"; then
+      echo "检测到兼容的 ${existing_codex}，保留现有版本"
+    else
+      proot-distro login ubuntu -- /usr/bin/env bash -c '
+        set -euo pipefail
+        version="0.147.0"
+        case "$(uname -m)" in
+          aarch64|arm64)
+            target="aarch64-unknown-linux-musl"
+            sha256="eb677c80f666b1ab8b4b1d083b66e8d614b1281d960bb6f9fd8ca98f58b38b90"
+            expected_size=91607658
+            ;;
+          x86_64|amd64)
+            target="x86_64-unknown-linux-musl"
+            sha256="0246e2e773834e07f0fb5249ed6ebad12e4591e608f8c7bb97dd6a9690544c36"
+            expected_size=98970270
+            ;;
+          *)
+            echo "Unsupported architecture: $(uname -m)" >&2
+            exit 2
+            ;;
+        esac
+        archive="codex-${target}.tar.gz"
+        url="https://github.com/openai/codex/releases/download/rust-v${version}/${archive}"
+        temp_dir="$(mktemp -d)"
+        trap "rm -rf -- \"${temp_dir}\"" EXIT
+        archive_path="${temp_dir}/${archive}"
+        part_path="${archive_path}.part"
+        chunk_size=$((8 * 1024 * 1024))
+        network_args=()
+        curl_options=(
+          --fail
+          --location
+          --silent
+          --show-error
+          --connect-timeout 15
+          --speed-limit 1024
+          --speed-time 60
+          --max-time 300
+          --proto =https
+          --proto-redir =https
+        )
+
+        download_chunk() {
+          local start="$1"
+          local end="$2"
+          local expected_chunk_size=$((end - start + 1))
+          local actual_chunk_size
+          rm -f -- "${part_path}"
+
+          if ((${#network_args[@]} == 0)) && curl "${curl_options[@]}" \
+            --range "${start}-${end}" \
+            --max-filesize "${expected_chunk_size}" \
+            --output "${part_path}" \
+            "${url}"; then
+            :
+          else
+            if ((${#network_args[@]} == 0)); then
+              echo "默认 IPv4/IPv6 下载失败，正在回退 IPv4 重试" >&2
+              network_args=(--ipv4)
+            fi
+            rm -f -- "${part_path}"
+            curl "${network_args[@]}" "${curl_options[@]}" \
+              --retry 3 \
+              --retry-all-errors \
+              --retry-delay 2 \
+              --range "${start}-${end}" \
+              --max-filesize "${expected_chunk_size}" \
+              --output "${part_path}" \
+              "${url}"
+          fi
+
+          actual_chunk_size="$(stat -c %s "${part_path}")"
+          if ((actual_chunk_size != expected_chunk_size)); then
+            echo "下载分段长度错误：期望 ${expected_chunk_size}，实际 ${actual_chunk_size}" >&2
+            return 1
+          fi
+          cat -- "${part_path}" >> "${archive_path}"
+        }
+
+        : > "${archive_path}"
+        start=0
+        while ((start < expected_size)); do
+          end=$((start + chunk_size - 1))
+          if ((end >= expected_size)); then
+            end=$((expected_size - 1))
+          fi
+          download_chunk "${start}" "${end}"
+          start=$((end + 1))
+        done
+        rm -f -- "${part_path}"
+        test "$(stat -c %s "${archive_path}")" -eq "${expected_size}"
+        printf "%s  %s\n" "${sha256}" "${archive_path}" | sha256sum --check --status
+        tar -xzf "${temp_dir}/${archive}" -C "${temp_dir}"
+        install -m 0755 "${temp_dir}/codex-${target}" /usr/local/bin/codex
+        mkdir -p /root/projects/default
+        codex --version | grep -Eq "(^|[[:space:]])0[.]147[.]0($|[[:space:]])"
+      '
+      echo "Codex 0.147.0 二进制已安装或升级，并通过 SHA-256 校验"
+    fi
 verify:
   runtime: termux
   script: |
     set -euo pipefail
     test -x "$HOME/.agentdeck/wrappers/codex-ubuntu.sh"
+    test -x "$HOME/.agentdeck/wrappers/codex-app-server-start.sh"
+    test -x "$HOME/.agentdeck/wrappers/codex-app-server-bridge.py"
+    grep -Fq 'check_for_update_on_startup=false' "$HOME/.agentdeck/wrappers/codex-ubuntu.sh"
+    grep -Fq -- '--sandbox danger-full-access' "$HOME/.agentdeck/wrappers/codex-ubuntu.sh"
+    grep -Fq -- '--ask-for-approval on-request' "$HOME/.agentdeck/wrappers/codex-ubuntu.sh"
+    grep -Fq -- '--instance-key' "$HOME/.agentdeck/wrappers/codex-app-server-start.sh"
+    grep -Fq 'check_for_update_on_startup=false' "$HOME/.agentdeck/wrappers/codex-app-server-bridge.py"
+    grep -Fq 'write_lease' "$HOME/.agentdeck/wrappers/codex-app-server-bridge.py"
     proot-distro login ubuntu -- /usr/bin/env bash -c '
       set -euo pipefail
       command -v codex >/dev/null
-      codex --version | grep -Eq "(^|[[:space:]])0[.]147[.]0($|[[:space:]])"
+      codex --version >/dev/null
     '

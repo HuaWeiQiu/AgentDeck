@@ -8,7 +8,7 @@ cd "$repo_root"
 git diff --check
 git diff --cached --check
 diff -ru recipes android/app/src/main/assets/recipes
-diff -u wrappers/codex-ubuntu.sh android/app/src/main/assets/wrappers/codex-ubuntu.sh
+diff -ru wrappers android/app/src/main/assets/wrappers
 
 cd android
 ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug

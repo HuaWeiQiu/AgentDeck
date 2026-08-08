@@ -177,9 +177,12 @@ class AndroidTermuxGateway(
         }
 
         return runCatching {
-            checkNotNull(context.startService(intent)) {
-                "Termux RUN_COMMAND 服务未接受命令"
+            checkNotNull(context.packageManager.resolveService(intent, 0)) {
+                "当前 Termux 版本未提供 RUN_COMMAND 服务"
             }
+            // Some Android 16 vendor builds return null for an accepted cross-app service start.
+            // Result-bearing commands are still verified by their callback and timeout.
+            context.startService(intent)
             Unit
         }
     }

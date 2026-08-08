@@ -1,6 +1,8 @@
 package com.agentdeck.app.di
 
 import android.content.Context
+import com.agentdeck.app.data.chat.CodexBridgeLauncher
+import com.agentdeck.app.data.chat.ConversationLinkRepository
 import com.agentdeck.app.data.db.AppDatabase
 import com.agentdeck.app.data.repo.CardRepository
 import com.agentdeck.app.data.repo.InitialDataSeeder
@@ -12,12 +14,17 @@ import com.agentdeck.app.data.termux.TermuxGateway
 import com.agentdeck.app.domain.env.EnvironmentProbe
 import com.agentdeck.app.domain.install.RecipeInstaller
 import com.agentdeck.app.domain.launch.LaunchInteractor
+import com.agentdeck.app.domain.setup.SetupCoordinator
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /**
  * Minimal manual DI for skeleton. Can be replaced with Hilt later.
  */
 object ServiceLocator {
     @Volatile private var initialized = false
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     lateinit var termux: TermuxGateway
         private set
@@ -37,6 +44,12 @@ object ServiceLocator {
         private set
     lateinit var installer: RecipeInstaller
         private set
+    lateinit var setup: SetupCoordinator
+        private set
+    lateinit var conversationLinks: ConversationLinkRepository
+        private set
+    lateinit var codexBridge: CodexBridgeLauncher
+        private set
     fun init(context: Context) {
         if (initialized) return
         synchronized(this) {
@@ -52,6 +65,15 @@ object ServiceLocator {
             envProbe = EnvironmentProbe(termux)
             launcher = LaunchInteractor(cards, profiles, recipes, termux)
             installer = RecipeInstaller(termux, recipes)
+            conversationLinks = ConversationLinkRepository(app)
+            codexBridge = CodexBridgeLauncher(termux)
+            setup = SetupCoordinator(
+                scanner = envProbe,
+                installer = installer,
+                termux = termux,
+                scope = appScope,
+                onReport = onboarding::record,
+            )
             initialized = true
         }
     }

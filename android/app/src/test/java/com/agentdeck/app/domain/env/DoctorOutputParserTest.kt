@@ -55,21 +55,9 @@ class DoctorOutputParserTest {
         try {
             File(home, ".termux").mkdirs()
             File(home, ".termux/termux.properties").writeText("allow-external-apps=true\n")
-            val wrapper = File(home, ".agentdeck/wrappers/codex-ubuntu.sh")
-            wrapper.parentFile?.mkdirs()
-            wrapper.writeText("#!/bin/bash\n")
-            assertTrue(wrapper.setExecutable(true))
+            prepareTermuxFiles(home)
 
-            val binDir = File(home, "bin").apply { mkdirs() }
-            val proot = File(binDir, "proot-distro")
-            proot.writeText(
-                """
-                #!/bin/bash
-                printf 'codex_installed\tready\tcodex-cli 1.2.3\n'
-                printf 'codex_authenticated\tready\t已登录\n'
-                """.trimIndent(),
-            )
-            assertTrue(proot.setExecutable(true))
+            val binDir = prepareDoctorRuntime(home, loginReady = true)
 
             val result = runDoctor(home, pathPrefix = binDir)
             val markers = DoctorOutputParser.parse(result.output)
@@ -82,7 +70,301 @@ class DoctorOutputParserTest {
         }
     }
 
-    private fun runDoctor(home: File, pathPrefix: File): ProcessResult {
+    @Test
+    fun `doctor requests repair when legacy install lacks native chat bridge`() {
+        val home = Files.createTempDirectory("agentdeck-doctor-legacy-wrapper").toFile()
+        try {
+            File(home, ".termux").mkdirs()
+            File(home, ".termux/termux.properties").writeText("allow-external-apps=true\n")
+            val legacyWrapper = File(home, ".agentdeck/wrappers/codex-ubuntu.sh")
+            legacyWrapper.parentFile?.mkdirs()
+            legacyWrapper.writeText("#!/bin/bash\n")
+            assertTrue(legacyWrapper.setExecutable(true))
+
+            val binDir = prepareDoctorRuntime(home, loginReady = true)
+
+            val result = runDoctor(home, pathPrefix = binDir)
+            val wrapper = DoctorOutputParser.parse(result.output)["codex_wrapper"]
+
+            assertEquals(result.output, 0, result.exitCode)
+            assertEquals(EnvironmentCheckStatus.ACTION_REQUIRED, wrapper?.status)
+            assertEquals("需要补齐 2 个启动组件", wrapper?.detail)
+        } finally {
+            home.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `doctor requests repair when native chat wrappers are outdated`() {
+        val home = Files.createTempDirectory("agentdeck-doctor-old-wrapper").toFile()
+        try {
+            prepareTermuxFiles(home)
+            File(home, ".agentdeck/wrappers/codex-ubuntu.sh").writeText("#!/bin/bash\n")
+            File(home, ".agentdeck/wrappers/codex-app-server-bridge.py")
+                .writeText("#!/usr/bin/env python3\n")
+            val binDir = prepareDoctorRuntime(home, loginReady = true)
+
+            val result = runDoctor(home, pathPrefix = binDir)
+            val wrapper = DoctorOutputParser.parse(result.output)["codex_wrapper"]
+
+            assertEquals(result.output, 0, result.exitCode)
+            assertEquals(EnvironmentCheckStatus.ACTION_REQUIRED, wrapper?.status)
+            assertEquals("需要更新 Native Chat 启动组件", wrapper?.detail)
+        } finally {
+            home.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `doctor accepts Codex login status`() {
+        val home = Files.createTempDirectory("agentdeck-doctor-auth-ready").toFile()
+        try {
+            prepareTermuxFiles(home)
+            val binDir = prepareDoctorRuntime(home, loginReady = true)
+
+            val result = runDoctor(home, pathPrefix = binDir)
+            val auth = DoctorOutputParser.parse(result.output)["codex_authenticated"]
+
+            assertEquals(result.output, 0, result.exitCode)
+            assertEquals(EnvironmentCheckStatus.READY, auth?.status)
+            assertEquals("Codex 已确认认证状态", auth?.detail)
+        } finally {
+            home.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `doctor distinguishes config file from usable credentials`() {
+        val home = Files.createTempDirectory("agentdeck-doctor-config-only").toFile()
+        try {
+            prepareTermuxFiles(home)
+            val codexHome = File(home, ".codex").apply { mkdirs() }
+            File(codexHome, "config.toml").writeText("model = \"gpt-5\"\n")
+            val binDir = prepareDoctorRuntime(home, loginReady = false)
+
+            val result = runDoctor(home, pathPrefix = binDir)
+            val auth = DoctorOutputParser.parse(result.output)["codex_authenticated"]
+
+            assertEquals(result.output, 0, result.exitCode)
+            assertEquals(EnvironmentCheckStatus.ACTION_REQUIRED, auth?.status)
+            assertEquals("已发现 Codex 配置，但没有可用凭据", auth?.detail)
+        } finally {
+            home.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `doctor detects active provider credential environment`() {
+        val home = Files.createTempDirectory("agentdeck-doctor-provider-env").toFile()
+        try {
+            prepareTermuxFiles(home)
+            val codexHome = File(home, ".codex").apply { mkdirs() }
+            File(codexHome, "config.toml").writeText(
+                """
+                model_provider = "custom"
+                [model_providers.custom]
+                env_key = "CUSTOM_CODEX_TOKEN"
+                """.trimIndent(),
+            )
+            val binDir = prepareDoctorRuntime(home, loginReady = false)
+
+            val result = runDoctor(
+                home,
+                pathPrefix = binDir,
+                environment = mapOf("CUSTOM_CODEX_TOKEN" to "configured"),
+            )
+            val auth = DoctorOutputParser.parse(result.output)["codex_authenticated"]
+
+            assertEquals(result.output, 0, result.exitCode)
+            assertEquals(EnvironmentCheckStatus.READY, auth?.status)
+            assertEquals("已检测到可用 Provider 配置", auth?.detail)
+            assertTrue("configured" !in result.output)
+        } finally {
+            home.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `doctor accepts active provider that does not declare auth env`() {
+        val home = Files.createTempDirectory("agentdeck-doctor-provider-no-auth").toFile()
+        try {
+            prepareTermuxFiles(home)
+            val codexHome = File(home, ".codex").apply { mkdirs() }
+            File(codexHome, "config.toml").writeText(
+                """
+                model_provider = "custom"
+                [model_providers.custom]
+                base_url = "http://127.0.0.1:11434/v1"
+                """.trimIndent(),
+            )
+            val binDir = prepareDoctorRuntime(
+                home,
+                loginReady = false,
+                pythonProbeResult = "ready",
+            )
+
+            val result = runDoctor(home, pathPrefix = binDir)
+            val auth = DoctorOutputParser.parse(result.output)["codex_authenticated"]
+
+            assertEquals(result.output, 0, result.exitCode)
+            assertEquals(EnvironmentCheckStatus.READY, auth?.status)
+            assertEquals("已检测到可用 Provider 配置", auth?.detail)
+        } finally {
+            home.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `doctor rejects a distro that is not Ubuntu 24 04`() {
+        val home = Files.createTempDirectory("agentdeck-doctor-wrong-ubuntu").toFile()
+        try {
+            prepareTermuxFiles(home)
+            val binDir = prepareDoctorRuntime(
+                home = home,
+                loginReady = true,
+                ubuntuVersion = "22.04",
+            )
+
+            val result = runDoctor(home, pathPrefix = binDir)
+            val markers = DoctorOutputParser.parse(result.output)
+
+            assertEquals(result.output, 0, result.exitCode)
+            assertEquals(
+                EnvironmentCheckStatus.ACTION_REQUIRED,
+                markers["ubuntu_installed"]?.status,
+            )
+            assertEquals(
+                "需要 Ubuntu 24.04，当前为 ubuntu 22.04",
+                markers["ubuntu_installed"]?.detail,
+            )
+            assertEquals(EnvironmentCheckStatus.BLOCKED, markers["codex_installed"]?.status)
+        } finally {
+            home.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `doctor requests update for Codex below supported version`() {
+        val home = Files.createTempDirectory("agentdeck-doctor-old-codex").toFile()
+        try {
+            prepareTermuxFiles(home)
+            val binDir = prepareDoctorRuntime(
+                home = home,
+                loginReady = true,
+                codexVersion = "0.146.0",
+            )
+
+            val result = runDoctor(home, pathPrefix = binDir)
+            val markers = DoctorOutputParser.parse(result.output)
+
+            assertEquals(result.output, 0, result.exitCode)
+            assertEquals(
+                EnvironmentCheckStatus.ACTION_REQUIRED,
+                markers["codex_installed"]?.status,
+            )
+            assertEquals(
+                "需要 Codex 0.147.0 或更高版本，当前为 codex-cli 0.146.0",
+                markers["codex_installed"]?.detail,
+            )
+            assertEquals(EnvironmentCheckStatus.BLOCKED, markers["codex_authenticated"]?.status)
+        } finally {
+            home.deleteRecursively()
+        }
+    }
+
+    private fun prepareTermuxFiles(home: File) {
+        File(home, ".termux").mkdirs()
+        File(home, ".termux/termux.properties").writeText("allow-external-apps=true\n")
+        listOf(
+            "codex-ubuntu.sh",
+            "codex-app-server-start.sh",
+            "codex-app-server-bridge.py",
+        ).forEach { name ->
+            val wrapper = File(home, ".agentdeck/wrappers/$name")
+            wrapper.parentFile?.mkdirs()
+            wrapper.writeText(
+                "#!/bin/bash\n" +
+                    "# check_for_update_on_startup=false\n" +
+                    "# --sandbox danger-full-access\n" +
+                    "# --ask-for-approval on-request\n" +
+                    "# --instance-key\n" +
+                    "# write_lease\n",
+            )
+            assertTrue(wrapper.setExecutable(true))
+        }
+    }
+
+    private fun prepareDoctorRuntime(
+        home: File,
+        loginReady: Boolean,
+        pythonProbeResult: String = "configured",
+        ubuntuVersion: String = "24.04",
+        codexVersion: String = "0.147.0",
+    ): File {
+        val binDir = File(home, "bin").apply { mkdirs() }
+        val fakeUbuntu = File(home, "fake-ubuntu")
+        File(fakeUbuntu, "etc/os-release").apply {
+            parentFile?.mkdirs()
+            writeText("ID=ubuntu\nVERSION_ID=$ubuntuVersion\n")
+        }
+        File(fakeUbuntu, "etc/ssl/certs/ca-certificates.crt").apply {
+            parentFile?.mkdirs()
+            writeText("test certificate bundle\n")
+        }
+        val proot = File(binDir, "proot-distro")
+        proot.writeText(
+            """
+            #!/bin/bash
+            while [[ "${'$'}#" -gt 0 && "${'$'}1" != "--" ]]; do shift; done
+            [[ "${'$'}#" -gt 0 ]] && shift
+            if [[ "${'$'}1" == "/usr/bin/env" && "${'$'}2" == "bash" && "${'$'}3" == "-lc" ]]; then
+              script="${'$'}(printf '%s' "${'$'}4" | sed \
+                -e "s|/etc/os-release|${fakeUbuntu.absolutePath}/etc/os-release|g" \
+                -e "s|/etc/ssl/certs/ca-certificates.crt|${fakeUbuntu.absolutePath}/etc/ssl/certs/ca-certificates.crt|g")"
+              exec "${'$'}1" "${'$'}2" -c "${'$'}script"
+            fi
+            exec "${'$'}@"
+            """.trimIndent(),
+        )
+        assertTrue(proot.setExecutable(true))
+
+        val codex = File(binDir, "codex")
+        codex.writeText(
+            """
+            #!/bin/bash
+            case "${'$'}1:${'$'}{2:-}" in
+              --version:) printf 'codex-cli $codexVersion\n' ;;
+              login:status) exit ${if (loginReady) 0 else 1} ;;
+              *) exit 1 ;;
+            esac
+            """.trimIndent(),
+        )
+        assertTrue(codex.setExecutable(true))
+
+        val python = File(binDir, "python3")
+        python.writeText(
+            """
+            #!/bin/bash
+            if [[ -n "${'$'}{CUSTOM_CODEX_TOKEN:-}" ]]; then
+              printf 'ready\n'
+            else
+              printf '%s\n' '$pythonProbeResult'
+            fi
+            """.trimIndent(),
+        )
+        assertTrue(python.setExecutable(true))
+
+        val sha256sum = File(binDir, "sha256sum")
+        sha256sum.writeText("#!/bin/bash\nexit 0\n")
+        assertTrue(sha256sum.setExecutable(true))
+        return binDir
+    }
+
+    private fun runDoctor(
+        home: File,
+        pathPrefix: File,
+        environment: Map<String, String> = emptyMap(),
+    ): ProcessResult {
         val process = ProcessBuilder(
             "/bin/bash",
             "-c",
@@ -91,6 +373,7 @@ class DoctorOutputParserTest {
         process.environment()["HOME"] = home.absolutePath
         process.environment()["PATH"] =
             pathPrefix.absolutePath + File.pathSeparator + "/usr/bin:/bin"
+        process.environment().putAll(environment)
         val running = process.start()
         val output = running.inputStream.bufferedReader().readText()
         return ProcessResult(running.waitFor(), output)

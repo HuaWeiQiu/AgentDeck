@@ -20,21 +20,47 @@ class RecipeInstallerTest {
             ArrayDeque(listOf(exit(1), exit(0), exit(0), exit(1), exit(0), exit(0))),
         )
         val catalog = FakeRecipeCatalog(
-            listOf(recipe("base"), recipe("target", listOf("base"), wrapper = "wrapper.sh")),
+            listOf(
+                recipe("base"),
+                recipe(
+                    "target",
+                    listOf("base"),
+                    wrapper = "wrapper.sh",
+                    additionalWrappers = listOf("bridge.sh"),
+                ),
+            ),
         )
 
-        val result = RecipeInstaller(gateway, catalog).install("target")
+        val progress = mutableListOf<RecipeInstallProgress>()
+        val result = RecipeInstaller(gateway, catalog).install("target", progress::add)
 
-        assertEquals("target 1.0.0 已安装并验证", result.getOrThrow())
+        assertEquals("target 已可用并验证", result.getOrThrow())
         assertEquals(6, gateway.commands.size)
-        assertEquals(
-            listOf("echo verify-base", "echo install-base", "echo verify-base"),
-            gateway.commands.take(3).map { it.args.last() },
-        )
+        assertEquals("echo verify-base", gateway.commands[0].args.last())
+        assertTrue(gateway.commands[1].args.last().contains("echo install-base"))
+        assertEquals("echo verify-base", gateway.commands[2].args.last())
         val targetInstall = gateway.commands[4].args.last()
         assertTrue(targetInstall.contains("echo install-target"))
         assertTrue(targetInstall.contains("#!/bin/bash"))
+        assertTrue(targetInstall.contains("wrappers/bridge.sh"))
         assertTrue(targetInstall.contains("chmod 700"))
+        assertTrue(targetInstall.contains("install.lock"))
+        assertTrue(targetInstall.contains("kill -0"))
+        assertTrue(targetInstall.contains("trap release_agentdeck_lock EXIT"))
+        assertTrue(targetInstall.contains("trap 'exit 143' TERM"))
+        assertEquals(
+            listOf(
+                InstallPhase.PROBING,
+                InstallPhase.INSTALLING,
+                InstallPhase.VERIFYING,
+                InstallPhase.COMPLETE,
+                InstallPhase.PROBING,
+                InstallPhase.INSTALLING,
+                InstallPhase.VERIFYING,
+                InstallPhase.COMPLETE,
+            ),
+            progress.map { it.phase },
+        )
     }
 
     @Test
@@ -47,6 +73,23 @@ class RecipeInstallerTest {
         assertTrue(result.isSuccess)
         assertEquals(2, gateway.commands.size)
         assertTrue(gateway.commands.all { it.args.last().startsWith("echo verify-") })
+    }
+
+    @Test
+    fun `ready recipes report probe and completion without install phase`() = runBlocking {
+        val gateway = FakeTermuxGateway(ArrayDeque(listOf(exit(0))))
+        val progress = mutableListOf<RecipeInstallProgress>()
+
+        val result = RecipeInstaller(
+            gateway,
+            FakeRecipeCatalog(listOf(recipe("target"))),
+        ).install("target", progress::add)
+
+        assertTrue(result.isSuccess)
+        assertEquals(
+            listOf(InstallPhase.PROBING, InstallPhase.COMPLETE),
+            progress.map { it.phase },
+        )
     }
 
     @Test
@@ -75,6 +118,7 @@ class RecipeInstallerTest {
         id: String,
         dependencies: List<String> = emptyList(),
         wrapper: String? = null,
+        additionalWrappers: List<String> = emptyList(),
         available: Boolean = true,
     ) = AgentRecipe(
         schemaVersion = 1,
@@ -89,6 +133,7 @@ class RecipeInstallerTest {
         install = if (available) RecipeCommand(RecipeRuntime.TERMUX, "echo install-$id") else null,
         verify = if (available) RecipeCommand(RecipeRuntime.TERMUX, "echo verify-$id") else null,
         wrapperAsset = wrapper,
+        additionalWrapperAssets = additionalWrappers,
     )
 
     private fun exit(code: Int, stderr: String = "") = Result.success(

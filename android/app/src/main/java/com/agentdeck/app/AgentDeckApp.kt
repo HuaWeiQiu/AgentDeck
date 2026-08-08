@@ -17,6 +17,7 @@ class AgentDeckApp : Application() {
         super.onCreate()
         LegacyCredentialCleaner.clear(this)
         ServiceLocator.init(this)
+        ServiceLocator.setup.start()
         appScope.launch {
             try {
                 ServiceLocator.seeder.ensureInitialData()

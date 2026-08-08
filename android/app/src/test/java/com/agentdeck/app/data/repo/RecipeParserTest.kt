@@ -38,18 +38,61 @@ class RecipeParserTest {
     }
 
     @Test
-    fun `codex recipe pins official binaries and forbids npm fallback`() {
+    fun `codex recipe preserves usable installs and pins fresh install binaries`() {
         val codex = File(repoRoot, "recipes/codex.yaml").inputStream().use {
             RecipeParser.parse(it, "codex.yaml")
         }
         val script = requireNotNull(codex.install).script
+        val verifyScript = requireNotNull(codex.verify).script
 
         assertEquals("0.147.0", codex.version)
+        assertEquals(30, codex.timeoutMinutes)
         assertEquals("codex-ubuntu.sh", codex.wrapperAsset)
+        assertEquals(
+            listOf("codex-app-server-start.sh", "codex-app-server-bridge.py"),
+            codex.additionalWrapperAssets,
+        )
+        assertTrue(codex.description.contains("版本过低时安装"))
         assertTrue(script.contains("eb677c80f666b1ab8b4b1d083b66e8d614b1281d960bb6f9fd8ca98f58b38b90"))
         assertTrue(script.contains("0246e2e773834e07f0fb5249ed6ebad12e4591e608f8c7bb97dd6a9690544c36"))
+        assertTrue(script.contains("expected_size=91607658"))
+        assertTrue(script.contains("expected_size=98970270"))
         assertTrue(script.contains("sha256sum --check --status"))
+        assertTrue(script.contains("--connect-timeout 15"))
+        assertTrue(script.contains("--range \"${'$'}{start}-${'$'}{end}\""))
+        assertTrue(script.contains("network_args=(--ipv4)"))
+        assertTrue(script.contains("actual_chunk_size != expected_chunk_size"))
+        assertTrue(script.indexOf("curl \"${'$'}{curl_options[@]}\"") < script.indexOf("network_args=(--ipv4)"))
+        assertTrue(script.indexOf("command -v codex") < script.indexOf("download_chunk()"))
+        assertTrue(script.contains("保留现有版本"))
+        assertTrue(script.contains("minor > 147"))
+        assertTrue(script.contains("安装或升级"))
+        assertTrue(verifyScript.contains("command -v codex"))
+        assertTrue(verifyScript.contains("codex --version >/dev/null"))
+        assertTrue(verifyScript.contains("codex-app-server-start.sh"))
+        assertTrue(verifyScript.contains("codex-app-server-bridge.py"))
+        assertTrue(verifyScript.contains("check_for_update_on_startup=false"))
+        assertFalse(verifyScript.contains("0[.]147[.]0"))
         assertFalse(script.contains("npm install"))
+    }
+
+    @Test
+    fun `codex dependency prepares ubuntu packages before cli detection`() {
+        val base = File(repoRoot, "recipes/base-ubuntu.yaml").inputStream().use {
+            RecipeParser.parse(it, "base-ubuntu.yaml")
+        }
+        val codex = File(repoRoot, "recipes/codex.yaml").inputStream().use {
+            RecipeParser.parse(it, "codex.yaml")
+        }
+        val installScript = requireNotNull(base.install).script
+        val verifyScript = requireNotNull(base.verify).script
+
+        assertEquals(listOf(base.id), codex.dependsOn)
+        assertTrue(installScript.indexOf("apt-get update") < installScript.indexOf("apt-get install"))
+        assertTrue(installScript.contains("ca-certificates curl git gzip python3"))
+        assertTrue(verifyScript.contains("ca-certificates.crt"))
+        assertTrue(verifyScript.contains("command -v gzip"))
+        assertTrue(verifyScript.contains("command -v python3"))
     }
 
     @Test

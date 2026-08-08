@@ -26,7 +26,7 @@ install:
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
       apt-get update
-      apt-get install -y ca-certificates curl git
+      apt-get install -y ca-certificates curl git gzip python3
     '
     echo "Ubuntu 基础环境已准备"
 verify:
@@ -38,7 +38,11 @@ verify:
       set -euo pipefail
       test "$(. /etc/os-release && printf "%s" "$ID")" = "ubuntu"
       test "$(. /etc/os-release && printf "%s" "$VERSION_ID")" = "24.04"
+      test -s /etc/ssl/certs/ca-certificates.crt
       command -v curl >/dev/null
+      command -v git >/dev/null
+      command -v gzip >/dev/null
+      command -v python3 >/dev/null
       command -v sha256sum >/dev/null
       command -v tar >/dev/null
     '

@@ -71,6 +71,9 @@ class WrapperContractTest {
             val fixedInnerScript = captured[6]
             assertFalse(fixedInnerScript.contains(workspace))
             assertFalse(fixedInnerScript.contains(cliArg))
+            assertTrue(fixedInnerScript.contains("check_for_update_on_startup=false"))
+            assertTrue(fixedInnerScript.contains("--sandbox danger-full-access"))
+            assertTrue(fixedInnerScript.contains("--ask-for-approval on-request"))
             assertEquals("agentdeck", captured[7])
             assertEquals(workspace, captured[8])
             assertEquals("codex", captured[9])

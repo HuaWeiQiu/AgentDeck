@@ -55,9 +55,9 @@ class LaunchInteractor(
         val command = LaunchCommandFactory.create(card, profile, adapters).getOrElse {
             return LaunchResult.Failed(it.message ?: "启动配置无效")
         }
-        return termux.runCommand(command).fold(
-            onSuccess = { LaunchResult.Success },
-            onFailure = { LaunchResult.Failed(it.message ?: "启动失败") },
+        return foregroundLaunchResult(
+            commandResult = termux.runCommand(command),
+            openTermux = termux::openTermux,
         )
     }
 
@@ -73,3 +73,17 @@ class LaunchInteractor(
         }
     }
 }
+
+internal fun foregroundLaunchResult(
+    commandResult: Result<Unit>,
+    openTermux: () -> Boolean,
+): LaunchResult = commandResult.fold(
+    onSuccess = {
+        if (openTermux()) {
+            LaunchResult.Success
+        } else {
+            LaunchResult.Failed("命令已发送，但无法打开 Termux，请从桌面手动打开")
+        }
+    },
+    onFailure = { LaunchResult.Failed(it.message ?: "启动失败") },
+)
