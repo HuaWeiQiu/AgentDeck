@@ -45,6 +45,7 @@ fun primarySetupSteps(report: EnvironmentReport): List<SetupDisplayStep> {
     return listOf(
         report.display("termux_installed", "Termux"),
         report.display("termux_run_command_permission", "调用权限"),
+        report.display("termux_background_execution", "后台运行"),
         report.display("allow_external_apps", "Termux 集成"),
         ubuntu,
         report.display("codex_installed", "Codex CLI"),

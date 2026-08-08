@@ -49,7 +49,7 @@ class RecipeParserTest {
         assertEquals(30, codex.timeoutMinutes)
         assertEquals("codex-ubuntu.sh", codex.wrapperAsset)
         assertEquals(
-            listOf("codex-app-server-start.sh", "codex-app-server-bridge.py"),
+            listOf("codex-app-server-start.sh"),
             codex.additionalWrapperAssets,
         )
         assertTrue(codex.description.contains("版本过低时安装"))
@@ -70,8 +70,10 @@ class RecipeParserTest {
         assertTrue(verifyScript.contains("command -v codex"))
         assertTrue(verifyScript.contains("codex --version >/dev/null"))
         assertTrue(verifyScript.contains("codex-app-server-start.sh"))
-        assertTrue(verifyScript.contains("codex-app-server-bridge.py"))
         assertTrue(verifyScript.contains("check_for_update_on_startup=false"))
+        assertTrue(verifyScript.contains("--listen ws://127.0.0.1:0"))
+        assertTrue(verifyScript.contains("--ws-auth capability-token"))
+        assertTrue(verifyScript.contains("START_CONTRACT_VERSION=6"))
         assertFalse(verifyScript.contains("0[.]147[.]0"))
         assertFalse(script.contains("npm install"))
     }
@@ -89,10 +91,12 @@ class RecipeParserTest {
 
         assertEquals(listOf(base.id), codex.dependsOn)
         assertTrue(installScript.indexOf("apt-get update") < installScript.indexOf("apt-get install"))
-        assertTrue(installScript.contains("ca-certificates curl git gzip python3"))
+        assertTrue(installScript.contains("pkg install -y proot-distro"))
+        assertTrue(installScript.contains("ca-certificates coreutils curl git gzip python3"))
         assertTrue(verifyScript.contains("ca-certificates.crt"))
         assertTrue(verifyScript.contains("command -v gzip"))
         assertTrue(verifyScript.contains("command -v python3"))
+        assertTrue(verifyScript.contains("command -v timeout"))
     }
 
     @Test

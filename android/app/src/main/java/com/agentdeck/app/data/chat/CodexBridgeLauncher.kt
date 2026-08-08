@@ -9,10 +9,12 @@ import org.json.JSONObject
 data class CodexBridgeEndpoint(
     val port: Int,
     val token: String,
+    val instanceKey: String,
 )
 
 interface CodexBridgeLaunch {
     suspend fun launch(card: AgentCard): Result<CodexBridgeEndpoint>
+    fun stop(endpoint: CodexBridgeEndpoint): Result<Unit>
 }
 
 @SuppressLint("SdCardPath")
@@ -41,31 +43,44 @@ class CodexBridgeLauncher(
             val detail = result.stderr.ifBlank { result.stdout }
                 .trim()
                 .takeLast(240)
-                .ifBlank { "桥接进程未返回错误信息" }
-            error("无法启动 Codex 聊天桥（退出码 ${result.exitCode}）：$detail")
+                .ifBlank { "app-server 未返回错误信息" }
+            error("无法启动 Codex app-server（退出码 ${result.exitCode}）：$detail")
         }
         val payload = result.stdout.lineSequence()
             .map(String::trim)
             .filter(String::isNotEmpty)
             .lastOrNull()
-            ?: error("Codex 聊天桥未返回连接信息")
-        parseEndpoint(payload)
+            ?: error("Codex app-server 未返回连接信息")
+        parseEndpoint(payload, instanceKey)
     }
+
+    override fun stop(endpoint: CodexBridgeEndpoint): Result<Unit> = termux.runCommand(
+        TermuxCommand(
+            sessionName = "agentdeck-chat-stop-${endpoint.instanceKey}",
+            executable = START_WRAPPER,
+            args = listOf("--instance-key", endpoint.instanceKey, "--stop"),
+            background = true,
+            reuseExistingSession = false,
+        ),
+    )
 
     companion object {
         private const val START_WRAPPER =
             "/data/data/com.termux/files/home/.agentdeck/wrappers/codex-app-server-start.sh"
         private const val START_TIMEOUT_MILLIS = 30_000L
 
-        internal fun parseEndpoint(payload: String): CodexBridgeEndpoint {
+        internal fun parseEndpoint(payload: String, instanceKey: String): CodexBridgeEndpoint {
             val json = JSONObject(payload)
             val port = json.getInt("port")
             val token = json.getString("token")
-            require(port in 1..65_535) { "Codex 聊天桥返回了无效端口" }
+            require(port in 1..65_535) { "Codex app-server 返回了无效端口" }
             require(token.matches(Regex("[A-Za-z0-9_-]{32,128}"))) {
-                "Codex 聊天桥返回了无效凭据"
+                "Codex app-server 返回了无效凭据"
             }
-            return CodexBridgeEndpoint(port, token)
+            require(instanceKey.matches(Regex("[a-f0-9]{1,16}"))) {
+                "Codex app-server 返回了无效实例标识"
+            }
+            return CodexBridgeEndpoint(port, token, instanceKey)
         }
     }
 }

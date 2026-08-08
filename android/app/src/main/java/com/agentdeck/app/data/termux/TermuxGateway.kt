@@ -48,6 +48,7 @@ interface TermuxGateway {
     fun hasRunCommandPermission(): Boolean
     fun openTermux(): Boolean
     fun openTermuxInstallPage(): Boolean
+    fun openTermuxAppSettings(): Boolean
     fun runCommand(command: TermuxCommand): Result<Unit>
     suspend fun runCommandForResult(
         command: TermuxCommand,
@@ -88,6 +89,14 @@ class AndroidTermuxGateway(
     override fun openTermuxInstallPage(): Boolean {
         val uri = "https://f-droid.org/packages/com.termux/".toUri()
         val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(intent) }.isSuccess
+    }
+
+    override fun openTermuxAppSettings(): Boolean {
+        val intent = Intent(
+            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            "package:$TERMUX_PACKAGE".toUri(),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return runCatching { context.startActivity(intent) }.isSuccess
     }
 

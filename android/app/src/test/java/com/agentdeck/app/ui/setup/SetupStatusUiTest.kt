@@ -11,7 +11,7 @@ class SetupStatusUiTest {
     fun `primary setup list combines proot and ubuntu`() {
         val steps = primarySetupSteps(readyReport())
 
-        assertEquals(7, steps.size)
+        assertEquals(8, steps.size)
         assertEquals(1, steps.count { it.id == "ubuntu_runtime" })
         assertEquals(EnvironmentCheckStatus.READY, steps.single { it.id == "ubuntu_runtime" }.status)
     }

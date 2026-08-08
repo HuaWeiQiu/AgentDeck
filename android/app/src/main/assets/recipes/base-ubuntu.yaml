@@ -26,7 +26,7 @@ install:
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
       apt-get update
-      apt-get install -y ca-certificates curl git gzip python3
+      apt-get install -y ca-certificates coreutils curl git gzip python3
     '
     echo "Ubuntu 基础环境已准备"
 verify:
@@ -45,4 +45,5 @@ verify:
       command -v python3 >/dev/null
       command -v sha256sum >/dev/null
       command -v tar >/dev/null
+      command -v timeout >/dev/null
     '

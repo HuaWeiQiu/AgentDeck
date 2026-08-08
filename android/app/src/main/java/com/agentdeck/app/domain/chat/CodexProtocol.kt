@@ -46,6 +46,15 @@ object CodexProtocol {
             "Codex 响应缺少 turn id"
         }
 
+    fun runtime(response: JSONObject): CodexRuntime = CodexRuntime(
+        model = requireNotNull(response.nullableString("model")) {
+            "Codex app-server 未返回实际模型"
+        },
+        provider = requireNotNull(response.nullableString("modelProvider")) {
+            "Codex app-server 未返回实际 Provider"
+        },
+    )
+
     fun inProgressTurnId(response: JSONObject): String? {
         val turns = response.optJSONObject("thread")?.optJSONArray("turns") ?: return null
         val turn = turns.optJSONObject(turns.length() - 1) ?: return null

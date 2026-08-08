@@ -4,9 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.agentdeck.app.BuildConfig
+import com.agentdeck.app.data.chat.CodexBridgeEndpoint
 import com.agentdeck.app.data.chat.CodexInbound
 import com.agentdeck.app.data.chat.CodexRpcClient
 import com.agentdeck.app.data.chat.CodexRpcException
+import com.agentdeck.app.data.chat.CodexRpcTimeoutException
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.chat.ApprovalKind
 import com.agentdeck.app.domain.chat.ChatApproval
@@ -32,8 +34,10 @@ class ChatViewModel(
     val state: StateFlow<ChatUiState> = mutableState.asStateFlow()
 
     private var client: CodexRpcClient? = null
+    private var endpoint: CodexBridgeEndpoint? = null
     private var connectJob: Job? = null
     private var eventJob: Job? = null
+    private var turnStartJob: Job? = null
     private var threadId: String? = null
     private var activeTurnId: String? = null
 
@@ -44,12 +48,12 @@ class ChatViewModel(
     fun connect() {
         if (connectJob?.isActive == true) return
         connectJob = viewModelScope.launch {
-            client?.close()
-            client = null
+            disconnectServer()
             eventJob?.cancel()
             mutableState.update {
                 it.copy(
                     isConnecting = true,
+                    isConnected = false,
                     isStreaming = false,
                     approval = null,
                     error = null,
@@ -59,6 +63,7 @@ class ChatViewModel(
                 val card = requireNotNull(ServiceLocator.cards.getCard(cardId)) { "对话不存在" }
                 mutableState.update { it.copy(card = card) }
                 val endpoint = ServiceLocator.codexBridge.launch(card).getOrThrow()
+                this@ChatViewModel.endpoint = endpoint
                 val rpc = CodexRpcClient.connect(endpoint)
                 client = rpc
                 eventJob = viewModelScope.launch { rpc.events.collect(::handleInbound) }
@@ -74,7 +79,7 @@ class ChatViewModel(
                             CodexProtocol.threadResumeParams(linkedThread, card.workspacePath),
                         )
                     } catch (error: CodexRpcException) {
-                        if (!error.isMissingThread()) throw error
+                        if (!error.isMissingThread() && !error.hasActiveWriter()) throw error
                         ServiceLocator.conversationLinks.clearThreadId(cardId)
                         startThread(rpc, card.workspacePath)
                     }
@@ -101,11 +106,15 @@ class ChatViewModel(
                     }
                 }
                 activeTurnId = null
+                val runtime = CodexProtocol.runtime(response)
                 ServiceLocator.conversationLinks.saveThreadId(cardId, requireNotNull(threadId))
                 mutableState.update {
                     it.copy(
                         isConnecting = false,
+                        isConnected = true,
                         isStreaming = false,
+                        runtimeModel = runtime.model,
+                        runtimeProvider = runtime.provider,
                         items = CodexProtocol.historyItems(response),
                         error = null,
                     )
@@ -113,11 +122,11 @@ class ChatViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                client?.close()
-                client = null
+                disconnectServer()
                 mutableState.update {
                     it.copy(
                         isConnecting = false,
+                        isConnected = false,
                         isStreaming = false,
                         error = error.message ?: "无法连接 Codex",
                     )
@@ -150,7 +159,7 @@ class ChatViewModel(
                 items = it.items + localItem,
             )
         }
-        viewModelScope.launch {
+        turnStartJob = viewModelScope.launch {
             try {
                 val response = rpc.request(
                     "turn/start",
@@ -160,14 +169,20 @@ class ChatViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                if (error is CodexRpcTimeoutException) {
+                    disconnectServer()
+                }
                 mutableState.update {
                     it.copy(
                         composer = it.composer.ifBlank { text },
+                        isConnected = error !is CodexRpcTimeoutException,
                         isStreaming = false,
                         items = it.items.filterNot { item -> item.id == localItem.id },
                         error = error.message ?: "消息发送失败",
                     )
                 }
+            } finally {
+                turnStartJob = null
             }
         }
     }
@@ -175,7 +190,21 @@ class ChatViewModel(
     fun stop() {
         val rpc = client ?: return
         val currentThread = threadId ?: return
-        val currentTurn = activeTurnId ?: return
+        val currentTurn = activeTurnId
+        if (currentTurn == null) {
+            if (turnStartJob?.isActive != true) return
+            turnStartJob?.cancel()
+            turnStartJob = null
+            disconnectServer()
+            mutableState.update {
+                it.copy(
+                    isConnected = false,
+                    isStreaming = false,
+                    error = "已停止等待 Codex 响应，请重试连接",
+                )
+            }
+            return
+        }
         viewModelScope.launch {
             runCatching {
                 rpc.request(
@@ -221,12 +250,14 @@ class ChatViewModel(
             is CodexInbound.ServerRequest -> handleServerRequest(inbound)
             is CodexInbound.Disconnected -> {
                 activeTurnId = null
+                disconnectServer()
                 mutableState.update {
                     it.copy(
                         isConnecting = false,
+                        isConnected = false,
                         isStreaming = false,
                         approval = null,
-                        error = "Codex 连接已断开：${inbound.message}",
+                        error = it.error ?: "Codex 连接已断开：${inbound.message}",
                     )
                 }
             }
@@ -331,8 +362,15 @@ class ChatViewModel(
     }
 
     override fun onCleared() {
-        client?.close()
+        disconnectServer()
         super.onCleared()
+    }
+
+    private fun disconnectServer() {
+        client?.close()
+        client = null
+        endpoint?.let { ServiceLocator.codexBridge.stop(it) }
+        endpoint = null
     }
 
     companion object {
@@ -352,3 +390,6 @@ private fun CodexRpcException.isMissingThread(): Boolean {
     val normalized = message.lowercase()
     return normalized.contains("not found") || normalized.contains("no rollout found")
 }
+
+internal fun CodexRpcException.hasActiveWriter(): Boolean =
+    message.lowercase().contains("active writer")

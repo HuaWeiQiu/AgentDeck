@@ -18,6 +18,10 @@ class SetupActionResolverTest {
             stateWith("termux_run_command_permission", EnvironmentCheckStatus.ACTION_REQUIRED).action,
         )
         assertEquals(
+            SetupAction.ALLOW_TERMUX_BACKGROUND,
+            stateWith("termux_background_execution", EnvironmentCheckStatus.ACTION_REQUIRED).action,
+        )
+        assertEquals(
             SetupAction.ENABLE_EXTERNAL_APPS,
             stateWith("allow_external_apps", EnvironmentCheckStatus.ACTION_REQUIRED).action,
         )
@@ -61,6 +65,7 @@ internal fun readyReport(): EnvironmentReport = EnvironmentReport(
     listOf(
         "termux_installed",
         "termux_run_command_permission",
+        "termux_background_execution",
         "allow_external_apps",
         "proot_distro",
         "ubuntu_installed",

@@ -1,10 +1,10 @@
-# AgentDeck 设计文档（0.1.3 基线）
+# AgentDeck 设计文档（0.1.4 基线）
 
-> 状态：0.1.3 Android 实现、原生聊天桥、自动化验证和发布文档已落地；等待真实 Android + F-Droid Termux 验收
+> 状态：0.1.4 Android 实现、自动化验证和 iQOO/Termux 真机主链路验收已完成；当前仍是 debug 预发布
 > 平台：Android
 > 形态：**聊天优先客户端**（App 承载原生 transcript；Termux/Ubuntu 运行 Codex app-server 与 TUI 兜底）
 > 运行时：**必须安装 Termux**
-> 交付顺序：参考研究 ✅ → 0.1.3 实现 ✅ → 自动化验证 ✅ → 真机验收 → 发布
+> 交付顺序：参考研究 ✅ → 0.1.4 实现 ✅ → 自动化验证 ✅ → 主链路真机验收 ✅ → 预发布
 
 ---
 
@@ -17,13 +17,13 @@
 | 3 | 首批 CLI | **以 Codex 为 P0**；Claude Code / Kimi CLI 同模型扩展（P1） |
 | 4 | 主交互 | 首页 **对话列表** → app-server 原生 transcript；Termux TUI 是对话内备用动作 |
 | 4b | 启动链 | 不是单条命令：需 **先进入 Ubuntu（proot-distro）再执行 `codex`** |
-| 5 | 认证与模型 | 凭据由各 CLI 官方认证流程管理；App 只保存非敏感配置选择 |
+| 5 | 认证与模型 | 凭据、Provider 与模型由 CLI 官方配置管理；App 显示 app-server 返回的实际运行值 |
 | 6 | 交付 | P0 Android 客户端 + 可重复验证 + 真机发布清单 |
 
 ### 1.1 「聊天界面」的精确定义
 
 1. 首页是 **对话列表**，不是安装器或 Doctor；整行进入，展示标题、CLI、工作区和状态。
-2. 0.1.3 点击对话后进入 App 内原生 transcript，提供底部输入器、工具活动、审批、停止与历史恢复；数据来自官方 `codex app-server` 双向 JSON-RPC。
+2. 点击对话后进入 App 内原生 transcript，提供底部输入器、工具活动、审批、停止与历史恢复；数据来自官方 `codex app-server` 双向 JSON-RPC。
 3. 对话右上角保留“在 Termux 中打开”，用于登录、协议不兼容、诊断和完整官方 TUI。
 4. 原生聊天不是把 prompt 转发给 HTTP，也不解析 ANSI/TUI 或 JSONL 猜消息。Codex 仍拥有 Agent loop、认证、配置和会话语义。
 
@@ -50,10 +50,10 @@ Termux shell
 
 - 用对话列表管理多个 Agent 启动配置
 - 一键进入同一 Codex thread 的原生聊天，并保留同一工作区的 TUI 兜底
-- 在 App 内选择 CLI 的非敏感配置（Provider / Base URL / Model 等元数据）
+- 在 App 内显示 CLI 实际使用的 Provider / Model，不维护与 CLI 脱节的第二套运行配置
 - API Key、OAuth token 等凭据由各 CLI 官方认证流程管理
 - 能检测/引导安装：Termux、proot-distro、Ubuntu、Codex CLI 和 wrapper
-- 为每个对话配置：工作目录、启动模板、绑定的模型 Profile
+- 为每个对话配置：名称、工作目录和固定启动模板
 
 ### 2.2 非目标（MVP 不做）
 
@@ -81,7 +81,7 @@ Termux shell
         [ ] ubuntu:24.04 可用
         [ ] codex 0.147.0 已安装且在 PATH
         [ ] codex login status 就绪
-        [ ] 终端与 app-server bridge wrapper 已安装
+        [ ] 终端与 app-server WebSocket wrapper 已安装
   → 在对应 CLI 内完成官方登录或认证
   → 创建默认对话「Codex」
   → 点击对话 → 进入 Codex 聊天会话
@@ -93,7 +93,7 @@ Termux shell
 打开 App 首页
   → 看到 Codex 对话（未开放的旧入口不可启动）
   → 点整行「Codex」
-  → App 通过 Termux 后台启动一次性鉴权桥
+  → App 通过 Termux 后台启动一次性鉴权 app-server
   → 原生 transcript 恢复或创建 Codex thread
   → 需要完整 TUI 时点击右上角终端按钮
 ```
@@ -111,15 +111,15 @@ Termux shell
 
 ## 4. 信息架构（UI）
 
-0.1.3 使用三个主 Tab；Profile 作为设置内二级页面，环境向导与安装合并为“工具”中的单一设置表面。
+0.1.4 使用三个主 Tab；环境向导与安装合并为“工具”中的单一设置表面。当前 UI 不再展示旧 Profile，因为它不会改写 CLI 配置。
 
 ### 4.1 底部导航（3 Tab）
 
 | Tab | 名称 | 作用 |
 |---|---|---|
 | 1 | **对话** | 对话列表与 app-server 原生 transcript |
-| 2 | **工具** | 统一检测、安装/修复并验证 CLI、依赖与 bridge |
-| 3 | **设置** | 版本、环境状态、Termux 入口与 CLI Profile 二级页面 |
+| 2 | **工具** | 统一检测、安装/修复并验证 CLI、依赖与 app-server wrapper |
+| 3 | **设置** | 版本、环境状态与 Termux 入口 |
 
 ### 4.2 对话 Tab（主界面）
 
@@ -133,7 +133,7 @@ Termux shell
 
 **点击「进入」后**
 
-- 0.1.3：后台启动回环桥，握手后恢复映射的 Codex thread；没有映射时创建并保存 thread ID
+- 后台启动官方回环 WebSocket，握手后恢复映射的 Codex thread；没有映射时创建并保存 thread ID
 - 用户看到由真实 Thread / Turn / Item 驱动的原生 transcript；Agent Markdown 不使用统一气泡，工具与审批结构化展示
 - “在终端中打开”启动或复用命名 Termux session，作为同一工作区的 TUI 兜底
 - 运行、审批、失败和完成状态只来自 app-server 协议事件
@@ -142,7 +142,6 @@ Termux shell
 
 - 名称、CLI 类型、启停状态
 - 工作区目录（`cwd`，在 Ubuntu 内路径或 Termux 路径，需标明命名空间）
-- 绑定模型 Profile
 - 启动模板由所选 CLI adapter 固定；0.1.x 不开放自定义脚本、env 或额外参数编辑
 
 ### 4.3 工具 Tab
@@ -156,12 +155,11 @@ Termux shell
 
 每张配方卡显示描述、固定版本、优先级和依赖，提供安装/修复、重新验证与失败重试。可取消/导出的安装日志和卸载操作属于 P1。
 
-### 4.4 CLI Profile（二级页面）
+### 4.4 CLI 运行配置
 
-- Profile 列表
-- 类型：`openai_compatible` | `anthropic`
-- 字段：名称、Base URL、默认 Model
-- 认证由对应 CLI 管理；App 不接收、不保存、不传递 API Key 或 OAuth token
+- Provider、Base URL、模型和认证由 Codex CLI 的本地配置管理
+- AgentDeck 不接收、不保存、不传递 API Key 或 OAuth token
+- 聊天页只显示 app-server 返回的实际 Provider 与模型，不用本地占位值推断运行配置
 
 ### 4.5 设置 Tab
 
@@ -179,7 +177,7 @@ Termux shell
 ### 5.1 实体
 
 ```text
-ProviderProfile   模型配置（OpenAI 兼容 / Anthropic）
+ProviderProfile   历史兼容数据；当前不注入 CLI，也不在主 UI 展示
 AgentRecipe       可安装的 CLI 配方（工具）
 AgentCard         用户的一键启动卡片（会话入口）
 CliAdapter        单个 CLI 的校验、默认值与固定启动命令
@@ -290,7 +288,6 @@ verify:
 | `ubuntu_installed` | Termux | `proot-distro list` 含 ubuntu | 安装 ubuntu |
 | `codex_installed` | Ubuntu | `command -v codex` | 安装 Codex 配方 |
 | `codex_authenticated` | Ubuntu | `codex login status`、官方认证环境变量、当前 Provider `env_key` | 复用已有认证；缺失时打开认证助手 |
-| `profile_bound` | App | 卡片绑定有效 Profile | 去模型页 |
 
 每项检查使用 `UNKNOWN / CHECKING / READY / ACTION_REQUIRED / BLOCKED / ERROR` 状态。Android 本地条件同步判断；Termux、Ubuntu 和 Codex 条件通过带 `PendingIntent` 结果回调的后台命令判断。Intent 被系统接受不代表命令成功。
 
@@ -312,17 +309,17 @@ set -euo pipefail
 # wrapper 负责逐项解析和校验，不执行 App 生成的 shell 源码。
 ```
 
-同一配方还安装 `codex-app-server-start.sh` 与 `codex-app-server-bridge.py`。前者由 Termux 后台任务启动 Ubuntu 内的 Python bridge；后者只监听 `127.0.0.1`，用一次性 token 鉴权后转发稳定 stdio JSONL。
+同一配方还安装 `codex-app-server-start.sh`。它在 Termux 中作为稳定 supervisor，进入 Ubuntu 后直接启动官方 `codex app-server --listen ws://127.0.0.1:0 --ws-auth capability-token`。token 文件与 PID lease 位于 Termux 私有运行目录；supervisor 负责离开页面或异常退出后的精确进程树清理。
 
 ### 6.2 App 侧原生聊天步骤
 
 ```text
 1. 校验卡片 → 模板 → CLI 配置 → Termux 安装与权限
 2. 后台执行固定 codex-app-server-start.sh，动态 cwd/distro 只通过 argv 传入
-3. Termux 回调只返回 port 与一次性 token；Android 连接 127.0.0.1 并完成 bridge 鉴权
+3. Termux 回调只返回 port、一次性 token 与 instance key；Android 以 bearer token 连接 127.0.0.1 WebSocket
 4. 发送 initialize / initialized，随后 thread/resume 或 thread/start
 5. Android 按 Item 与 delta 更新时间线，按 server request 内联审批，turn/interrupt 停止回复
-6. 离开页面关闭 socket；bridge 终止 app-server。再次进入按本地 card ID → Codex thread ID 映射恢复历史与活动 turn
+6. 离开页面关闭 socket并停止 lease；supervisor 终止其完整 PRoot/app-server 进程树。再次进入按本地 card ID → Codex thread ID 映射恢复历史与活动 turn
 ```
 
 终端兜底继续使用 `codex-ubuntu.sh`、前台命名会话和 `no-shell-with-name`，不与 Codex thread ID 混用。
@@ -340,7 +337,7 @@ set -euo pipefail
 - 权限：`com.termux.permission.RUN_COMMAND`
 - 前置：`~/.termux/termux.properties` 中 `allow-external-apps=true`
 
-> 常量与 termux-app 当前 `termux-shared` 契约保持一致；发布前仍需真机验证会话复用行为。
+> 常量与 termux-app 当前 `termux-shared` 契约保持一致；会话进入、恢复、新回复与退出清理已在 Android 16 / iQOO Neo8 上验证。
 
 ### 6.4 为什么必须 wrapper
 
@@ -420,13 +417,13 @@ interface CliAdapter {
 
 ## 9. MVP 范围拆分
 
-### P0（0.1.3 已实现）
+### P0（0.1.4 已实现）
 
-1. Compose 三 Tab、卡片 CRUD、Profile CRUD、原生聊天与底部导航
+1. Compose 三 Tab、卡片 CRUD、原生聊天与底部导航
 2. Room v3、非破坏迁移、Profile 外键与一次性初始化
 3. 统一设置状态、一步安装、Termux 命名兜底会话和后台结果回调
 4. 严格配方 schema、依赖排序、版本/摘要固定和安装后验证
-5. Codex adapter、固定 wrapper、鉴权回环 bridge 和 argv 安全边界
+5. Codex adapter、固定 supervisor wrapper、鉴权回环 WebSocket 和 argv 安全边界
 6. Thread 恢复、Item 时间线、Markdown、流式 delta、停止和 command/file approval
 7. CI、Apache-2.0、安全策略、变更日志和发布清单
 
@@ -456,8 +453,8 @@ interface CliAdapter {
 | proot Ubuntu 与 Termux 路径混淆 | cd 失败 | 路径命名空间 `ubuntu` / `termux` |
 | CLI 资产/参数变更 | 配方失效 | 固定版本与 SHA-256；升级必须显式更新配方和测试 |
 | API Key 出现在进程参数 | 泄露 | AgentDeck 不接收或传递凭据；认证留在 CLI |
-| Codex 配置键变更 | Profile 误导用户 | 当前不注入配置；稳定后只在 Codex adapter 内实现映射 |
-| bridge 被系统杀死或协议变化 | 原生聊天断开 | 明确错误与重试；按 thread history 恢复；始终保留官方 TUI 兜底 |
+| Codex 配置键变更 | App 显示错误模型 | 以 app-server 实际返回值为准；当前不注入或推断配置 |
+| app-server 被系统杀死或协议变化 | 原生聊天断开 | 明确错误与重试；按 thread history 恢复；始终保留官方 TUI 兜底 |
 | 回环端口被其它 App 尝试连接 | 控制 Codex | 仅 127.0.0.1、一次性高熵 token、单客户端、消息上限和空闲退出 |
 
 ---
@@ -478,7 +475,6 @@ AgentDeck/
   wrappers/
     codex-ubuntu.sh              # TUI 兜底
     codex-app-server-start.sh    # Termux 后台启动入口
-    codex-app-server-bridge.py   # stdio ↔ 回环 JSONL bridge
   android/                 # Kotlin + Compose 工程
     app/
     ...
@@ -500,7 +496,7 @@ AgentDeck/
 5. 离开后再次进入恢复同一 thread 的历史；活动 turn 仍显示运行并可停止
 6. 右上角终端按钮进入同一工作区的官方 Codex TUI
 7. 未装 Termux、bridge 失败或协议不兼容时给出明确错误与修复/终端兜底，不显示假成功
-8. 删除 Profile 后卡片保留并解除绑定；删除最后一项后重启不复活
+8. 历史 Profile 数据不被破坏，但当前聊天不把它误报为实际 CLI 配置
 
 ---
 
@@ -522,9 +518,9 @@ AgentDeck/
 
 ## 14. 发布前剩余工作
 
-1. 在真实 Android + F-Droid Termux 上完成 `docs/RELEASE_CHECKLIST.md`
+1. 在更多 OEM/Android 版本上完成 `docs/RELEASE_CHECKLIST.md` 的稳定版验收
 2. 验证 v0.1.0 APK 数据升级到 Room v3
-3. 验证 arm64 Ubuntu/Codex 下载、SHA-256、认证检测与配置、回环 bridge、原生消息/审批与 TUI 兜底
+3. 继续验证首次 arm64 Ubuntu/Codex 下载、SHA-256、全部审批分支与 TUI 兜底
 4. 配置正式 release 签名，并在真机清单通过后发布稳定版
 
 ---

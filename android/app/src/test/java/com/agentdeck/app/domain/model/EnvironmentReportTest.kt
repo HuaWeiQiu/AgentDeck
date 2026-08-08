@@ -10,6 +10,7 @@ class EnvironmentReportTest {
         val readyForLaunch = setOf(
             "termux_installed",
             "termux_run_command_permission",
+            "termux_background_execution",
             "allow_external_apps",
             "proot_distro",
             "ubuntu_installed",

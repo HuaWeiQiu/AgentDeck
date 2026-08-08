@@ -24,7 +24,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.ui.chat.ChatScreen
-import com.agentdeck.app.ui.models.ModelsScreen
 import com.agentdeck.app.ui.sessions.SessionsScreen
 import com.agentdeck.app.ui.settings.SettingsScreen
 import com.agentdeck.app.ui.store.StoreScreen
@@ -68,12 +67,11 @@ fun AgentDeckRoot() {
 
     Scaffold(
         bottomBar = {
-            if (currentRoute in tabs.map { it.route } || currentRoute == "models") {
+            if (currentRoute in tabs.map { it.route }) {
                 NavigationBar {
                     tabs.forEach { tab ->
                         NavigationBarItem(
-                            selected = currentRoute == tab.route ||
-                                (tab.route == "settings" && currentRoute == "models"),
+                            selected = currentRoute == tab.route,
                             onClick = { navigateTopLevel(tab.route) },
                             icon = { Icon(tab.icon, contentDescription = tab.label) },
                             label = { Text(tab.label) },
@@ -99,11 +97,9 @@ fun AgentDeckRoot() {
                     onReady = { navigateTopLevel("sessions") },
                 )
             }
-            composable("models") { ModelsScreen() }
             composable("settings") {
                 SettingsScreen(
                     onOpenSetup = { navigateTopLevel("store") },
-                    onOpenProfiles = { navController.navigate("models") },
                 )
             }
             composable("chat/{cardId}") { entry ->

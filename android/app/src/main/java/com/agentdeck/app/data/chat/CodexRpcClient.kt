@@ -4,22 +4,27 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
 import org.json.JSONObject
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 sealed interface CodexInbound {
@@ -56,17 +61,117 @@ class CodexRpcException(
     override val message: String,
 ) : Exception(message)
 
-class CodexRpcClient private constructor(
-    private val socket: Socket,
-    private val input: BufferedInputStream,
-    private val output: BufferedOutputStream,
+class CodexRpcTimeoutException(
+    val method: String,
+    val timeoutMillis: Long,
+) : Exception(
+    "Codex 请求 $method 在 ${timeoutMillis / 1_000} 秒内没有响应；" +
+        "Termux 可能被系统冻结，请检查其后台耗电设置",
+)
+
+internal sealed interface CodexSocketEvent {
+    data class Text(val value: String) : CodexSocketEvent
+    data class Disconnected(val message: String, val cause: Throwable? = null) : CodexSocketEvent
+}
+
+internal interface CodexRpcTransport : AutoCloseable {
+    val events: Flow<CodexSocketEvent>
+    fun send(text: String): Boolean
+}
+
+private class OkHttpCodexTransport(
+    private val socket: WebSocket,
+    eventChannel: Channel<CodexSocketEvent>,
+) : CodexRpcTransport {
+    override val events: Flow<CodexSocketEvent> = eventChannel.receiveAsFlow()
+
+    override fun send(text: String): Boolean = socket.send(text)
+
+    override fun close() {
+        if (!socket.close(NORMAL_CLOSE_CODE, "AgentDeck closed")) {
+            socket.cancel()
+        }
+    }
+
+    companion object {
+        private const val NORMAL_CLOSE_CODE = 1_000
+
+        suspend fun connect(endpoint: CodexBridgeEndpoint): OkHttpCodexTransport {
+            val opened = CompletableDeferred<WebSocket>()
+            val eventChannel = Channel<CodexSocketEvent>(Channel.BUFFERED)
+            val listener = object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    opened.complete(webSocket)
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    if (text.toByteArray(StandardCharsets.UTF_8).size > CodexRpcClient.MAX_MESSAGE_BYTES) {
+                        eventChannel.close(IllegalStateException("Codex 响应超过大小限制"))
+                        webSocket.close(1_009, "message too large")
+                        return
+                    }
+                    if (eventChannel.trySend(CodexSocketEvent.Text(text)).isFailure) {
+                        eventChannel.close(IllegalStateException("Codex 消息过多，客户端无法继续处理"))
+                        webSocket.close(1_013, "client overloaded")
+                    }
+                }
+
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    eventChannel.close(IllegalStateException("Codex 返回了不支持的二进制消息"))
+                    webSocket.close(1_003, "binary messages are unsupported")
+                }
+
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    webSocket.close(code, reason)
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    val error = IllegalStateException("Codex WebSocket 已关闭（$code）")
+                    if (!opened.completeExceptionally(error)) {
+                        eventChannel.trySend(
+                            CodexSocketEvent.Disconnected(
+                                reason.ifBlank { "Codex WebSocket 已关闭（$code）" },
+                            ),
+                        )
+                    }
+                }
+
+                override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
+                    val detail = response?.let { "HTTP ${it.code}" }
+                        ?: error.message
+                        ?: "Codex WebSocket 连接失败"
+                    if (!opened.completeExceptionally(IllegalStateException(detail, error))) {
+                        eventChannel.trySend(CodexSocketEvent.Disconnected(detail, error))
+                    }
+                }
+            }
+            val pendingSocket = CodexRpcClient.HTTP_CLIENT.newWebSocket(
+                CodexRpcClient.endpointRequest(endpoint),
+                listener,
+            )
+            return try {
+                val socket = withTimeout(CodexRpcClient.CONNECT_TIMEOUT_MILLIS) { opened.await() }
+                OkHttpCodexTransport(socket, eventChannel)
+            } catch (_: TimeoutCancellationException) {
+                pendingSocket.cancel()
+                throw IllegalStateException("连接 Codex WebSocket 超时")
+            } catch (error: Exception) {
+                pendingSocket.cancel()
+                throw error
+            }
+        }
+    }
+}
+
+class CodexRpcClient internal constructor(
+    private val transport: CodexRpcTransport,
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val requestIds = AtomicLong(1)
     private val pending = ConcurrentHashMap<Long, CompletableDeferred<JSONObject>>()
     private val writeMutex = Mutex()
     private val inbound = Channel<CodexInbound>(Channel.BUFFERED)
-    private var closed = false
+    private val closed = AtomicBoolean(false)
 
     val events: Flow<CodexInbound> = inbound.receiveAsFlow()
 
@@ -93,13 +198,19 @@ class CodexRpcClient private constructor(
         params: JSONObject = JSONObject(),
         timeoutMillis: Long = REQUEST_TIMEOUT_MILLIS,
     ): JSONObject {
-        check(!closed) { "Codex 连接已关闭" }
+        check(!closed.get()) { "Codex 连接已关闭" }
         val id = requestIds.getAndIncrement()
         val result = CompletableDeferred<JSONObject>()
         pending[id] = result
         try {
-            send(JSONObject().put("method", method).put("id", id).put("params", params))
-            return withTimeout(timeoutMillis) { result.await() }
+            return try {
+                withTimeout(timeoutMillis) {
+                    send(JSONObject().put("method", method).put("id", id).put("params", params))
+                    result.await()
+                }
+            } catch (_: TimeoutCancellationException) {
+                throw CodexRpcTimeoutException(method, timeoutMillis)
+            }
         } finally {
             pending.remove(id)
         }
@@ -125,46 +236,54 @@ class CodexRpcClient private constructor(
     }
 
     private suspend fun send(payload: JSONObject) {
-        val bytes = (payload.toString() + "\n").toByteArray(StandardCharsets.UTF_8)
-        require(bytes.size <= MAX_LINE_BYTES) { "Codex 请求过大" }
+        val text = payload.toString()
+        require(text.toByteArray(StandardCharsets.UTF_8).size <= MAX_MESSAGE_BYTES) {
+            "Codex 请求过大"
+        }
         writeMutex.withLock {
-            withContext(Dispatchers.IO) {
-                output.write(bytes)
-                output.flush()
-            }
+            check(transport.send(text)) { "Codex WebSocket 无法发送消息" }
         }
     }
 
     private suspend fun readLoop() {
         try {
-            while (!closed) {
-                val message = readJsonLine(input)
-                val method = message.optString("method").takeIf(String::isNotBlank)
-                val rawId = message.opt("id")?.takeUnless { it == JSONObject.NULL }
-                if (method != null && rawId != null) {
-                    inbound.send(
-                        CodexInbound.ServerRequest(
-                            RpcRequestId.from(rawId),
-                            method,
-                            message.optJSONObject("params") ?: JSONObject(),
-                        ),
+            transport.events.collect { event ->
+                when (event) {
+                    is CodexSocketEvent.Text -> handleMessage(JSONObject(event.value))
+                    is CodexSocketEvent.Disconnected -> throw IllegalStateException(
+                        event.message,
+                        event.cause,
                     )
-                } else if (method != null) {
-                    inbound.send(
-                        CodexInbound.Notification(
-                            method,
-                            message.optJSONObject("params") ?: JSONObject(),
-                        ),
-                    )
-                } else if (rawId is kotlin.Number) {
-                    completeResponse(rawId.toLong(), message)
                 }
             }
         } catch (error: Exception) {
-            if (!closed) {
+            if (!closed.get()) {
                 failPending(IllegalStateException("Codex 连接已断开", error))
                 inbound.trySend(CodexInbound.Disconnected(error.message ?: "Codex 连接已断开"))
             }
+        }
+    }
+
+    private suspend fun handleMessage(message: JSONObject) {
+        val method = message.optString("method").takeIf(String::isNotBlank)
+        val rawId = message.opt("id")?.takeUnless { it == JSONObject.NULL }
+        if (method != null && rawId != null) {
+            inbound.send(
+                CodexInbound.ServerRequest(
+                    RpcRequestId.from(rawId),
+                    method,
+                    message.optJSONObject("params") ?: JSONObject(),
+                ),
+            )
+        } else if (method != null) {
+            inbound.send(
+                CodexInbound.Notification(
+                    method,
+                    message.optJSONObject("params") ?: JSONObject(),
+                ),
+            )
+        } else if (rawId is kotlin.Number) {
+            completeResponse(rawId.toLong(), message)
         }
     }
 
@@ -191,53 +310,28 @@ class CodexRpcClient private constructor(
     }
 
     override fun close() {
-        if (closed) return
-        closed = true
-        runCatching { socket.close() }
+        if (!closed.compareAndSet(false, true)) return
+        runCatching { transport.close() }
         failPending(IllegalStateException("Codex 连接已关闭"))
         inbound.close()
         scope.cancel()
     }
 
     companion object {
-        private const val MAX_LINE_BYTES = 1024 * 1024
-        private const val CONNECT_TIMEOUT_MILLIS = 10_000
-        private const val AUTH_TIMEOUT_MILLIS = 10_000
+        internal const val MAX_MESSAGE_BYTES = 1024 * 1024
+        internal const val CONNECT_TIMEOUT_MILLIS = 10_000L
         private const val REQUEST_TIMEOUT_MILLIS = 30_000L
+        internal val HTTP_CLIENT = OkHttpClient.Builder()
+            .connectTimeout(CONNECT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+            .pingInterval(30, TimeUnit.SECONDS)
+            .build()
 
-        suspend fun connect(endpoint: CodexBridgeEndpoint): CodexRpcClient = withContext(Dispatchers.IO) {
-            val socket = Socket()
-            try {
-                socket.connect(InetSocketAddress("127.0.0.1", endpoint.port), CONNECT_TIMEOUT_MILLIS)
-                socket.soTimeout = AUTH_TIMEOUT_MILLIS
-                val input = BufferedInputStream(socket.getInputStream())
-                val output = BufferedOutputStream(socket.getOutputStream())
-                val auth = (JSONObject().put("token", endpoint.token).toString() + "\n")
-                    .toByteArray(StandardCharsets.UTF_8)
-                output.write(auth)
-                output.flush()
-                val response = readJsonLine(input)
-                check(response.optBoolean("ok")) { "Codex 聊天桥鉴权失败" }
-                socket.soTimeout = 0
-                CodexRpcClient(socket, input, output)
-            } catch (error: Exception) {
-                runCatching { socket.close() }
-                throw error
-            }
-        }
+        suspend fun connect(endpoint: CodexBridgeEndpoint): CodexRpcClient =
+            CodexRpcClient(OkHttpCodexTransport.connect(endpoint))
 
-        internal fun readJsonLine(input: BufferedInputStream): JSONObject {
-            val bytes = ArrayList<Byte>(256)
-            while (bytes.size <= MAX_LINE_BYTES) {
-                val next = input.read()
-                if (next == -1) error("Codex 连接已关闭")
-                if (next == '\n'.code) {
-                    val payload = ByteArray(bytes.size) { index -> bytes[index] }
-                    return JSONObject(String(payload, StandardCharsets.UTF_8))
-                }
-                bytes += next.toByte()
-            }
-            error("Codex 响应超过大小限制")
-        }
+        internal fun endpointRequest(endpoint: CodexBridgeEndpoint): Request = Request.Builder()
+            .url("ws://127.0.0.1:${endpoint.port}/")
+            .header("Authorization", "Bearer ${endpoint.token}")
+            .build()
     }
 }

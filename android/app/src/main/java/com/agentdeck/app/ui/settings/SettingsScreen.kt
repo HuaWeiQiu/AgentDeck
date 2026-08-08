@@ -35,7 +35,6 @@ import com.agentdeck.app.ui.setup.TechnicalEnvironmentList
 @Composable
 fun SettingsScreen(
     onOpenSetup: () -> Unit = {},
-    onOpenProfiles: () -> Unit = {},
     vm: SettingsViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsState()
@@ -71,16 +70,6 @@ fun SettingsScreen(
                 )
             }
             item { HorizontalDivider() }
-            item {
-                ListItem(
-                    headlineContent = { Text("CLI 配置") },
-                    supportingContent = { Text("Provider、Base URL 和默认模型") },
-                    trailingContent = {
-                        Icon(Icons.Filled.ChevronRight, contentDescription = null)
-                    },
-                    modifier = Modifier.clickable(onClick = onOpenProfiles),
-                )
-            }
 
             item {
                 Row(

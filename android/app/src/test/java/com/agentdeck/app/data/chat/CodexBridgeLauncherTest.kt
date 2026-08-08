@@ -17,16 +17,21 @@ class CodexBridgeLauncherTest {
 
         val endpoint = CodexBridgeLauncher.parseEndpoint(
             """{"port":48123,"token":"$token","pid":42}""",
+            "abc123",
         )
 
         assertEquals(48_123, endpoint.port)
         assertEquals(token, endpoint.token)
+        assertEquals("abc123", endpoint.instanceKey)
     }
 
     @Test
     fun `invalid bootstrap is rejected`() {
         val result = runCatching {
-            CodexBridgeLauncher.parseEndpoint("""{"port":70000,"token":"short"}""")
+            CodexBridgeLauncher.parseEndpoint(
+                """{"port":70000,"token":"short"}""",
+                "abc123",
+            )
         }
 
         assertTrue(result.isFailure)
@@ -40,6 +45,7 @@ class CodexBridgeLauncherTest {
             override fun hasRunCommandPermission() = true
             override fun openTermux() = true
             override fun openTermuxInstallPage() = true
+            override fun openTermuxAppSettings() = true
             override fun runCommand(command: TermuxCommand) = Result.success(Unit)
             override suspend fun runCommandForResult(
                 command: TermuxCommand,
@@ -77,5 +83,33 @@ class CodexBridgeLauncherTest {
         assertTrue(keyIndex >= 0)
         assertTrue(instanceKey.matches(Regex("[a-f0-9]{1,16}")))
         assertEquals("agentdeck-chat-$instanceKey", command.sessionName)
+    }
+
+    @Test
+    fun `stop targets only the validated app server instance`() {
+        var captured: TermuxCommand? = null
+        val gateway = object : TermuxGateway {
+            override fun isTermuxInstalled() = true
+            override fun hasRunCommandPermission() = true
+            override fun openTermux() = true
+            override fun openTermuxInstallPage() = true
+            override fun openTermuxAppSettings() = true
+            override fun runCommand(command: TermuxCommand): Result<Unit> {
+                captured = command
+                return Result.success(Unit)
+            }
+            override suspend fun runCommandForResult(
+                command: TermuxCommand,
+                timeoutMillis: Long,
+            ) = error("not used")
+        }
+
+        CodexBridgeLauncher(gateway).stop(
+            CodexBridgeEndpoint(48_123, "a".repeat(64), "abc123"),
+        ).getOrThrow()
+
+        val command = requireNotNull(captured)
+        assertEquals(listOf("--instance-key", "abc123", "--stop"), command.args)
+        assertEquals("agentdeck-chat-stop-abc123", command.sessionName)
     }
 }

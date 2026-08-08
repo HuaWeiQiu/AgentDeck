@@ -2,6 +2,29 @@
 
 All notable changes to AgentDeck are documented in this file.
 
+## 0.1.4 - 2026-08-09
+
+### Changed
+
+- Replaced the Python stdio relay with the official authenticated Codex app-server WebSocket transport on `127.0.0.1`.
+- Native chat now reports the Provider and model returned by the running CLI instead of presenting an unrelated local Profile as the active model.
+- Removed Profile selection from current conversation and settings surfaces; existing database records remain compatible and untouched.
+- Redesigned the transcript hierarchy: answers remain in the primary timeline, while consecutive reasoning and tool activity are grouped into a compact, expandable process row.
+
+### Fixed
+
+- Added an exact per-conversation supervisor lease that terminates its complete PRoot/app-server process tree on disconnect without killing unrelated Codex sessions.
+- Recovered from Codex's explicit active-writer error by discarding only the stale local thread mapping and starting a new thread.
+- Added a bounded Termux background-execution Doctor check and a direct Android settings action for OEM power restrictions.
+- Authentication checks now inspect existing Provider/API-key configuration before running the bounded `codex login status` probe.
+- Ubuntu setup installs and verifies `coreutils`, so timeout-bounded detection and authentication probes are available on fresh installations.
+- WebSocket connection, request, message-size, and event-queue failures now terminate visibly instead of hanging or silently dropping protocol events.
+- The message composer now follows Android IME insets, keeping typed content and the send/stop action visible above the keyboard.
+
+### Verified
+
+- On Android 16 / iQOO Neo8 with F-Droid Termux 0.119.0 beta: Doctor 8/8, existing DeepSeek Provider/model detection, history restore, a new native-chat response, and complete app-server tree cleanup after leaving the conversation.
+
 ## 0.1.3 - 2026-08-09
 
 ### Added

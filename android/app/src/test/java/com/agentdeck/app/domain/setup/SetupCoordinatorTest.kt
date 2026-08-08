@@ -100,7 +100,11 @@ class SetupCoordinatorTest {
         )
         assertEquals("bash", gateway.commands.single().args[5])
         assertEquals("-lc", gateway.commands.single().args[7])
-        assertTrue(gateway.commands.single().args.last().contains("codex login --with-api-key"))
+        val script = gateway.commands.single().args.last()
+        assertTrue(script.contains("codex login --with-api-key"))
+        assertTrue(script.contains("timeout --kill-after=1s 5s codex login status"))
+        assertTrue(script.indexOf("OPENAI_API_KEY") < script.indexOf("codex login status"))
+        assertTrue(script.indexOf("model_providers") < script.indexOf("codex login status"))
     }
 
     private fun reportWith(id: String, status: EnvironmentCheckStatus): EnvironmentReport =
@@ -154,6 +158,7 @@ class SetupCoordinatorTest {
             return true
         }
         override fun openTermuxInstallPage() = true
+        override fun openTermuxAppSettings() = true
         override fun runCommand(command: TermuxCommand): Result<Unit> {
             commands += command
             return Result.success(Unit)

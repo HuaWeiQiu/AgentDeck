@@ -1,60 +1,54 @@
 package com.agentdeck.app.data.chat
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
-import java.net.ServerSocket
-import java.util.concurrent.CompletableFuture
-import kotlin.concurrent.thread
 
 class CodexRpcClientTest {
     @Test
-    fun `client authenticates initializes and handles both inbound message types`() = runBlocking {
-        val token = "t".repeat(43)
-        val responseFuture = CompletableFuture<JSONObject>()
-        val server = ServerSocket(0)
-        val serverThread = thread(name = "fake-codex-app-server") {
-            server.use {
-                val connection = it.accept()
-                connection.use { socket ->
-                    val input = socket.getInputStream().bufferedReader()
-                    val output = socket.getOutputStream().bufferedWriter()
-                    assertEquals(token, JSONObject(input.readLine()).getString("token"))
-                    output.appendLine("""{"ok":true}""")
-                    output.flush()
+    fun `client initializes and handles both inbound message types over framed transport`() = runBlocking {
+        val transport = FakeTransport()
+        val response = CompletableDeferred<JSONObject>()
+        val client = CodexRpcClient(transport)
+        val server = launch {
+            val initialize = JSONObject(transport.sent.receive())
+            assertEquals("initialize", initialize.getString("method"))
+            assertEquals(
+                "agentdeck",
+                initialize.getJSONObject("params").getJSONObject("clientInfo").getString("name"),
+            )
+            transport.receive(
+                JSONObject()
+                    .put("id", initialize.getLong("id"))
+                    .put("result", JSONObject()),
+            )
 
-                    val initialize = JSONObject(input.readLine())
-                    assertEquals("initialize", initialize.getString("method"))
-                    assertEquals("agentdeck", initialize.getJSONObject("params")
-                        .getJSONObject("clientInfo").getString("name"))
-                    output.appendLine(
-                        JSONObject()
-                            .put("id", initialize.getLong("id"))
-                            .put("result", JSONObject())
-                            .toString(),
-                    )
-                    output.flush()
-
-                    assertEquals("initialized", JSONObject(input.readLine()).getString("method"))
-                    output.appendLine(
-                        """{"method":"item/agentMessage/delta","params":{"itemId":"i1","delta":"hi"}}""",
-                    )
-                    output.appendLine(
-                        """{"id":"approval-1","method":"item/fileChange/requestApproval","params":{"itemId":"i2"}}""",
-                    )
-                    output.flush()
-                    responseFuture.complete(JSONObject(input.readLine()))
-                }
-            }
+            assertEquals("initialized", JSONObject(transport.sent.receive()).getString("method"))
+            transport.receive(
+                JSONObject(
+                    """{"method":"item/agentMessage/delta","params":{"itemId":"i1","delta":"hi"}}""",
+                ),
+            )
+            transport.receive(
+                JSONObject(
+                    """{"id":"approval-1","method":"item/fileChange/requestApproval","params":{"itemId":"i2"}}""",
+                ),
+            )
+            response.complete(JSONObject(transport.sent.receive()))
         }
 
-        val client = CodexRpcClient.connect(CodexBridgeEndpoint(server.localPort, token))
         try {
-            client.initialize("0.1.3-test")
+            client.initialize("0.1.4-test")
             val notification = withTimeout(2_000) { client.events.first() }
             assertTrue(notification is CodexInbound.Notification)
             notification as CodexInbound.Notification
@@ -65,12 +59,65 @@ class CodexRpcClientTest {
             request as CodexInbound.ServerRequest
             client.respond(request.id, JSONObject().put("decision", "accept"))
 
-            val response = responseFuture.get()
-            assertEquals("approval-1", response.getString("id"))
-            assertEquals("accept", response.getJSONObject("result").getString("decision"))
+            val approval = response.await()
+            assertEquals("approval-1", approval.getString("id"))
+            assertEquals("accept", approval.getJSONObject("result").getString("decision"))
         } finally {
             client.close()
-            serverThread.join(2_000)
+            server.join()
+        }
+    }
+
+    @Test
+    fun `request timeout is a recoverable RPC error instead of coroutine cancellation`() = runBlocking {
+        val transport = FakeTransport()
+        val client = CodexRpcClient(transport)
+
+        try {
+            val requestReceived = launch {
+                assertEquals("turn/start", JSONObject(transport.sent.receive()).getString("method"))
+            }
+            try {
+                client.request("turn/start", timeoutMillis = 100)
+                fail("request should time out")
+            } catch (error: CodexRpcTimeoutException) {
+                assertEquals("turn/start", error.method)
+                assertEquals(100L, error.timeoutMillis)
+                assertTrue(error.message.orEmpty().contains("没有响应"))
+            }
+            requestReceived.join()
+            assertTrue("timeout must not cancel the caller", true)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun `websocket endpoint is loopback only and uses bearer capability token`() {
+        val token = "a".repeat(64)
+
+        val request = CodexRpcClient.endpointRequest(CodexBridgeEndpoint(48_123, token, "abc123"))
+
+        assertEquals("http", request.url.scheme)
+        assertEquals("127.0.0.1", request.url.host)
+        assertEquals(48_123, request.url.port)
+        assertEquals("Bearer $token", request.header("Authorization"))
+    }
+
+    private class FakeTransport : CodexRpcTransport {
+        private val incoming = Channel<CodexSocketEvent>(Channel.BUFFERED)
+        val sent = Channel<String>(Channel.BUFFERED)
+        override val events: Flow<CodexSocketEvent> = incoming.receiveAsFlow()
+
+        override fun send(text: String): Boolean = sent.trySend(text).isSuccess
+
+        suspend fun receive(payload: JSONObject) {
+            incoming.send(CodexSocketEvent.Text(payload.toString()))
+        }
+
+        override fun close() {
+            incoming.close()
+            sent.close()
         }
     }
 }

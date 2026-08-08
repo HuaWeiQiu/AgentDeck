@@ -21,6 +21,11 @@ data class ChatItem(
     val status: String? = null,
 )
 
+data class CodexRuntime(
+    val model: String,
+    val provider: String,
+)
+
 enum class ApprovalKind {
     COMMAND,
     FILE_CHANGE,
@@ -38,12 +43,16 @@ data class ChatApproval(
 data class ChatUiState(
     val card: AgentCard? = null,
     val isConnecting: Boolean = true,
+    val isConnected: Boolean = false,
     val isStreaming: Boolean = false,
+    val runtimeModel: String? = null,
+    val runtimeProvider: String? = null,
     val items: List<ChatItem> = emptyList(),
     val composer: String = "",
     val approval: ChatApproval? = null,
     val error: String? = null,
 ) {
     val canSend: Boolean
-        get() = !isConnecting && !isStreaming && composer.isNotBlank() && approval == null
+        get() = isConnected && !isConnecting && !isStreaming &&
+            composer.isNotBlank() && approval == null
 }

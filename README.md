@@ -2,19 +2,19 @@
 
 AgentDeck 是 Android 上聊天优先的本地 Codex 客户端。当前开发版本负责检查环境、一键安装受验证的 CLI，并通过官方 `codex app-server` 在 App 内呈现真实消息、工具活动、审批和停止；Termux/Ubuntu 承载运行时与官方认证，Codex TUI 保留为终端兜底。AgentDeck 不重写 Codex 的 Agent 循环，也不解析终端屏幕伪造消息。
 
-最新测试版为 [`v0.1.3`](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.3)。测试 APK 使用 debug 签名，不是正式签名的稳定版。`v0.1.0` 是早期骨架。
+最新测试版为 [`v0.1.4`](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.4)。测试 APK 使用 debug 签名，不是正式签名的稳定版。`v0.1.0` 是早期骨架。
 
 ## 当前能力
 
 - 对话作为首屏，整行进入由 Codex thread 支撑的原生聊天；右上角可打开同一工作区的 Termux TUI。
-- 通过稳定 stdio 协议桥接 `codex app-server`，支持历史恢复、Markdown、流式回复、停止、命令/文件审批和结构化工具活动。
-- 本地桥仅监听回环地址，每次启动生成一次性 token，并限制单客户端、消息大小和空闲时长。
+- 通过官方 `codex app-server` WebSocket，支持历史恢复、Markdown、流式回复、停止、命令/文件审批和结构化工具活动。
+- app-server 仅监听回环地址，每次启动生成一次性 capability token，并限制消息大小与连接生命周期。
 - 单一设置状态检测 Termux、权限、`allow-external-apps`、proot、Ubuntu、Codex、认证状态和全部 wrapper，并给出唯一下一步动作。
 - 严格解析 APK 内 YAML 配方，按依赖执行“探测、安装、再验证”。
 - 新安装固定使用 `ubuntu:24.04` 和 Codex CLI `0.147.0`。
 - Codex arm64/x86_64 官方二进制使用固定 SHA-256 校验。
-- 会话卡片支持新建、编辑、启停、删除和兼容 Profile 选择。
-- Profile 删除时保留卡片并自动解除绑定；数据库迁移不使用破坏性回退。
+- 会话卡片支持新建、编辑、启停和删除；原生聊天直接继承 Codex CLI 的本地 Provider 与模型配置。
+- 旧 Profile 数据继续兼容保留，数据库迁移不使用破坏性回退，但当前不会把它注入 Codex 配置。
 - API Key、OAuth token 和 CLI 登录信息始终由 CLI 自己管理。
 
 Claude Code 目前只是 P1 规划项，不提供安装或启动入口。Profile 绑定当前用于类型约束和本地引用，不会改写 Codex `config.toml`。
@@ -24,11 +24,11 @@ Claude Code 目前只是 P1 规划项，不提供安装或启动入口。Profile
 ```text
 AgentDeck
   -> native chat UI
-  -> authenticated 127.0.0.1 JSONL bridge
+  -> authenticated 127.0.0.1 WebSocket
 F-Droid Termux
-  -> fixed codex-app-server-start.sh + argv
+  -> fixed supervisor + codex-app-server-start.sh
 proot-distro ubuntu
-  -> codex app-server --listen stdio://
+  -> codex app-server --listen ws://127.0.0.1:0
 
 Terminal fallback
   -> codex-ubuntu.sh
@@ -88,9 +88,10 @@ AgentDeck/
 ## 发布状态
 
 - 早期骨架：[v0.1.0](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.0)
-- 测试预发布：[v0.1.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.2)（debug 签名）
+- 当前测试预发布：[v0.1.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.4)（debug 签名）
+- 历史测试预发布：[v0.1.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.3)、[v0.1.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.2)
 - 已知损坏版本：[v0.1.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.1)（新安装首次启动会崩溃）
-- 转为稳定版前的阻塞项：真实 Android + F-Droid Termux 安装、桥接、原生消息/审批、终端兜底和迁移验收；正式签名配置。
+- 转为稳定版前的阻塞项：更多 OEM/Android 版本、首次完整安装、审批、终端兜底和历史迁移验收；正式签名配置。
 
 ## 贡献与安全
 

@@ -190,6 +190,17 @@ private fun performPrimaryAction(
             }
         }
         SetupAction.GRANT_PERMISSION -> grantPermission()
+        SetupAction.ALLOW_TERMUX_BACKGROUND -> {
+            if (vm.openTermuxAppSettings()) {
+                Toast.makeText(
+                    context,
+                    "请进入耗电管理，允许 Termux 后台高耗电或设为不限制",
+                    Toast.LENGTH_LONG,
+                ).show()
+            } else {
+                Toast.makeText(context, "无法打开 Termux 应用设置", Toast.LENGTH_LONG).show()
+            }
+        }
         SetupAction.ENABLE_EXTERNAL_APPS -> {
             copy(context, vm.allowExternalAppsFixCommand())
             if (vm.openTermux()) {
@@ -229,6 +240,7 @@ private fun primaryActionLabel(
         SetupAction.SCAN -> "重新检测"
         SetupAction.INSTALL_TERMUX -> "安装 Termux"
         SetupAction.GRANT_PERMISSION -> "授予调用权限"
+        SetupAction.ALLOW_TERMUX_BACKGROUND -> "允许 Termux 后台运行"
         SetupAction.ENABLE_EXTERNAL_APPS -> "修复 Termux 集成"
         SetupAction.INSTALL_CODEX -> "安装、更新或修复 Codex"
         SetupAction.CONFIGURE_CODEX_AUTH -> "配置 Codex 认证"
@@ -240,6 +252,7 @@ private fun setupSummary(action: SetupAction): String = when (action) {
     SetupAction.SCAN -> "正在确认当前环境"
     SetupAction.INSTALL_TERMUX -> "需要先安装 F-Droid 版 Termux"
     SetupAction.GRANT_PERMISSION -> "需要允许 AgentDeck 调用 Termux"
+    SetupAction.ALLOW_TERMUX_BACKGROUND -> "系统正在限制 Termux 后台执行"
     SetupAction.ENABLE_EXTERNAL_APPS -> "需要在 Termux 中启用外部调用"
     SetupAction.INSTALL_CODEX -> "兼容版本会保留，旧版本和缺失组件将安全更新"
     SetupAction.CONFIGURE_CODEX_AUTH -> "未检测到可用账号或 API Key 配置"

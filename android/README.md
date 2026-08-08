@@ -35,7 +35,7 @@ cd android
 | 项目 | 值 |
 |---|---|
 | Debug application ID | `com.agentdeck.app.debug` |
-| 版本 | `0.1.3-debug`（`versionCode=4`） |
+| 版本 | `0.1.4-debug`（`versionCode=5`） |
 | APK | `app/build/outputs/apk/debug/app-debug.apk` |
 | Lint | `app/build/reports/lint-results-debug.html` |
 
@@ -44,7 +44,7 @@ cd android
 | 模块 | 责任 |
 |---|---|
 | `data/termux` | `RUN_COMMAND` Intent、命名会话和后台结果回调 |
-| `data/chat` | 本地桥启动、一次性 token 鉴权、双向 JSON-RPC 与对话/thread 映射 |
+| `data/chat` | 本地 app-server WebSocket 启动、一次性 token 鉴权、双向 JSON-RPC 与对话/thread 映射 |
 | `domain/env` | Doctor 固定探测协议与状态映射 |
 | `domain/setup` | 全局设置状态、唯一下一步动作和可恢复安装进度 |
 | `domain/chat` | Thread/Turn/Item 到移动聊天时间线的协议映射 |
@@ -52,7 +52,7 @@ cd android
 | `domain/launch` | CLI adapter、固定 executable 与 argv 生成 |
 | `domain/cards` | 卡片编辑规则和 Profile 类型约束 |
 | `data/db` | Room v3、Profile 外键和一次性初始化状态 |
-| `ui` | 对话列表、原生聊天、工具、CLI 配置和设置工作面 |
+| `ui` | 对话列表、原生聊天、工具和设置工作面 |
 
 ## 数据与凭据
 

@@ -8,6 +8,7 @@ enum class SetupAction {
     SCAN,
     INSTALL_TERMUX,
     GRANT_PERMISSION,
+    ALLOW_TERMUX_BACKGROUND,
     ENABLE_EXTERNAL_APPS,
     INSTALL_CODEX,
     CONFIGURE_CODEX_AUTH,
@@ -42,6 +43,11 @@ object SetupActionResolver {
 
         if (report.needsScan("termux_run_command_permission")) return SetupAction.SCAN
         if (!report.ready("termux_run_command_permission")) return SetupAction.GRANT_PERMISSION
+
+        if (report.needsScan("termux_background_execution")) return SetupAction.SCAN
+        if (!report.ready("termux_background_execution")) {
+            return SetupAction.ALLOW_TERMUX_BACKGROUND
+        }
 
         if (report.needsScan("allow_external_apps")) return SetupAction.SCAN
         if (!report.ready("allow_external_apps")) return SetupAction.ENABLE_EXTERNAL_APPS

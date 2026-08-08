@@ -1,0 +1,45 @@
+package com.agentdeck.app.ui.chat
+
+import com.agentdeck.app.domain.chat.ChatItem
+import com.agentdeck.app.domain.chat.ChatItemKind
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ChatTimelineTest {
+    @Test
+    fun `consecutive reasoning and tools collapse into one activity entry`() {
+        val timeline = groupChatTimeline(
+            listOf(
+                ChatItem("user", ChatItemKind.USER, "question"),
+                ChatItem("reason", ChatItemKind.REASONING, "checking"),
+                ChatItem("search-1", ChatItemKind.TOOL, "query", status = "webSearch"),
+                ChatItem("search-2", ChatItemKind.TOOL, "url", status = "webSearch"),
+                ChatItem("answer", ChatItemKind.ASSISTANT, "done"),
+            ),
+        )
+
+        assertEquals(3, timeline.size)
+        assertTrue(timeline[0] is ChatTimelineEntry.Message)
+        val activity = timeline[1] as ChatTimelineEntry.Activity
+        assertEquals(3, activity.items.size)
+        assertEquals("思考 1 · 网页搜索 2", activitySummary(activity.items))
+        assertTrue(timeline[2] is ChatTimelineEntry.Message)
+    }
+
+    @Test
+    fun `errors break activity groups`() {
+        val timeline = groupChatTimeline(
+            listOf(
+                ChatItem("command", ChatItemKind.COMMAND, "pwd"),
+                ChatItem("error", ChatItemKind.ERROR, "failed"),
+                ChatItem("file", ChatItemKind.FILE_CHANGE, "README.md"),
+            ),
+        )
+
+        assertEquals(3, timeline.size)
+        assertTrue(timeline[0] is ChatTimelineEntry.Activity)
+        assertTrue(timeline[1] is ChatTimelineEntry.Message)
+        assertTrue(timeline[2] is ChatTimelineEntry.Activity)
+    }
+}

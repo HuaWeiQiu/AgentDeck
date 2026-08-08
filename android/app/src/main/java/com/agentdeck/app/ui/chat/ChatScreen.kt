@@ -1,7 +1,9 @@
 package com.agentdeck.app.ui.chat
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,9 +24,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Terminal
@@ -32,10 +38,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -49,6 +57,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -78,6 +87,7 @@ fun ChatScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val timeline = remember(state.items) { groupChatTimeline(state.items) }
     var timelineWasEmpty by remember { mutableStateOf(true) }
 
     LaunchedEffect(
@@ -96,6 +106,7 @@ fun ChatScreen(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 navigationIcon = {
@@ -110,9 +121,13 @@ fun ChatScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        state.card?.workspacePath?.let { path ->
+                        val runtime = listOfNotNull(
+                            state.runtimeProvider,
+                            state.runtimeModel,
+                        ).joinToString(" · ").ifBlank { state.card?.workspacePath.orEmpty() }
+                        runtime.takeIf(String::isNotBlank)?.let { detail ->
                             Text(
-                                path,
+                                detail,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -143,6 +158,7 @@ fun ChatScreen(
         },
         bottomBar = {
             ChatBottomBar(
+                modifier = Modifier.imePadding(),
                 state = state,
                 onComposerChange = vm::updateComposer,
                 onSend = vm::send,
@@ -156,14 +172,9 @@ fun ChatScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            state.error?.let { error ->
-                item(key = "error") {
-                    ErrorBanner(error = error, onRetry = vm::connect)
-                }
-            }
             if (state.isConnecting && state.items.isEmpty()) {
                 item(key = "connecting") {
                     Row(
@@ -183,8 +194,16 @@ fun ChatScreen(
                     }
                 }
             }
-            items(state.items, key = { it.id }) { item ->
-                ChatTimelineItem(item)
+            items(timeline, key = { it.key }) { entry ->
+                when (entry) {
+                    is ChatTimelineEntry.Message -> ChatMessage(entry.item)
+                    is ChatTimelineEntry.Activity -> ActivityDisclosure(entry)
+                }
+            }
+            state.error?.let { error ->
+                item(key = "error") {
+                    ErrorBanner(error = error, onRetry = vm::connect)
+                }
             }
             if (state.isStreaming && state.items.lastOrNull()?.kind != ChatItemKind.ASSISTANT) {
                 item(key = "responding") {
@@ -213,7 +232,7 @@ private fun androidx.compose.foundation.lazy.LazyListState.isNearBottom(): Boole
 private const val AUTO_FOLLOW_THRESHOLD = 3
 
 @Composable
-private fun ChatTimelineItem(item: ChatItem) {
+private fun ChatMessage(item: ChatItem) {
     when (item.kind) {
         ChatItemKind.USER -> Row(
             modifier = Modifier.fillMaxWidth(),
@@ -233,105 +252,213 @@ private fun ChatTimelineItem(item: ChatItem) {
             }
         }
 
-        ChatItemKind.ASSISTANT -> Column(Modifier.fillMaxWidth()) {
-            Text(
-                "Codex",
-                style = MaterialTheme.typography.labelMedium,
+        ChatItemKind.ASSISTANT -> Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Surface(
+                modifier = Modifier.size(30.dp),
+                shape = RoundedCornerShape(6.dp),
                 color = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.height(4.dp))
-            Markdown(
-                content = item.text,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(17.dp),
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Codex",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(3.dp))
+                Markdown(
+                    content = item.text,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
-        ChatItemKind.REASONING -> ActivityRow(
-            icon = Icons.Filled.Psychology,
-            title = item.text,
-            status = "思考",
-        )
+        ChatItemKind.REASONING,
+        ChatItemKind.COMMAND,
+        ChatItemKind.FILE_CHANGE,
+        ChatItemKind.TOOL,
+        -> Unit
 
-        ChatItemKind.COMMAND -> ActivityRow(
-            icon = Icons.Filled.Code,
-            title = item.text,
-            detail = item.detail,
-            status = item.status,
-            monospace = true,
-        )
-
-        ChatItemKind.FILE_CHANGE -> ActivityRow(
-            icon = Icons.Filled.Description,
-            title = item.text,
-            status = item.status,
-        )
-
-        ChatItemKind.TOOL -> ActivityRow(
-            icon = Icons.Filled.Tune,
-            title = item.text,
-            detail = item.detail,
-            status = item.status,
-        )
-
-        ChatItemKind.ERROR -> ActivityRow(
-            icon = Icons.Filled.ErrorOutline,
-            title = item.text,
-            status = "错误",
-        )
+        ChatItemKind.ERROR -> Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.errorContainer,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(
+                    Icons.Filled.ErrorOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    item.text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun ActivityRow(
-    icon: ImageVector,
-    title: String,
-    detail: String? = null,
-    status: String? = null,
-    monospace: Boolean = false,
-) {
+private fun ActivityDisclosure(entry: ChatTimelineEntry.Activity) {
+    var expanded by rememberSaveable(entry.key) { mutableStateOf(false) }
+    val title = if (entry.items.all { it.kind == ChatItemKind.REASONING }) {
+        "思考过程"
+    } else {
+        "执行过程"
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
+        Column {
+            Row(
                 modifier = Modifier
-                    .padding(top = 1.dp)
-                    .size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
-                    ),
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (entry.items.all { it.kind == ChatItemKind.REASONING }) {
+                        Icons.Filled.Psychology
+                    } else {
+                        Icons.Filled.Tune
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                detail?.takeIf(String::isNotBlank)?.let {
-                    Spacer(Modifier.height(5.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.labelLarge)
                     Text(
-                        it,
+                        activitySummary(entry.items),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(
+                    if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight,
+                    contentDescription = if (expanded) "收起$title" else "展开$title",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    entry.items.forEachIndexed { index, item ->
+                        ActivityDetailRow(item)
+                        if (index != entry.items.lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = 40.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityDetailRow(item: ChatItem) {
+    val icon: ImageVector = when (item.kind) {
+        ChatItemKind.REASONING -> Icons.Filled.Psychology
+        ChatItemKind.COMMAND -> Icons.Filled.Code
+        ChatItemKind.FILE_CHANGE -> Icons.Filled.Description
+        else -> Icons.Filled.Tune
+    }
+    val label = when {
+        item.kind == ChatItemKind.REASONING -> "思考"
+        item.kind == ChatItemKind.COMMAND -> "命令"
+        item.kind == ChatItemKind.FILE_CHANGE -> "文件"
+        item.status == "webSearch" -> "网页搜索"
+        else -> "工具"
+    }
+    Row(
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                item.status
+                    ?.takeIf { it.isNotBlank() && it != "webSearch" }
+                    ?.let { status ->
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            status,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                item.text,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = if (item.kind == ChatItemKind.COMMAND) {
+                        FontFamily.Monospace
+                    } else {
+                        FontFamily.Default
+                    },
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = if (item.status == "webSearch") 3 else Int.MAX_VALUE,
+                overflow = TextOverflow.Ellipsis,
+            )
+            item.detail?.takeIf(String::isNotBlank)?.let { detail ->
+                Spacer(Modifier.height(5.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(6.dp),
+                ) {
+                    Text(
+                        detail,
+                        modifier = Modifier.padding(8.dp),
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 8,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-            }
-            status?.let {
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
@@ -367,6 +494,7 @@ private fun ErrorBanner(error: String, onRetry: () -> Unit) {
 
 @Composable
 private fun ChatBottomBar(
+    modifier: Modifier = Modifier,
     state: ChatUiState,
     onComposerChange: (String) -> Unit,
     onSend: () -> Unit,
@@ -374,6 +502,7 @@ private fun ChatBottomBar(
     onDecision: (String) -> Unit,
 ) {
     Surface(
+        modifier = modifier,
         tonalElevation = 3.dp,
         shadowElevation = 4.dp,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -400,6 +529,12 @@ private fun ChatBottomBar(
                     minLines = 1,
                     maxLines = 5,
                     shape = RoundedCornerShape(8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.16f),
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                    ),
                 )
                 Spacer(Modifier.width(8.dp))
                 FilledIconButton(

@@ -16,7 +16,7 @@ AgentDeck 的产品目标是移动端 Agent 对话入口，不只是安装器或
 
 | 项目 | 已核对的实现 | AgentDeck 吸收 | 不直接照搬 |
 |---|---|---|---|
-| [OpenAI Codex app-server](https://github.com/openai/codex/tree/main/codex-rs/app-server) | 官方以 Thread / Turn / Item 建模，通过双向 JSON-RPC 提供历史、流式 delta、工具事件、审批和中断；schema 可按已安装版本生成 | 原生聊天以 app-server 为唯一 Codex 语义来源，不解析 TUI 文本 | WebSocket transport 仍标记为实验性；不把无鉴权端口直接暴露给其它 Android App |
+| [OpenAI Codex app-server](https://github.com/openai/codex/tree/main/codex-rs/app-server) | 官方以 Thread / Turn / Item 建模，通过双向 JSON-RPC 提供历史、流式 delta、工具事件、审批和中断；固定版本支持 capability-token WebSocket | 原生聊天以 app-server 为唯一 Codex 语义来源，直接使用回环 WebSocket，不解析 TUI 文本 | 不把无鉴权端口直接暴露给其它 Android App；升级 CLI 前必须重新验证 schema 与 transport |
 | [codex-app-mobile](https://github.com/shuto-S/codex-app-mobile) | 移动端直接消费 app-server，将 workspace、thread、turn、审批和终端兜底分层；只有用户接近底部时才自动跟随流式内容；断开和 interrupt 都主动清理 active turn | 采用真实 turn 生命周期而非定时假进度；恢复历史与当前执行状态分开处理 | 其桌面/移动共享结构不是 Android + Termux 的现成 transport，不能直接复制运行层 |
 | [oc-remote](https://github.com/crim50n/oc-remote) | Android 通过 Termux 本地服务连接 Codex，并用前台服务维持运行 | 验证了“Termux 负责 runtime、App 负责会话 UI”的本地路线 | 在本轮 iQOO/Android 16 真机上，第三方拉起 Termux foreground service 受到系统限制，因此没有照搬该生命周期 |
 | [Happy](https://github.com/slopus/happy) | 会话、消息持久化、Agent 活动和移动输入器分层，强调恢复后继续同一任务 | 对话是持久实体，运行态必须从 Agent runtime 校正 | 不引入其远端同步、账号和 relay 基础设施 |
@@ -37,12 +37,13 @@ AgentDeck 的产品目标是移动端 Agent 对话入口，不只是安装器或
 
 ## 落地状态
 
-### 0.1.3 已实现
+### 0.1.4 已实现
 
 - 未就绪时先进入统一设置，环境完成后以“对话”为首屏；设置页只给出一个上下文主动作。
 - 会话采用聊天线程式整行入口，进入 app-server 原生 transcript，Termux/Codex TUI 作为明确的备用动作。
-- Termux 内的受管桥只监听回环地址，使用一次性高熵 token、单客户端、消息大小限制和空闲退出。
+- Termux supervisor 直接启动官方 app-server WebSocket，仅监听回环地址并使用一次性高熵 capability token；Android 端限制消息大小和队列，离开页面精确清理该实例进程树。
 - Android 端实现初始化、thread start/resume、turn start/interrupt、历史恢复、残留 turn 清理、事件 delta 和 command/file/permissions approval。
+- Doctor 用真实后台命令结果识别 OEM 对 Termux 的冻结，并提供系统设置入口；聊天页以 app-server 返回值显示实际 Provider 与模型。
 
 ### 后续差距
 

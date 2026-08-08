@@ -8,6 +8,18 @@ import org.junit.Test
 
 class CodexProtocolTest {
     @Test
+    fun `runtime model and provider come from app server response`() {
+        val runtime = CodexProtocol.runtime(
+            JSONObject()
+                .put("model", "deepseek-v4-flash")
+                .put("modelProvider", "deepseek"),
+        )
+
+        assertEquals("deepseek-v4-flash", runtime.model)
+        assertEquals("deepseek", runtime.provider)
+    }
+
+    @Test
     fun `thread history becomes ordered chat timeline`() {
         val response = JSONObject(
             """

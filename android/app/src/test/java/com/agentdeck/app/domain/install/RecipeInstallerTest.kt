@@ -156,6 +156,7 @@ class RecipeInstallerTest {
         override fun hasRunCommandPermission() = true
         override fun openTermux() = true
         override fun openTermuxInstallPage() = true
+        override fun openTermuxAppSettings() = true
         override fun runCommand(command: TermuxCommand) = Result.success(Unit)
 
         override suspend fun runCommandForResult(

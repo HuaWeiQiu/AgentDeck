@@ -63,7 +63,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.agentdeck.app.domain.cards.CardDraft
 import com.agentdeck.app.domain.launch.CliAdapterDescriptor
 import com.agentdeck.app.domain.model.AgentCard
-import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.setup.SetupAction
 import com.agentdeck.app.domain.setup.SetupState
 import kotlinx.coroutines.launch
@@ -76,7 +75,6 @@ fun SessionsScreen(
     vm: SessionsViewModel = viewModel(),
 ) {
     val cards by vm.cards.collectAsState()
-    val profiles by vm.profiles.collectAsState()
     val setupState by vm.setupState.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -123,12 +121,10 @@ fun SessionsScreen(
                 }
             }
             items(cards, key = { it.id }) { card ->
-                val profileName = profiles.firstOrNull { it.id == card.profileId }?.name ?: "未绑定配置"
                 val recipeAvailable = vm.isRecipeAvailable(card.recipeId)
                 AgentCardItem(
                     card = card,
                     cliName = vm.adapterDisplayName(card.recipeId),
-                    profileName = profileName,
                     recipeAvailable = recipeAvailable,
                     environmentReady = setupState.canStartChat,
                     onEnter = {
@@ -149,8 +145,6 @@ fun SessionsScreen(
         CardEditorDialog(
             initial = draft,
             adapters = vm.availableAdapters,
-            profiles = profiles,
-            compatibleProfiles = vm::compatibleProfiles,
             onDismiss = { editor = null },
             onSave = { next ->
                 scope.launch {
@@ -253,6 +247,7 @@ private fun setupBannerDetail(action: SetupAction): String = when (action) {
     SetupAction.SCAN -> "确认 Termux、Ubuntu 和 Codex 状态"
     SetupAction.INSTALL_TERMUX -> "需要安装 Termux"
     SetupAction.GRANT_PERMISSION -> "需要授予 Termux 调用权限"
+    SetupAction.ALLOW_TERMUX_BACKGROUND -> "需要允许 Termux 在后台持续运行"
     SetupAction.ENABLE_EXTERNAL_APPS -> "需要启用 Termux 外部调用"
     SetupAction.INSTALL_CODEX -> "需要安装、更新或修复 Codex 环境"
     SetupAction.CONFIGURE_CODEX_AUTH -> "需要登录账号或配置 API Key"
@@ -263,7 +258,6 @@ private fun setupBannerDetail(action: SetupAction): String = when (action) {
 private fun AgentCardItem(
     card: AgentCard,
     cliName: String,
-    profileName: String,
     recipeAvailable: Boolean,
     environmentReady: Boolean,
     onEnter: () -> Unit,
@@ -311,7 +305,7 @@ private fun AgentCardItem(
                 )
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    "$cliName · $profileName",
+                    "$cliName · 继承 CLI 本地配置",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -389,17 +383,12 @@ private fun AgentCardItem(
 private fun CardEditorDialog(
     initial: CardDraft,
     adapters: List<CliAdapterDescriptor>,
-    profiles: List<ProviderProfile>,
-    compatibleProfiles: (String, List<ProviderProfile>) -> List<ProviderProfile>,
     onDismiss: () -> Unit,
     onSave: (CardDraft) -> Unit,
 ) {
     var draft by remember(initial.id, initial.recipeId) { mutableStateOf(initial) }
     var cliExpanded by remember { mutableStateOf(false) }
-    var profileExpanded by remember { mutableStateOf(false) }
     val selectedAdapter = adapters.firstOrNull { it.recipeId == draft.recipeId }
-    val profileOptions = compatibleProfiles(draft.recipeId, profiles)
-    val selectedProfile = profileOptions.firstOrNull { it.id == draft.profileId }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -446,42 +435,6 @@ private fun CardEditorDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                ExposedDropdownMenuBox(
-                    expanded = profileExpanded,
-                    onExpandedChange = { profileExpanded = it },
-                ) {
-                    OutlinedTextField(
-                        value = selectedProfile?.name ?: "不绑定",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("CLI 配置") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(profileExpanded) },
-                        modifier = Modifier
-                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                            .fillMaxWidth(),
-                    )
-                    ExposedDropdownMenu(
-                        expanded = profileExpanded,
-                        onDismissRequest = { profileExpanded = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("不绑定") },
-                            onClick = {
-                                draft = draft.copy(profileId = null)
-                                profileExpanded = false
-                            },
-                        )
-                        profileOptions.forEach { profile ->
-                            DropdownMenuItem(
-                                text = { Text(profile.name) },
-                                onClick = {
-                                    draft = draft.copy(profileId = profile.id)
-                                    profileExpanded = false
-                                },
-                            )
-                        }
-                    }
-                }
                 OutlinedTextField(
                     value = draft.workspacePath,
                     onValueChange = { draft = draft.copy(workspacePath = it) },

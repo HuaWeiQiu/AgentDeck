@@ -116,6 +116,8 @@ class SetupCoordinator(
 
     fun openTermux(): Boolean = termux.openTermux()
 
+    fun openTermuxAppSettings(): Boolean = termux.openTermuxAppSettings()
+
     fun allowExternalAppsFixCommand(): String = scanner.allowExternalAppsFixCommand()
 
     fun startCodexAuthentication(): Result<Unit> {
@@ -168,8 +170,17 @@ class SetupCoordinator(
         private val CODEX_AUTH_SETUP_SCRIPT = """
             set +u
 
-            if codex login status >/dev/null 2>&1 ||
-              [[ -n "${'$'}{OPENAI_API_KEY:-}" || -n "${'$'}{CODEX_ACCESS_TOKEN:-}" ]]; then
+            auth_ready=0
+            if [[ -n "${'$'}{OPENAI_API_KEY:-}" || -n "${'$'}{CODEX_ACCESS_TOKEN:-}" ]]; then
+              auth_ready=1
+            elif command -v python3 >/dev/null 2>&1 &&
+              timeout --kill-after=1s 3s python3 -c 'import os,pathlib,tomllib; home=pathlib.Path(os.environ.get("CODEX_HOME", pathlib.Path.home() / ".codex")); path=home / "config.toml"; data=tomllib.loads(path.read_text()) if path.is_file() else {}; provider=str(data.get("model_provider", "openai")); info=data.get("model_providers", {}).get(provider, {}); env_key=info.get("env_key") if isinstance(info, dict) else None; ready=(isinstance(env_key, str) and bool(os.environ.get(env_key))) or (provider != "openai" and isinstance(info, dict) and bool(info) and not env_key and info.get("requires_openai_auth") is not True); raise SystemExit(0 if ready else 1)' 2>/dev/null; then
+              auth_ready=1
+            elif timeout --kill-after=1s 5s codex login status >/dev/null 2>&1; then
+              auth_ready=1
+            fi
+
+            if [[ "${'$'}auth_ready" -eq 1 ]]; then
               printf '\nCodex 已检测到可用认证，无需重复配置。\n'
               printf '返回 AgentDeck 后点击重新检测即可。\n'
               exec bash -l

@@ -18,6 +18,8 @@ class StoreViewModel : ViewModel() {
 
     fun openTermux(): Boolean = setup.openTermux()
 
+    fun openTermuxAppSettings(): Boolean = setup.openTermuxAppSettings()
+
     fun allowExternalAppsFixCommand(): String = setup.allowExternalAppsFixCommand()
 
     fun startCodexAuthentication(): Result<Unit> = setup.startCodexAuthentication()
