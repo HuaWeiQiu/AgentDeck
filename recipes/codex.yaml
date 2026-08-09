@@ -11,6 +11,7 @@ timeout_minutes: 30
 wrapper_asset: codex-ubuntu.sh
 additional_wrapper_assets:
   - codex-app-server-start.sh
+  - codex-provider-token.py
 install:
   runtime: termux
   script: |
@@ -135,16 +136,19 @@ verify:
     set -euo pipefail
     test -x "$HOME/.agentdeck/wrappers/codex-ubuntu.sh"
     test -x "$HOME/.agentdeck/wrappers/codex-app-server-start.sh"
+    test -x "$HOME/.agentdeck/wrappers/codex-provider-token.py"
     grep -Fq 'check_for_update_on_startup=false' "$HOME/.agentdeck/wrappers/codex-ubuntu.sh"
     grep -Fq -- '--sandbox danger-full-access' "$HOME/.agentdeck/wrappers/codex-ubuntu.sh"
-    grep -Fq -- '--ask-for-approval on-request' "$HOME/.agentdeck/wrappers/codex-ubuntu.sh"
+    grep -Fq -- '--ask-for-approval "$approval_policy"' "$HOME/.agentdeck/wrappers/codex-ubuntu.sh"
     grep -Fq -- '--instance-key' "$HOME/.agentdeck/wrappers/codex-app-server-start.sh"
-    grep -Fq 'START_CONTRACT_VERSION=6' "$HOME/.agentdeck/wrappers/codex-app-server-start.sh"
+    grep -Fq 'START_CONTRACT_VERSION=7' "$HOME/.agentdeck/wrappers/codex-app-server-start.sh"
+    grep -Fq 'api_key_b64' "$HOME/.agentdeck/wrappers/codex-provider-token.py"
     grep -Fq -- '--listen ws://127.0.0.1:0' "$HOME/.agentdeck/wrappers/codex-app-server-start.sh"
     grep -Fq -- '--ws-auth capability-token' "$HOME/.agentdeck/wrappers/codex-app-server-start.sh"
     grep -Fq -- '--ws-token-file' "$HOME/.agentdeck/wrappers/codex-app-server-start.sh"
     proot-distro login ubuntu -- /usr/bin/env bash -c '
       set -euo pipefail
       command -v codex >/dev/null
+      command -v python3 >/dev/null
       codex --version >/dev/null
     '

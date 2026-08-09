@@ -12,4 +12,6 @@ Include the affected version, Android/Termux versions, reproduction steps, impac
 
 ## Credential boundary
 
-AgentDeck does not accept, store, log, or pass API keys or OAuth tokens. Authentication belongs to each CLI. A report that finds credentials in AgentDeck preferences, Room tables, Intent extras, process arguments, or logs should be treated as a security issue.
+Existing CLI API keys, ChatGPT sessions, and OAuth tokens remain owned by each CLI; AgentDeck does not import or copy them. API keys that a user explicitly adds for a managed third-party Provider are encrypted with Android Keystore and stored only under `noBackupFilesDir`; Room stores an opaque credential reference. Codex receives a managed key on demand through the authenticated loopback `auth.command` broker described in ADR-0007.
+
+A report that finds plaintext credentials in AgentDeck preferences, Room tables, backups, Intent extras, process arguments, generated shell source, Codex config, Termux persistent files, or logs should be treated as a security issue. Reports should also cover broker access without the instance capability token, cross-Provider credential substitution, or continued broker access after the chat instance closes.

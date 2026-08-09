@@ -25,9 +25,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import com.agentdeck.app.domain.model.EnvironmentCheck
 import com.agentdeck.app.domain.model.EnvironmentCheckStatus
 import com.agentdeck.app.domain.model.EnvironmentReport
+import com.agentdeck.app.domain.setup.SetupAction
+import com.agentdeck.app.domain.setup.SetupState
 
 data class SetupDisplayStep(
     val id: String,
@@ -36,21 +37,114 @@ data class SetupDisplayStep(
     val detail: String,
 )
 
-fun primarySetupSteps(report: EnvironmentReport): List<SetupDisplayStep> {
-    val ubuntu = combinedStep(
-        id = "ubuntu_runtime",
-        label = "Ubuntu 24.04",
-        checks = listOfNotNull(report.check("proot_distro"), report.check("ubuntu_installed")),
+data class CustomerSetupPresentation(
+    val title: String,
+    val summary: String,
+    val primaryActionLabel: String,
+    val errorMessage: String?,
+)
+
+fun customerSetupPresentation(state: SetupState): CustomerSetupPresentation {
+    val title = when {
+        state.isScanning -> "正在检查设备"
+        state.isInstalling -> "正在准备 Codex"
+        state.error != null -> "准备未完成"
+        state.action == SetupAction.READY -> "一切就绪"
+        state.action == SetupAction.CONFIGURE_CODEX_AUTH -> "连接模型服务"
+        state.action == SetupAction.INSTALL_CODEX -> "准备 Codex"
+        else -> "完成设备准备"
+    }
+    val summary = when {
+        state.isScanning -> "正在确认本机运行环境和模型连接"
+        state.isInstalling -> "正在安装并验证所需组件"
+        else -> when (state.action) {
+            SetupAction.SCAN -> "正在确认本机运行环境和模型连接"
+            SetupAction.INSTALL_TERMUX -> "当前版本需要安装一个本机运行组件"
+            SetupAction.GRANT_PERMISSION -> "允许 AgentDeck 在本机运行 Codex"
+            SetupAction.ALLOW_TERMUX_BACKGROUND -> "系统限制了后台任务，请调整运行权限"
+            SetupAction.ENABLE_EXTERNAL_APPS -> "完成运行组件设置后即可继续"
+            SetupAction.INSTALL_CODEX -> "将安装或修复所需组件，不会删除对话和项目"
+            SetupAction.CONFIGURE_CODEX_AUTH -> "尚未检测到可用账号或 API Key"
+            SetupAction.UNSUPPORTED_DEVICE -> "当前测试版仅支持 ARM64 Android 设备"
+            SetupAction.READY -> "可以开始新的对话"
+        }
+    }
+    val primaryActionLabel = when {
+        state.isScanning -> "检查中"
+        state.isInstalling -> "准备中"
+        else -> when (state.action) {
+            SetupAction.SCAN -> "重新检查"
+            SetupAction.INSTALL_TERMUX -> "安装运行组件"
+            SetupAction.GRANT_PERMISSION -> "允许本机运行"
+            SetupAction.ALLOW_TERMUX_BACKGROUND -> "调整后台限制"
+            SetupAction.ENABLE_EXTERNAL_APPS -> "完成组件设置"
+            SetupAction.INSTALL_CODEX -> "安装或修复"
+            SetupAction.CONFIGURE_CODEX_AUTH -> "连接模型服务"
+            SetupAction.UNSUPPORTED_DEVICE -> "设备不支持"
+            SetupAction.READY -> "开始对话"
+        }
+    }
+    return CustomerSetupPresentation(
+        title = title,
+        summary = summary,
+        primaryActionLabel = primaryActionLabel,
+        errorMessage = state.error?.let {
+            "未能完成当前步骤。请重试；现有对话和项目不会受到影响。"
+        },
     )
+}
+
+fun customerSetupSteps(report: EnvironmentReport): List<SetupDisplayStep> {
+    if (report.check("embedded_supported") != null) {
+        return listOf(
+            report.combinedStep(
+                id = "device_ready",
+                label = "设备准备",
+                checkIds = listOf("embedded_supported"),
+            ),
+            report.combinedStep(
+                id = "local_runtime",
+                label = "本机运行环境",
+                checkIds = listOf("embedded_runtime", "ubuntu_installed", "embedded_tools"),
+            ),
+            report.combinedStep(
+                id = "agent_ready",
+                label = "Codex",
+                checkIds = listOf("codex_installed", "codex_wrapper"),
+            ),
+            report.combinedStep(
+                id = "model_connection",
+                label = "模型连接",
+                checkIds = listOf("codex_authenticated"),
+            ),
+        )
+    }
     return listOf(
-        report.display("termux_installed", "Termux"),
-        report.display("termux_run_command_permission", "调用权限"),
-        report.display("termux_background_execution", "后台运行"),
-        report.display("allow_external_apps", "Termux 集成"),
-        ubuntu,
-        report.display("codex_installed", "Codex CLI"),
-        report.display("codex_authenticated", "Codex 认证"),
-        report.display("codex_wrapper", "启动组件"),
+        report.combinedStep(
+            id = "device_ready",
+            label = "设备准备",
+            checkIds = listOf(
+                "termux_installed",
+                "termux_run_command_permission",
+                "termux_background_execution",
+                "allow_external_apps",
+            ),
+        ),
+        report.combinedStep(
+            id = "local_runtime",
+            label = "本机运行环境",
+            checkIds = listOf("proot_distro", "ubuntu_installed"),
+        ),
+        report.combinedStep(
+            id = "agent_ready",
+            label = "Codex",
+            checkIds = listOf("codex_installed", "codex_wrapper"),
+        ),
+        report.combinedStep(
+            id = "model_connection",
+            label = "模型连接",
+            checkIds = listOf("codex_authenticated"),
+        ),
     )
 }
 
@@ -153,36 +247,34 @@ private fun statusAppearance(status: EnvironmentCheckStatus): StatusAppearance =
     )
 }
 
-private fun EnvironmentReport.display(id: String, label: String): SetupDisplayStep {
-    val check = check(id)
+private fun EnvironmentReport.combinedStep(
+    id: String,
+    label: String,
+    checkIds: List<String>,
+): SetupDisplayStep {
+    val checks = checkIds.map { checkId -> check(checkId) }
+    val missingCheck = checks.any { it == null }
+    val firstIncomplete = checks.filterNotNull().firstOrNull { !it.ok }
+    val status = when {
+        missingCheck -> EnvironmentCheckStatus.ERROR
+        firstIncomplete != null -> firstIncomplete.status
+        else -> EnvironmentCheckStatus.READY
+    }
     return SetupDisplayStep(
         id = id,
         label = label,
-        status = check?.status ?: EnvironmentCheckStatus.ERROR,
-        detail = check?.detail ?: "未返回检查结果",
+        status = status,
+        detail = customerStatusDetail(status),
     )
 }
 
-private fun combinedStep(
-    id: String,
-    label: String,
-    checks: List<EnvironmentCheck>,
-): SetupDisplayStep {
-    val firstIncomplete = checks.firstOrNull { !it.ok }
-    return SetupDisplayStep(
-        id = id,
-        label = label,
-        status = when {
-            checks.isEmpty() -> EnvironmentCheckStatus.ERROR
-            firstIncomplete != null -> firstIncomplete.status
-            else -> EnvironmentCheckStatus.READY
-        },
-        detail = when {
-            checks.isEmpty() -> "未返回 Ubuntu 检查结果"
-            firstIncomplete != null -> firstIncomplete.detail
-            else -> checks.last().detail
-        },
-    )
+private fun customerStatusDetail(status: EnvironmentCheckStatus): String = when (status) {
+    EnvironmentCheckStatus.UNKNOWN -> "等待检查"
+    EnvironmentCheckStatus.CHECKING -> "正在检查"
+    EnvironmentCheckStatus.READY -> "已完成"
+    EnvironmentCheckStatus.ACTION_REQUIRED -> "需要完成此步骤"
+    EnvironmentCheckStatus.BLOCKED -> "等待前一步完成"
+    EnvironmentCheckStatus.ERROR -> "暂时无法完成检查"
 }
 
 private data class StatusAppearance(

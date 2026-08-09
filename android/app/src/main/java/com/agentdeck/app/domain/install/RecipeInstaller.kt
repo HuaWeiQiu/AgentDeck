@@ -1,18 +1,23 @@
 package com.agentdeck.app.domain.install
 
 import android.annotation.SuppressLint
-import com.agentdeck.app.data.termux.TermuxCommand
-import com.agentdeck.app.data.termux.TermuxCommandResult
-import com.agentdeck.app.data.termux.TermuxGateway
 import com.agentdeck.app.domain.model.AgentRecipe
 import com.agentdeck.app.domain.model.RecipeCommand
 import com.agentdeck.app.domain.model.RecipeRuntime
 import com.agentdeck.app.domain.recipe.RecipeCatalog
 import com.agentdeck.app.domain.recipe.RecipeDependencyResolver
+import com.agentdeck.app.domain.runtime.AgentRuntime
+import com.agentdeck.app.domain.runtime.RuntimeCommand
+import com.agentdeck.app.domain.runtime.RuntimeCommandResult
+import com.agentdeck.app.domain.runtime.RuntimeKind
+import com.agentdeck.app.domain.runtime.RuntimeProgram
 
 enum class InstallPhase {
     PROBING,
+    DOWNLOADING,
+    EXTRACTING,
     INSTALLING,
+    INSTALLING_TOOLS,
     VERIFYING,
     COMPLETE,
 }
@@ -33,7 +38,7 @@ interface RecipeInstallation {
 }
 
 internal object RecipeInstallResultInterpreter {
-    fun interpret(result: TermuxCommandResult): Result<String> {
+    fun interpret(result: RuntimeCommandResult): Result<String> {
         if (!result.commandSucceeded) {
             val detail = result.stderr.ifBlank { result.stdout }
                 .trim()
@@ -59,7 +64,7 @@ internal object RecipeInstallResultInterpreter {
 
 @SuppressLint("SdCardPath")
 class RecipeInstaller(
-    private val termux: TermuxGateway,
+    private val runtime: AgentRuntime,
     private val recipes: RecipeCatalog,
 ) : RecipeInstallation {
     override suspend fun install(
@@ -134,16 +139,17 @@ class RecipeInstaller(
         command: RecipeCommand,
         purpose: String,
         timeoutMillis: Long,
-    ): Result<TermuxCommandResult> {
+    ): Result<RuntimeCommandResult> {
         require(command.runtime == RecipeRuntime.TERMUX) { "不支持的配方 runtime" }
-        val termuxCommand = TermuxCommand(
-            sessionName = sessionName(recipe.id, purpose),
-            executable = TERMUX_BASH,
-            args = listOf("-c", command.script),
+        require(runtime.kind == RuntimeKind.TERMUX_COMPATIBILITY) { "配方仅支持 Termux 兼容运行环境" }
+        val runtimeCommand = RuntimeCommand(
+            instanceId = sessionName(recipe.id, purpose),
+            program = RuntimeProgram.HOST_SHELL,
+            script = command.script,
             background = true,
-            reuseExistingSession = false,
+            reuseExistingInstance = false,
         )
-        return termux.runCommandForResult(termuxCommand, timeoutMillis)
+        return runtime.runCommandForResult(runtimeCommand, timeoutMillis)
     }
 
     private fun buildInstallScript(recipe: AgentRecipe, script: String): Result<String> = runCatching {
@@ -234,7 +240,6 @@ class RecipeInstaller(
     }
 
     companion object {
-        private const val TERMUX_BASH = "/data/data/com.termux/files/usr/bin/bash"
         private const val VERIFY_TIMEOUT_MILLIS = 2 * 60 * 1_000L
         private const val MAX_SESSION_NAME_LENGTH = 64
         private const val WRAPPER_HEREDOC_MARKER = "AGENTDECK_WRAPPER_EOF"

@@ -49,7 +49,7 @@ class RecipeParserTest {
         assertEquals(30, codex.timeoutMinutes)
         assertEquals("codex-ubuntu.sh", codex.wrapperAsset)
         assertEquals(
-            listOf("codex-app-server-start.sh"),
+            listOf("codex-app-server-start.sh", "codex-provider-token.py"),
             codex.additionalWrapperAssets,
         )
         assertTrue(codex.description.contains("版本过低时安装"))
@@ -73,7 +73,7 @@ class RecipeParserTest {
         assertTrue(verifyScript.contains("check_for_update_on_startup=false"))
         assertTrue(verifyScript.contains("--listen ws://127.0.0.1:0"))
         assertTrue(verifyScript.contains("--ws-auth capability-token"))
-        assertTrue(verifyScript.contains("START_CONTRACT_VERSION=6"))
+        assertTrue(verifyScript.contains("START_CONTRACT_VERSION=7"))
         assertFalse(verifyScript.contains("0[.]147[.]0"))
         assertFalse(script.contains("npm install"))
     }

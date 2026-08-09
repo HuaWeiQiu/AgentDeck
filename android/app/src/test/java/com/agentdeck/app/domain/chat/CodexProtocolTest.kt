@@ -1,5 +1,6 @@
 package com.agentdeck.app.domain.chat
 
+import com.agentdeck.app.domain.model.CodexPermissionLevel
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -93,19 +94,46 @@ class CodexProtocolTest {
     }
 
     @Test
-    fun `proot runtime disables nested sandbox while keeping approvals`() {
+    fun `recommended proot runtime asks before unsafe operations`() {
         val started = CodexProtocol.threadStartParams("/root/project")
         val resumed = CodexProtocol.threadResumeParams("thread-1", "/root/project")
         val turn = CodexProtocol.turnStartParams("thread-1", "hello")
 
         assertEquals("read-only", started.getString("sandbox"))
-        assertEquals("on-request", started.getString("approvalPolicy"))
+        assertEquals("untrusted", started.getString("approvalPolicy"))
         assertEquals("thread-1", resumed.getString("threadId"))
         assertEquals("/root/project", resumed.getString("cwd"))
         assertEquals("externalSandbox", turn.getJSONObject("sandboxPolicy").getString("type"))
         assertEquals("enabled", turn.getJSONObject("sandboxPolicy").getString("networkAccess"))
-        assertEquals("on-request", turn.getString("approvalPolicy"))
+        assertEquals("untrusted", turn.getString("approvalPolicy"))
         assertEquals("hello", turn.getJSONArray("input").getJSONObject(0).getString("text"))
+    }
+
+    @Test
+    fun `permission levels map to enforced app server policies`() {
+        val readOnly = CodexProtocol.turnStartParams(
+            "thread-1",
+            "inspect",
+            CodexPermissionLevel.READ_ONLY,
+        )
+        val askFirst = CodexProtocol.turnStartParams(
+            "thread-1",
+            "edit",
+            CodexPermissionLevel.ASK_FIRST,
+        )
+        val fullAccess = CodexProtocol.turnStartParams(
+            "thread-1",
+            "edit",
+            CodexPermissionLevel.FULL_ACCESS,
+        )
+
+        assertEquals("untrusted", readOnly.getString("approvalPolicy"))
+        assertEquals("untrusted", askFirst.getString("approvalPolicy"))
+        assertEquals("never", fullAccess.getString("approvalPolicy"))
+        assertEquals("externalSandbox", readOnly.getJSONObject("sandboxPolicy").getString("type"))
+        assertEquals(true, CodexProtocol.shouldAutoDecline(CodexPermissionLevel.READ_ONLY))
+        assertEquals(false, CodexProtocol.shouldAutoDecline(CodexPermissionLevel.ASK_FIRST))
+        assertEquals(false, CodexProtocol.shouldAutoDecline(CodexPermissionLevel.FULL_ACCESS))
     }
 
     @Test

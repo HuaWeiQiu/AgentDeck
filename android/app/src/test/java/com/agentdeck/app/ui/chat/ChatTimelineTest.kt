@@ -42,4 +42,25 @@ class ChatTimelineTest {
         assertTrue(timeline[1] is ChatTimelineEntry.Message)
         assertTrue(timeline[2] is ChatTimelineEntry.Activity)
     }
+
+    @Test
+    fun `standard activity summary hides technical event counts`() {
+        val items = listOf(
+            ChatItem("reason", ChatItemKind.REASONING, "checking"),
+            ChatItem("command", ChatItemKind.COMMAND, "pwd"),
+        )
+
+        assertEquals("已完成 2 项操作，需要时可展开查看", activitySummary(items, false))
+        assertEquals("思考 1 · 命令 1", activitySummary(items, true))
+    }
+
+    @Test
+    fun `standard activity details hide raw reasoning but preserve commands`() {
+        val reasoning = ChatItem("reason", ChatItemKind.REASONING, "raw internal reasoning")
+        val command = ChatItem("command", ChatItemKind.COMMAND, "pwd")
+
+        assertEquals("已完成必要的分析", activityDetailText(reasoning, false))
+        assertEquals("raw internal reasoning", activityDetailText(reasoning, true))
+        assertEquals("pwd", activityDetailText(command, false))
+    }
 }

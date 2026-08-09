@@ -1,12 +1,17 @@
 package com.agentdeck.app.data.db
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.agentdeck.app.domain.model.AgentCard
+import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.PathNamespace
 import com.agentdeck.app.domain.model.ProviderProfile
+import com.agentdeck.app.domain.model.ProviderAdapterId
+import com.agentdeck.app.domain.model.ProviderConnectionStatus
+import com.agentdeck.app.domain.model.ProviderModel
 import com.agentdeck.app.domain.model.ProviderType
 
 @Entity(tableName = "app_metadata")
@@ -22,7 +27,12 @@ data class ProviderProfileEntity(
     val type: String,
     val baseUrl: String,
     val defaultModel: String,
+    @ColumnInfo(defaultValue = "'OPENAI_RESPONSES'") val adapterId: String,
+    val credentialRef: String?,
+    @ColumnInfo(defaultValue = "'UNVERIFIED'") val connectionStatus: String,
+    val lastCheckedAtEpochMs: Long?,
     val createdAtEpochMs: Long,
+    @ColumnInfo(defaultValue = "0") val updatedAtEpochMs: Long,
 ) {
     fun toDomain(): ProviderProfile = ProviderProfile(
         id = id,
@@ -30,7 +40,12 @@ data class ProviderProfileEntity(
         type = ProviderType.valueOf(type),
         baseUrl = baseUrl,
         defaultModel = defaultModel,
+        adapterId = ProviderAdapterId.valueOf(adapterId),
+        credentialRef = credentialRef,
+        connectionStatus = ProviderConnectionStatus.valueOf(connectionStatus),
+        lastCheckedAtEpochMs = lastCheckedAtEpochMs,
         createdAtEpochMs = createdAtEpochMs,
+        updatedAtEpochMs = updatedAtEpochMs,
     )
 
     companion object {
@@ -40,7 +55,48 @@ data class ProviderProfileEntity(
             type = domain.type.name,
             baseUrl = domain.baseUrl,
             defaultModel = domain.defaultModel,
+            adapterId = domain.adapterId.name,
+            credentialRef = domain.credentialRef,
+            connectionStatus = domain.connectionStatus.name,
+            lastCheckedAtEpochMs = domain.lastCheckedAtEpochMs,
             createdAtEpochMs = domain.createdAtEpochMs,
+            updatedAtEpochMs = domain.updatedAtEpochMs,
+        )
+    }
+}
+
+@Entity(
+    tableName = "provider_models",
+    primaryKeys = ["providerId", "modelId"],
+    foreignKeys = [
+        ForeignKey(
+            entity = ProviderProfileEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["providerId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("providerId")],
+)
+data class ProviderModelEntity(
+    val providerId: String,
+    val modelId: String,
+    val displayName: String,
+    val discoveredAtEpochMs: Long,
+) {
+    fun toDomain() = ProviderModel(
+        providerId = providerId,
+        id = modelId,
+        displayName = displayName,
+        discoveredAtEpochMs = discoveredAtEpochMs,
+    )
+
+    companion object {
+        fun from(domain: ProviderModel) = ProviderModelEntity(
+            providerId = domain.providerId,
+            modelId = domain.id,
+            displayName = domain.displayName,
+            discoveredAtEpochMs = domain.discoveredAtEpochMs,
         )
     }
 }
@@ -64,6 +120,8 @@ data class AgentCardEntity(
     val recipeId: String,
     val templateId: String,
     val profileId: String?,
+    val modelId: String?,
+    val permissionLevel: String?,
     val termuxSessionName: String,
     val workspaceNamespace: String,
     val workspacePath: String,
@@ -79,6 +137,8 @@ data class AgentCardEntity(
         recipeId = recipeId,
         templateId = templateId,
         profileId = profileId,
+        modelId = modelId,
+        permissionLevel = CodexPermissionLevel.overrideFromStorage(permissionLevel),
         termuxSessionName = termuxSessionName,
         workspaceNamespace = PathNamespace.valueOf(workspaceNamespace),
         workspacePath = workspacePath,
@@ -96,6 +156,8 @@ data class AgentCardEntity(
             recipeId = domain.recipeId,
             templateId = domain.templateId,
             profileId = domain.profileId,
+            modelId = domain.modelId,
+            permissionLevel = domain.permissionLevel?.name,
             termuxSessionName = domain.termuxSessionName,
             workspaceNamespace = domain.workspaceNamespace.name,
             workspacePath = domain.workspacePath,

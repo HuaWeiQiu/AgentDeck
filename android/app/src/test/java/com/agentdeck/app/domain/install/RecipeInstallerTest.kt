@@ -3,6 +3,7 @@ package com.agentdeck.app.domain.install
 import com.agentdeck.app.data.termux.TermuxCommand
 import com.agentdeck.app.data.termux.TermuxCommandResult
 import com.agentdeck.app.data.termux.TermuxGateway
+import com.agentdeck.app.data.runtime.TermuxRuntime
 import com.agentdeck.app.domain.model.AgentRecipe
 import com.agentdeck.app.domain.model.RecipeCommand
 import com.agentdeck.app.domain.model.RecipeRuntime
@@ -32,7 +33,7 @@ class RecipeInstallerTest {
         )
 
         val progress = mutableListOf<RecipeInstallProgress>()
-        val result = RecipeInstaller(gateway, catalog).install("target", progress::add)
+        val result = RecipeInstaller(TermuxRuntime(gateway), catalog).install("target", progress::add)
 
         assertEquals("target 已可用并验证", result.getOrThrow())
         assertEquals(6, gateway.commands.size)
@@ -68,7 +69,7 @@ class RecipeInstallerTest {
         val gateway = FakeTermuxGateway(ArrayDeque(listOf(exit(0), exit(0))))
         val catalog = FakeRecipeCatalog(listOf(recipe("base"), recipe("target", listOf("base"))))
 
-        val result = RecipeInstaller(gateway, catalog).install("target")
+        val result = RecipeInstaller(TermuxRuntime(gateway), catalog).install("target")
 
         assertTrue(result.isSuccess)
         assertEquals(2, gateway.commands.size)
@@ -81,7 +82,7 @@ class RecipeInstallerTest {
         val progress = mutableListOf<RecipeInstallProgress>()
 
         val result = RecipeInstaller(
-            gateway,
+            TermuxRuntime(gateway),
             FakeRecipeCatalog(listOf(recipe("target"))),
         ).install("target", progress::add)
 
@@ -97,7 +98,7 @@ class RecipeInstallerTest {
         val gateway = FakeTermuxGateway(ArrayDeque(listOf(exit(1), exit(0), exit(7, "wrong version"))))
         val catalog = FakeRecipeCatalog(listOf(recipe("target")))
 
-        val result = RecipeInstaller(gateway, catalog).install("target")
+        val result = RecipeInstaller(TermuxRuntime(gateway), catalog).install("target")
 
         assertTrue(result.isFailure)
         assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("安装后验证失败"))
@@ -108,7 +109,7 @@ class RecipeInstallerTest {
         val gateway = FakeTermuxGateway(ArrayDeque())
         val catalog = FakeRecipeCatalog(listOf(recipe("planned", available = false)))
 
-        val result = RecipeInstaller(gateway, catalog).install("planned")
+        val result = RecipeInstaller(TermuxRuntime(gateway), catalog).install("planned")
 
         assertTrue(result.isFailure)
         assertFalse(gateway.commands.isNotEmpty())

@@ -3,6 +3,7 @@ package com.agentdeck.app.ui.store
 import androidx.lifecycle.ViewModel
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.setup.SetupState
+import com.agentdeck.app.domain.runtime.RuntimeKind
 import kotlinx.coroutines.flow.StateFlow
 
 class StoreViewModel : ViewModel() {
@@ -23,4 +24,7 @@ class StoreViewModel : ViewModel() {
     fun allowExternalAppsFixCommand(): String = setup.allowExternalAppsFixCommand()
 
     fun startCodexAuthentication(): Result<Unit> = setup.startCodexAuthentication()
+
+    fun usesEmbeddedRuntime(): Boolean =
+        ServiceLocator.runtime.kind == RuntimeKind.EMBEDDED_PROOT
 }

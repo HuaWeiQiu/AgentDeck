@@ -1,6 +1,6 @@
 # Contributing
 
-AgentDeck is an Android launcher for real CLI sessions running in F-Droid Termux. It does not implement an agent loop or an in-app terminal.
+AgentDeck is an Android client for real local agent CLI sessions. The 0.1.x compatibility runtime uses F-Droid Termux; the target runtime is an app-private embedded Linux environment behind the `AgentRuntime` boundary. AgentDeck does not implement its own agent loop.
 
 ## Development
 
@@ -14,8 +14,11 @@ This command verifies packaged recipe/wrapper synchronization, runs JVM tests, b
 
 ## Change rules
 
-- Keep secrets inside the CLI authentication flow. Never add API keys or OAuth tokens to Room, SharedPreferences, Intents, argv, shell source, or logs.
+- Keep existing CLI/OAuth secrets inside the CLI authentication flow. Managed third-party API keys may only use the ADR-0007 Keystore vault and authenticated `auth.command` broker; never add secrets to Room, SharedPreferences, Intents, argv, shell source, Codex config, Termux files, or logs.
 - Keep dynamic launch values as argv passed to a fixed executable.
+- Keep UI and domain code behind `AgentRuntime`; do not add new direct `TermuxGateway` dependencies outside the compatibility backend.
+- Keep standard-mode copy free of Runtime implementation terms. Put raw commands, ports, process data, and protocol logs behind advanced or developer surfaces.
+- Developer diagnostics must be bounded and redact credentials, capability tokens, auth files, and user message content by default.
 - Add or update a strict packaged recipe and its tests when installation behavior changes.
 - Add a `CliAdapter` before exposing a new CLI as available.
 - Preserve Room migrations and user data; never use destructive fallback migration.

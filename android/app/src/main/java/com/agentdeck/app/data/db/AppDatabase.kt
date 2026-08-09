@@ -11,14 +11,16 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         AppMetadataEntity::class,
         ProviderProfileEntity::class,
+        ProviderModelEntity::class,
         AgentCardEntity::class,
     ],
-    version = 3,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun appMetadataDao(): AppMetadataDao
     abstract fun providerProfileDao(): ProviderProfileDao
+    abstract fun providerModelDao(): ProviderModelDao
     abstract fun agentCardDao(): AgentCardDao
 
     companion object {
@@ -31,7 +33,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "agentdeck.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }
@@ -126,6 +128,59 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "INSERT INTO app_metadata (`key`, value) VALUES ('initial_seed_completed', 'true')",
                 )
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE provider_profiles ADD COLUMN adapterId TEXT NOT NULL " +
+                        "DEFAULT 'OPENAI_RESPONSES'",
+                )
+                db.execSQL(
+                    "ALTER TABLE provider_profiles ADD COLUMN credentialRef TEXT",
+                )
+                db.execSQL(
+                    "ALTER TABLE provider_profiles ADD COLUMN connectionStatus TEXT NOT NULL " +
+                        "DEFAULT 'UNVERIFIED'",
+                )
+                db.execSQL(
+                    "ALTER TABLE provider_profiles ADD COLUMN lastCheckedAtEpochMs INTEGER",
+                )
+                db.execSQL(
+                    "ALTER TABLE provider_profiles ADD COLUMN updatedAtEpochMs INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "UPDATE provider_profiles SET updatedAtEpochMs = createdAtEpochMs",
+                )
+                db.execSQL(
+                    "UPDATE provider_profiles SET adapterId = 'ANTHROPIC', " +
+                        "connectionStatus = 'UNSUPPORTED' WHERE type = 'ANTHROPIC'",
+                )
+                db.execSQL(
+                    "ALTER TABLE agent_cards ADD COLUMN modelId TEXT",
+                )
+                db.execSQL("UPDATE agent_cards SET profileId = NULL, modelId = NULL")
+                db.execSQL(
+                    """
+                    CREATE TABLE provider_models (
+                        providerId TEXT NOT NULL,
+                        modelId TEXT NOT NULL,
+                        displayName TEXT NOT NULL,
+                        discoveredAtEpochMs INTEGER NOT NULL,
+                        PRIMARY KEY(providerId, modelId),
+                        FOREIGN KEY(providerId) REFERENCES provider_profiles(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX index_provider_models_providerId ON provider_models(providerId)")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE agent_cards ADD COLUMN permissionLevel TEXT")
             }
         }
     }

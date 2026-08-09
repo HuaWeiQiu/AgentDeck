@@ -3,6 +3,7 @@ package com.agentdeck.app.domain.env
 import com.agentdeck.app.data.termux.TermuxCommand
 import com.agentdeck.app.data.termux.TermuxCommandResult
 import com.agentdeck.app.data.termux.TermuxGateway
+import com.agentdeck.app.data.runtime.TermuxRuntime
 import com.agentdeck.app.domain.model.EnvironmentCheckStatus
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -23,7 +24,7 @@ class EnvironmentProbeTest {
             ),
         )
 
-        val report = EnvironmentProbe(gateway).scan()
+        val report = EnvironmentProbe(TermuxRuntime(gateway)).scan()
 
         assertEquals(
             EnvironmentCheckStatus.READY,
@@ -60,7 +61,7 @@ class EnvironmentProbeTest {
             mutableListOf(Result.success(successResult(hostOutput))),
         )
 
-        val report = EnvironmentProbe(gateway).scan()
+        val report = EnvironmentProbe(TermuxRuntime(gateway)).scan()
 
         assertEquals(EnvironmentCheckStatus.ACTION_REQUIRED, report.check("proot_distro")?.status)
         assertEquals(EnvironmentCheckStatus.BLOCKED, report.check("ubuntu_installed")?.status)
@@ -78,7 +79,7 @@ class EnvironmentProbeTest {
                 ),
             )
 
-            val report = EnvironmentProbe(gateway).scan()
+            val report = EnvironmentProbe(TermuxRuntime(gateway)).scan()
 
             assertEquals(
                 EnvironmentCheckStatus.ACTION_REQUIRED,

@@ -2,6 +2,44 @@
 
 All notable changes to AgentDeck are documented in this file.
 
+## Unreleased
+
+## 0.2.0-beta.1 - 2026-08-09
+
+- Refined the mobile chat transcript with compact expandable activity, a keyboard-safe composer,
+  customer-facing errors, and a dedicated approval sheet that remains recoverable after dismissal.
+
+### Added
+
+- Added managed Sub2API/OpenAI Responses-compatible Provider profiles with authenticated model discovery and per-conversation model selection.
+- Added Android Keystore-backed credential storage and a loopback `auth.command` broker that keeps API keys out of Room, Codex config, Termux files, Intents, argv, and logs.
+- Defined Standard, Advanced, and Developer experience levels so the default mobile flow exposes tasks and recovery actions instead of Linux runtime details.
+- Accepted an `AgentRuntime` boundary and a staged `EmbeddedProotRuntime` target while retaining Termux as an explicit compatibility backend.
+- Added a persisted Advanced Settings switch for model, project, compatibility-runtime, and environment controls.
+- Added global and per-conversation Codex permission presets for read-only, ask-first, and full-access operation.
+- Added an experimental ARM64 embedded Runtime with packaged PRoot, verified Ubuntu Base/Codex downloads, atomic installation, app-owned processes, and a foreground-service lease.
+- Added an Advanced Settings runtime selector; existing completed Termux installations stay on the compatibility backend until embedded-device acceptance is complete.
+- Added one-click import of the active Termux/Ubuntu Codex CLI Provider into Keystore-backed model services and bound it to the default Codex conversation.
+
+### Changed
+
+- Existing Codex/ChatGPT authentication remains the upgrade-safe default while local Provider profiles become real app-server runtime inputs.
+- Updated the product, setup, contribution, release, and reference-project contracts for the two-tab customer experience and the future app-owned local runtime.
+- Replaced the permanent Tools tab with contextual setup, grouped technical checks into customer-facing steps, and simplified the conversation and settings layouts for phone use.
+- Replaced the permissive `on-request` PRoot policy with explicit `untrusted` or `never` mappings; read-only auto-declines unsafe operations and cannot open the terminal fallback.
+- Chat now force-follows a newly sent message and keeps streaming output pinned to the latest item until the user deliberately scrolls upward.
+- Doctor, installers, terminal fallback, and native chat now depend on the `AgentRuntime` contract instead of Termux paths or Intents.
+
+### Fixed
+
+- Made the “current Codex configuration” row actionable and fixed first-save model IDs so newly added services persist their discovered models.
+- Hid the global setup warning once a managed conversation is ready.
+- Terminated the complete embedded PRoot/Codex process tree on conversation exit, including ptrace-managed children that Android does not expose through the usual `children` file.
+
+### Verified
+
+- On Android 16 / iQOO Neo8 (V2301A, ARM64): embedded Ubuntu/Codex preparation, existing DeepSeek Provider import, encrypted credential persistence, a real native-chat response, IME-safe composition, collapsed reasoning, latest-message following, background foreground-service ownership, and zero orphan processes after exit.
+
 ## 0.1.4 - 2026-08-09
 
 ### Changed

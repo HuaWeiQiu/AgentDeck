@@ -1,11 +1,12 @@
 package com.agentdeck.app.domain.setup
 
 import android.annotation.SuppressLint
-import com.agentdeck.app.data.termux.TermuxCommand
-import com.agentdeck.app.data.termux.TermuxGateway
 import com.agentdeck.app.domain.env.EnvironmentScanner
 import com.agentdeck.app.domain.install.RecipeInstallation
 import com.agentdeck.app.domain.model.EnvironmentReport
+import com.agentdeck.app.domain.runtime.AgentRuntime
+import com.agentdeck.app.domain.runtime.RuntimeCommand
+import com.agentdeck.app.domain.runtime.RuntimeProgram
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -19,7 +20,7 @@ import kotlinx.coroutines.launch
 class SetupCoordinator(
     private val scanner: EnvironmentScanner,
     private val installer: RecipeInstallation,
-    private val termux: TermuxGateway,
+    private val runtime: AgentRuntime,
     private val scope: CoroutineScope,
     private val onReport: (EnvironmentReport) -> Unit = {},
 ) {
@@ -112,11 +113,11 @@ class SetupCoordinator(
         }
     }
 
-    fun openTermuxInstallPage(): Boolean = termux.openTermuxInstallPage()
+    fun openTermuxInstallPage(): Boolean = runtime.openInstallPage()
 
-    fun openTermux(): Boolean = termux.openTermux()
+    fun openTermux(): Boolean = runtime.openConsole()
 
-    fun openTermuxAppSettings(): Boolean = termux.openTermuxAppSettings()
+    fun openTermuxAppSettings(): Boolean = runtime.openAppSettings()
 
     fun allowExternalAppsFixCommand(): String = scanner.allowExternalAppsFixCommand()
 
@@ -124,9 +125,9 @@ class SetupCoordinator(
         if (mutableState.value.action != SetupAction.CONFIGURE_CODEX_AUTH) {
             return Result.failure(IllegalStateException("当前环境无需或尚未进入 Codex 认证步骤"))
         }
-        val command = TermuxCommand(
-            sessionName = "agentdeck-codex-auth",
-            executable = CODEX_WRAPPER,
+        val command = RuntimeCommand(
+            instanceId = "agentdeck-codex-auth",
+            program = RuntimeProgram.CODEX_TERMINAL,
             args = listOf(
                 "--distro",
                 "ubuntu",
@@ -139,11 +140,11 @@ class SetupCoordinator(
                 CODEX_AUTH_SETUP_SCRIPT,
             ),
             background = false,
-            reuseExistingSession = true,
+            reuseExistingInstance = true,
         )
-        return termux.runCommand(command).fold(
+        return runtime.runCommand(command).fold(
             onSuccess = {
-                if (termux.openTermux()) {
+                if (runtime.openConsole()) {
                     Result.success(Unit)
                 } else {
                     Result.failure(IllegalStateException("认证助手已启动，但无法打开 Termux"))
@@ -163,8 +164,6 @@ class SetupCoordinator(
 
     companion object {
         private const val CODEX_RECIPE_ID = "recipe_codex"
-        private const val CODEX_WRAPPER =
-            "/data/data/com.termux/files/home/.agentdeck/wrappers/codex-ubuntu.sh"
         private const val MAX_ERROR_LENGTH = 240
 
         private val CODEX_AUTH_SETUP_SCRIPT = """
@@ -224,7 +223,10 @@ private fun com.agentdeck.app.domain.install.RecipeInstallProgress.userMessage()
     val position = "${recipeIndex + 1}/$recipeCount"
     val action = when (phase) {
         com.agentdeck.app.domain.install.InstallPhase.PROBING -> "检测"
+        com.agentdeck.app.domain.install.InstallPhase.DOWNLOADING -> "下载"
+        com.agentdeck.app.domain.install.InstallPhase.EXTRACTING -> "解压"
         com.agentdeck.app.domain.install.InstallPhase.INSTALLING -> "安装"
+        com.agentdeck.app.domain.install.InstallPhase.INSTALLING_TOOLS -> "配置"
         com.agentdeck.app.domain.install.InstallPhase.VERIFYING -> "验证"
         com.agentdeck.app.domain.install.InstallPhase.COMPLETE -> "完成"
     }

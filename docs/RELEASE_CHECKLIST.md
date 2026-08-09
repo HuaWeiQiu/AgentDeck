@@ -15,8 +15,28 @@
 - [ ] Confirm legacy credential preferences and the old key alias are removed once.
 - [ ] Delete a referenced Profile and confirm its cards remain with no binding.
 - [ ] Delete the final card/Profile, restart, and confirm it does not reappear.
+- [ ] Upgrade v0.1.4 and confirm existing conversations use “current Codex configuration” without requiring a new API Key.
+- [ ] Confirm legacy OpenAI-compatible Profiles are retained as unverified metadata and no synthetic credential is created.
 
-## F-Droid Termux device
+## Customer experience
+
+- [ ] Standard mode exposes only conversation and settings top-level destinations; setup and recovery open in context.
+- [ ] Standard mode never requires users to interpret Termux, PRoot, Ubuntu, app-server, ports, paths, exit codes, or shell logs.
+- [ ] Existing Codex login, API Key environment, and managed Provider configuration are detected before any sign-in prompt is shown.
+- [ ] Reasoning and tool activity are collapsed by default, approvals explain impact before confirmation, and the composer remains above the IME.
+- [ ] Advanced and Developer settings are opt-in, reversible, and cannot expose secret values in UI, exports, screenshots, or logs.
+
+## Embedded runtime default gate
+
+Complete this section before changing the default from `TermuxRuntime` to `EmbeddedProotRuntime`.
+
+- [ ] Runtime packs and manifests are signed, versioned, checksum-verified, installed atomically, and recover after process death.
+- [ ] The previous known-good Base, Codex, and wrapper versions can be rolled back independently without deleting user configuration or conversations.
+- [ ] Runtime processes are owned by a foreground service, accept control only through an app-private authenticated channel, and terminate without orphaned children.
+- [ ] APK/AAB packaging, native library extraction, ABI coverage, target-SDK behavior, licenses, notices, and corresponding source obligations are verified.
+- [ ] Fresh install, upgrade, rollback, no-space, corrupt-pack, offline, lock-screen, OEM background, and reboot scenarios pass on representative ARM64 devices.
+
+## F-Droid Termux device (compatibility backend)
 
 - [ ] Test a supported Android device with F-Droid Termux 0.118.3 (current stable baseline) or newer.
 - [ ] Grant `RUN_COMMAND` only from the contextual Doctor action.
@@ -31,10 +51,14 @@
 - [ ] Confirm app-server listens only on `127.0.0.1`, rejects a wrong capability token, and its supervised process tree exits after disconnect.
 - [ ] Use the terminal icon and confirm the named Termux fallback session opens in the same workspace.
 - [ ] Test workspace paths and CLI args containing spaces and quotes.
+- [ ] Add a Sub2API Provider, retrieve its `/v1/models` list, select a model, and complete a real native-chat turn with the returned Provider/model matching the selection.
+- [ ] Run two managed Providers sequentially and confirm credentials, model caches, thread mappings, and app-server processes do not cross over.
+- [ ] Verify wrong keys, forbidden groups, rate limits, malformed model responses, TLS failures, and model-list timeouts terminate with actionable UI states.
 
 ## Final review
 
-- [ ] No CLI credentials or app-server tokens appear in `adb logcat`, process lists, Room, preferences, or persistent Termux files.
+- [ ] No CLI or managed Provider credentials appear in `adb logcat`, process lists, Room, preferences, Codex config, or persistent Termux files.
+- [ ] Confirm the managed credential ciphertext is under `noBackupFilesDir`, Keystore invalidation fails closed, deleting a Provider removes its ciphertext, and screenshots are blocked while the API Key editor is visible.
 - [ ] UI remains usable on a compact phone viewport and with large font scaling.
 - [ ] Known limitations are included in release notes.
 - [ ] Tag and publish only after all required device checks pass.

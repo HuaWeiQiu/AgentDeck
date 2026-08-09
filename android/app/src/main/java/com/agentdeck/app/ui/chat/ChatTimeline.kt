@@ -36,7 +36,18 @@ internal fun groupChatTimeline(items: List<ChatItem>): List<ChatTimelineEntry> =
     flushActivity()
 }
 
-internal fun activitySummary(items: List<ChatItem>): String {
+internal fun activitySummary(
+    items: List<ChatItem>,
+    showTechnicalDetails: Boolean = true,
+): String {
+    if (!showTechnicalDetails) {
+        val webSearches = items.count { it.kind == ChatItemKind.TOOL && it.status == "webSearch" }
+        return when {
+            items.all { it.kind == ChatItemKind.REASONING } -> "需要时可展开查看"
+            webSearches > 0 && items.size == webSearches -> "查看了 $webSearches 项网页内容"
+            else -> "已完成 ${items.size} 项操作，需要时可展开查看"
+        }
+    }
     val parts = buildList {
         items.count { it.kind == ChatItemKind.REASONING }
             .takeIf { it > 0 }
@@ -56,6 +67,13 @@ internal fun activitySummary(items: List<ChatItem>): String {
     }
     return parts.joinToString(" · ").ifBlank { "${items.size} 项活动" }
 }
+
+internal fun activityDetailText(item: ChatItem, showTechnicalDetails: Boolean): String =
+    if (!showTechnicalDetails && item.kind == ChatItemKind.REASONING) {
+        "已完成必要的分析"
+    } else {
+        item.text
+    }
 
 private fun ChatItemKind.isActivity(): Boolean = when (this) {
     ChatItemKind.REASONING,

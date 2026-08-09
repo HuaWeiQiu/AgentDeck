@@ -56,9 +56,9 @@ cd android
 
 ## 数据与凭据
 
-Room 只保存卡片和非敏感 Profile 元数据（名称、Provider 类型、Base URL、默认模型）。AgentDeck 不保存 API Key 或 OAuth token；登录由 Codex 等 CLI 自己完成。
+Room 只保存卡片和非敏感 Profile 元数据（名称、Provider adapter、Base URL、默认模型与 credential 引用）。CLI OAuth/ChatGPT 登录仍由 Codex 管理；用户主动添加的第三方 API Key 使用 Android Keystore 加密并保存在 `noBackupFilesDir`，不会进入 Room、Codex 配置、Intent、argv、日志或 Termux 持久文件。
 
-数据库升级链为 v1→v2→v3：v2 移除旧 `keyRef`，v3 增加 Profile 外键与一次性播种标记。禁止添加 `fallbackToDestructiveMigration()`。
+数据库升级链为 v1→v2→v3→v4：v2 移除旧 `keyRef`，v3 增加 Profile 外键与一次性播种标记，v4 增加 Provider adapter、credential 引用、模型缓存和对话模型绑定。禁止添加 `fallbackToDestructiveMigration()`。
 
 ## 真机限制
 

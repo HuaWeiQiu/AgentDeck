@@ -2,25 +2,38 @@ package com.agentdeck.app.domain.chat
 
 import org.json.JSONArray
 import org.json.JSONObject
+import com.agentdeck.app.domain.model.CodexPermissionLevel
 
 object CodexProtocol {
-    fun threadStartParams(cwd: String): JSONObject =
-        runtimeThreadParams(cwd)
+    fun threadStartParams(
+        cwd: String,
+        permissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT,
+    ): JSONObject = runtimeThreadParams(cwd, permissionLevel)
 
-    fun threadResumeParams(threadId: String, cwd: String): JSONObject =
-        runtimeThreadParams(cwd).put("threadId", threadId)
+    fun threadResumeParams(
+        threadId: String,
+        cwd: String,
+        permissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT,
+    ): JSONObject = runtimeThreadParams(cwd, permissionLevel).put("threadId", threadId)
 
-    fun turnStartParams(threadId: String, text: String): JSONObject =
+    fun turnStartParams(
+        threadId: String,
+        text: String,
+        permissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT,
+    ): JSONObject =
         JSONObject()
             .put("threadId", threadId)
             .put("input", JSONArray().put(JSONObject().put("type", "text").put("text", text)))
-            .put("approvalPolicy", APPROVAL_POLICY)
+            .put("approvalPolicy", permissionLevel.approvalPolicy)
             .put(
                 "sandboxPolicy",
                 JSONObject()
                     .put("type", "externalSandbox")
                     .put("networkAccess", "enabled"),
             )
+
+    fun shouldAutoDecline(permissionLevel: CodexPermissionLevel): Boolean =
+        permissionLevel == CodexPermissionLevel.READ_ONLY
 
     fun approvalResponse(approval: ChatApproval, decision: String): JSONObject {
         if (approval.kind != ApprovalKind.PERMISSIONS) {
@@ -204,10 +217,13 @@ object CodexProtocol {
             ?: "Codex 返回了错误"
     }
 
-    private fun runtimeThreadParams(cwd: String): JSONObject =
+    private fun runtimeThreadParams(
+        cwd: String,
+        permissionLevel: CodexPermissionLevel,
+    ): JSONObject =
         JSONObject()
             .put("cwd", cwd)
-            .put("approvalPolicy", APPROVAL_POLICY)
+            .put("approvalPolicy", permissionLevel.approvalPolicy)
             // Keep thread bootstrap read-only so opening a chat does not mark the project
             // trusted. Every executable turn atomically overrides this with externalSandbox.
             .put("sandbox", "read-only")
@@ -232,5 +248,4 @@ object CodexProtocol {
     }
 
     private const val MAX_DETAIL_LENGTH = 8_000
-    private const val APPROVAL_POLICY = "on-request"
 }

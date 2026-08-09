@@ -8,7 +8,13 @@ import com.agentdeck.app.domain.cards.CardEditor
 import com.agentdeck.app.domain.launch.CliAdapterDescriptor
 import com.agentdeck.app.domain.launch.CliAdapterRegistry
 import com.agentdeck.app.domain.model.AgentCard
+import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.RecipeSummary
+import com.agentdeck.app.domain.model.ProviderAdapterId
+import com.agentdeck.app.domain.model.ProviderConnectionStatus
+import com.agentdeck.app.domain.model.ProviderModel
+import com.agentdeck.app.domain.model.ProviderProfile
+import com.agentdeck.app.domain.settings.ExperienceLevel
 import com.agentdeck.app.domain.setup.SetupState
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +35,15 @@ class SessionsViewModel : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val setupState: StateFlow<SetupState> = ServiceLocator.setup.state
+    val experienceLevel: StateFlow<ExperienceLevel> = ServiceLocator.experienceSettings.level
+    val defaultPermissionLevel: StateFlow<CodexPermissionLevel> =
+        ServiceLocator.experienceSettings.codexPermissionLevel
+
+    val profiles: StateFlow<List<ProviderProfile>> = ServiceLocator.profiles.observeProfiles()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val models: StateFlow<List<ProviderModel>> = ServiceLocator.profiles.observeAllModels()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun newDraft(): CardDraft? = availableAdapters.firstOrNull()?.let { descriptor ->
         CardDraft(
@@ -36,6 +51,8 @@ class SessionsViewModel : ViewModel() {
             name = descriptor.displayName,
             recipeId = descriptor.recipeId,
             profileId = null,
+            modelId = null,
+            permissionLevel = null,
             workspacePath = descriptor.defaultWorkspacePath,
             enabled = true,
         )
@@ -45,7 +62,9 @@ class SessionsViewModel : ViewModel() {
         id = card.id,
         name = card.name,
         recipeId = card.recipeId,
-        profileId = null,
+        profileId = card.profileId,
+        modelId = card.modelId,
+        permissionLevel = card.permissionLevel,
         workspacePath = card.workspacePath,
         enabled = card.enabled,
     )
@@ -63,9 +82,32 @@ class SessionsViewModel : ViewModel() {
         val adapter = requireNotNull(adapters.forRecipe(draft.recipeId)) { "缺少 CLI adapter" }
         val existing = draft.id?.let { cardsRepo.getCard(it) }
         require(draft.id == null || existing != null) { "要编辑的卡片不存在" }
-        val localConfigDraft = draft.copy(profileId = null)
+        val profile = draft.profileId?.let { profileId ->
+            requireNotNull(ServiceLocator.profiles.getProfile(profileId)) { "模型服务不存在" }
+        }
+        if (profile != null) {
+            if (adapter.descriptor.recipeId == "recipe_codex") {
+                require(
+                    profile.adapterId == ProviderAdapterId.SUB2API ||
+                        profile.adapterId == ProviderAdapterId.OPENAI_RESPONSES,
+                ) { "该模型服务不支持 Codex Responses" }
+            }
+            require(
+                profile.connectionStatus == ProviderConnectionStatus.READY ||
+                    profile.connectionStatus == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED,
+            ) { "模型服务尚未验证" }
+            val credentialRef = requireNotNull(profile.credentialRef) { "模型服务缺少 API Key" }
+            require(ServiceLocator.credentials.contains(credentialRef)) { "模型服务的 API Key 不存在" }
+            val modelId = requireNotNull(draft.modelId?.takeIf(String::isNotBlank)) { "请选择模型" }
+            val knownModels = ServiceLocator.profiles.getModels(profile.id)
+            require(
+                knownModels.any { it.id == modelId } ||
+                    profile.connectionStatus == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED &&
+                    modelId == profile.defaultModel,
+            ) { "所选模型不属于该模型服务，请重新获取模型列表" }
+        }
         val id = "card_${UUID.randomUUID().toString().replace("-", "").take(8)}"
-        val card = CardEditor.build(localConfigDraft, existing, id, adapter, null).getOrThrow()
+        val card = CardEditor.build(draft, existing, id, adapter, profile).getOrThrow()
         cardsRepo.saveCard(card)
         card
     }

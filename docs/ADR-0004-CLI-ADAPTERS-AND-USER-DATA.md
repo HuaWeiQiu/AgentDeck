@@ -23,6 +23,6 @@ v0.1.0 通过 `templateId` 的 `when` 分支生成启动命令，卡片只能修
 
 - 增加新 CLI 时必须提供 adapter 与经过验证的 recipe，不能只添加一张展示卡片。
 - Profile 删除不再破坏卡片行，卡片会明确显示未绑定状态。
-- 数据库迁移必须继续保持外键、索引和初始化标记；发布验证需要覆盖 v1→v2→v3 与 v2→v3。
-- Profile 目前仍是非敏感元数据。CLI 的 OAuth、API Key 和登录状态继续由 CLI 自己管理。
-- Profile 绑定当前只提供类型约束和本地引用关系，不代表 AgentDeck 已改写 Codex `config.toml`；配置映射必须等官方配置契约稳定并由 adapter 单独实现。
+- 数据库迁移必须继续保持外键、索引和初始化标记；发布验证需要覆盖 v1→v2→v3→v4、v2→v3→v4 与 v3→v4。
+- Profile 本身仍是非敏感元数据。0.1.5 起，受管第三方 API Key 按 ADR-0007 使用独立 Keystore 密文保存，不进入 Room。
+- Profile 绑定由 Provider adapter 映射为单个 app-server 进程的配置覆盖，不改写全局 Codex `config.toml`；未受管的 CLI OAuth、API Key 和登录状态继续由 CLI 自己管理。

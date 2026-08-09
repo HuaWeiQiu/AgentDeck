@@ -51,6 +51,8 @@ class WrapperContractTest {
                 workspace,
                 "--bin",
                 "codex",
+                "--approval-policy",
+                "never",
                 "--",
                 "resume",
                 cliArg,
@@ -73,14 +75,29 @@ class WrapperContractTest {
             assertFalse(fixedInnerScript.contains(cliArg))
             assertTrue(fixedInnerScript.contains("check_for_update_on_startup=false"))
             assertTrue(fixedInnerScript.contains("--sandbox danger-full-access"))
-            assertTrue(fixedInnerScript.contains("--ask-for-approval on-request"))
+            assertTrue(fixedInnerScript.contains("--ask-for-approval \"${'$'}approval_policy\""))
             assertEquals("agentdeck", captured[7])
             assertEquals(workspace, captured[8])
             assertEquals("codex", captured[9])
-            assertEquals(listOf("resume", cliArg), captured.drop(10))
+            assertEquals("never", captured[10])
+            assertEquals(listOf("resume", cliArg), captured.drop(11))
         } finally {
             tempDir.deleteRecursively()
         }
+    }
+
+    @Test
+    fun `wrapper rejects unknown approval policy`() {
+        val process = ProcessBuilder(
+            "/bin/bash",
+            assetWrapper.absolutePath,
+            "--approval-policy",
+            "on-request;touch-pwned",
+        ).redirectErrorStream(true).start()
+
+        val output = process.inputStream.bufferedReader().readText()
+        assertEquals(64, process.waitFor())
+        assertTrue(output.contains("invalid approval policy"))
     }
 
     @Test

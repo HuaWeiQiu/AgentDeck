@@ -1,44 +1,114 @@
 package com.agentdeck.app.data.chat
 
 import android.annotation.SuppressLint
-import com.agentdeck.app.data.termux.TermuxCommand
-import com.agentdeck.app.data.termux.TermuxGateway
 import com.agentdeck.app.domain.model.AgentCard
+import com.agentdeck.app.domain.model.ProviderProfile
+import com.agentdeck.app.domain.model.ProviderAdapterId
+import com.agentdeck.app.domain.model.ProviderType
+import com.agentdeck.app.domain.profiles.ProviderEndpointNormalizer
+import com.agentdeck.app.domain.runtime.AgentRuntime
+import com.agentdeck.app.domain.runtime.RuntimeCommand
+import com.agentdeck.app.domain.runtime.RuntimeProgram
 import org.json.JSONObject
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 
 data class CodexBridgeEndpoint(
     val port: Int,
     val token: String,
     val instanceKey: String,
+    val credentialToken: String? = null,
 )
 
+data class ManagedProviderRuntime(
+    val providerId: String,
+    val baseUrl: String,
+    val modelId: String,
+    val credentialRef: String,
+    val credentialBrokerPort: Int,
+) {
+    val conversationKey: String = "$providerId:$modelId"
+
+    companion object {
+        fun from(
+            profile: ProviderProfile,
+            modelId: String,
+            credentialBrokerPort: Int,
+        ): ManagedProviderRuntime {
+            require(
+                profile.type == ProviderType.OPENAI_COMPATIBLE &&
+                    (profile.adapterId == ProviderAdapterId.SUB2API ||
+                        profile.adapterId == ProviderAdapterId.OPENAI_RESPONSES),
+            ) { "该模型服务不支持 Codex Responses" }
+            val endpoint = ProviderEndpointNormalizer.normalize(profile.baseUrl).getOrThrow()
+            val credentialRef = requireNotNull(profile.credentialRef) { "模型服务缺少 API Key" }
+            require(modelId.isNotBlank() && modelId.length <= 160 && modelId.none(Char::isISOControl)) {
+                "模型 ID 无效"
+            }
+            require(credentialBrokerPort in 1..65_535) { "凭据代理端口无效" }
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(profile.id.toByteArray(StandardCharsets.UTF_8))
+                .take(8)
+                .joinToString("") { byte -> "%02x".format(byte) }
+            return ManagedProviderRuntime(
+                providerId = "agentdeck_$digest",
+                baseUrl = endpoint.apiBaseUrl,
+                modelId = modelId,
+                credentialRef = credentialRef,
+                credentialBrokerPort = credentialBrokerPort,
+            )
+        }
+    }
+}
+
 interface CodexBridgeLaunch {
-    suspend fun launch(card: AgentCard): Result<CodexBridgeEndpoint>
+    suspend fun launch(
+        card: AgentCard,
+        runtime: ManagedProviderRuntime? = null,
+    ): Result<CodexBridgeEndpoint>
     fun stop(endpoint: CodexBridgeEndpoint): Result<Unit>
 }
 
 @SuppressLint("SdCardPath")
 class CodexBridgeLauncher(
-    private val termux: TermuxGateway,
+    private val agentRuntime: AgentRuntime,
 ) : CodexBridgeLaunch {
-    override suspend fun launch(card: AgentCard): Result<CodexBridgeEndpoint> = runCatching {
+    override suspend fun launch(
+        card: AgentCard,
+        runtime: ManagedProviderRuntime?,
+    ): Result<CodexBridgeEndpoint> = runCatching {
         require(card.recipeId == "recipe_codex") { "该对话不支持 Codex 原生聊天" }
-        val instanceKey = card.id.hashCode().toUInt().toString(16)
-        val command = TermuxCommand(
-            sessionName = "agentdeck-chat-$instanceKey",
-            executable = START_WRAPPER,
-            args = listOf(
-                "--distro",
-                card.distro,
-                "--cwd",
-                card.workspacePath,
-                "--instance-key",
-                instanceKey,
-            ),
-            background = true,
-            reuseExistingSession = false,
+        val instanceKey = instanceKey(card.id)
+        val args = mutableListOf(
+            "--distro",
+            card.distro,
+            "--cwd",
+            card.workspacePath,
+            "--instance-key",
+            instanceKey,
         )
-        val result = termux.runCommandForResult(command, START_TIMEOUT_MILLIS).getOrThrow()
+        runtime?.let { managed ->
+            args += listOf(
+                "--provider-id",
+                managed.providerId,
+                "--base-url",
+                managed.baseUrl,
+                "--model",
+                managed.modelId,
+                "--credential-ref",
+                managed.credentialRef,
+                "--credential-broker-port",
+                managed.credentialBrokerPort.toString(),
+            )
+        }
+        val command = RuntimeCommand(
+            instanceId = "agentdeck-chat-$instanceKey",
+            program = RuntimeProgram.CODEX_APP_SERVER,
+            args = args,
+            background = true,
+            reuseExistingInstance = false,
+        )
+        val result = agentRuntime.runCommandForResult(command, START_TIMEOUT_MILLIS).getOrThrow()
         if (!result.commandSucceeded) {
             val detail = result.stderr.ifBlank { result.stdout }
                 .trim()
@@ -51,25 +121,27 @@ class CodexBridgeLauncher(
             .filter(String::isNotEmpty)
             .lastOrNull()
             ?: error("Codex app-server 未返回连接信息")
-        parseEndpoint(payload, instanceKey)
+        parseEndpoint(payload, instanceKey, runtime != null)
     }
 
-    override fun stop(endpoint: CodexBridgeEndpoint): Result<Unit> = termux.runCommand(
-        TermuxCommand(
-            sessionName = "agentdeck-chat-stop-${endpoint.instanceKey}",
-            executable = START_WRAPPER,
+    override fun stop(endpoint: CodexBridgeEndpoint): Result<Unit> = agentRuntime.runCommand(
+        RuntimeCommand(
+            instanceId = "agentdeck-chat-stop-${endpoint.instanceKey}",
+            program = RuntimeProgram.CODEX_APP_SERVER,
             args = listOf("--instance-key", endpoint.instanceKey, "--stop"),
             background = true,
-            reuseExistingSession = false,
+            reuseExistingInstance = false,
         ),
     )
 
     companion object {
-        private const val START_WRAPPER =
-            "/data/data/com.termux/files/home/.agentdeck/wrappers/codex-app-server-start.sh"
         private const val START_TIMEOUT_MILLIS = 30_000L
 
-        internal fun parseEndpoint(payload: String, instanceKey: String): CodexBridgeEndpoint {
+        internal fun parseEndpoint(
+            payload: String,
+            instanceKey: String,
+            expectsCredentialToken: Boolean = false,
+        ): CodexBridgeEndpoint {
             val json = JSONObject(payload)
             val port = json.getInt("port")
             val token = json.getString("token")
@@ -80,7 +152,22 @@ class CodexBridgeLauncher(
             require(instanceKey.matches(Regex("[a-f0-9]{1,16}"))) {
                 "Codex app-server 返回了无效实例标识"
             }
-            return CodexBridgeEndpoint(port, token, instanceKey)
+            val credentialToken = json.optString("credential_token")
+                .takeIf(String::isNotBlank)
+            require(!expectsCredentialToken || credentialToken?.matches(CREDENTIAL_TOKEN_PATTERN) == true) {
+                "Codex app-server 未返回有效的凭据授权"
+            }
+            require(expectsCredentialToken || credentialToken == null) {
+                "Codex app-server 返回了意外的凭据授权"
+            }
+            return CodexBridgeEndpoint(port, token, instanceKey, credentialToken)
         }
+
+        private val CREDENTIAL_TOKEN_PATTERN = Regex("[a-f0-9]{64}")
+
+        internal fun instanceKey(cardId: String): String = MessageDigest.getInstance("SHA-256")
+            .digest(cardId.toByteArray(StandardCharsets.UTF_8))
+            .take(8)
+            .joinToString("") { byte -> "%02x".format(byte) }
     }
 }

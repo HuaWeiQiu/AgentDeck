@@ -9,6 +9,9 @@ import com.agentdeck.app.data.chat.CodexInbound
 import com.agentdeck.app.data.chat.CodexRpcClient
 import com.agentdeck.app.data.chat.CodexRpcException
 import com.agentdeck.app.data.chat.CodexRpcTimeoutException
+import com.agentdeck.app.data.chat.ConversationLinkRepository
+import com.agentdeck.app.data.chat.ManagedProviderRuntime
+import com.agentdeck.app.data.secure.ProviderCredentialBroker
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.chat.ApprovalKind
 import com.agentdeck.app.domain.chat.ChatApproval
@@ -17,6 +20,8 @@ import com.agentdeck.app.domain.chat.ChatItemKind
 import com.agentdeck.app.domain.chat.ChatUiState
 import com.agentdeck.app.domain.chat.CodexProtocol
 import com.agentdeck.app.domain.model.LaunchResult
+import com.agentdeck.app.domain.model.CodexPermissionLevel
+import com.agentdeck.app.domain.model.ProviderConnectionStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +45,8 @@ class ChatViewModel(
     private var turnStartJob: Job? = null
     private var threadId: String? = null
     private var activeTurnId: String? = null
+    private var credentialBroker: ProviderCredentialBroker? = null
+    private var permissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT
 
     init {
         connect()
@@ -61,26 +68,62 @@ class ChatViewModel(
             }
             try {
                 val card = requireNotNull(ServiceLocator.cards.getCard(cardId)) { "对话不存在" }
+                permissionLevel = CodexPermissionLevel.effective(
+                    card.permissionLevel,
+                    ServiceLocator.experienceSettings.codexPermissionLevel.value,
+                )
                 mutableState.update { it.copy(card = card) }
-                val endpoint = ServiceLocator.codexBridge.launch(card).getOrThrow()
+                val profile = card.profileId?.let { profileId ->
+                    requireNotNull(ServiceLocator.profiles.getProfile(profileId)) { "对话绑定的模型服务不存在" }
+                }
+                val managedRuntime = profile?.let { managedProfile ->
+                    require(
+                        managedProfile.connectionStatus == ProviderConnectionStatus.READY ||
+                            managedProfile.connectionStatus == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED,
+                    ) { "模型服务尚未验证，请先在设置中重新验证" }
+                    val credentialRef = requireNotNull(managedProfile.credentialRef) {
+                        "模型服务缺少 API Key，请重新配置"
+                    }
+                    require(ServiceLocator.credentials.contains(credentialRef)) {
+                        "模型服务的 API Key 不存在，请重新配置"
+                    }
+                    val selectedModel = requireNotNull(card.modelId?.takeIf(String::isNotBlank)) {
+                        "对话没有绑定模型，请编辑对话后重试"
+                    }
+                    ProviderCredentialBroker(ServiceLocator.credentials, credentialRef).also { broker ->
+                        credentialBroker = broker
+                    }.let { broker ->
+                        ManagedProviderRuntime.from(managedProfile, selectedModel, broker.port)
+                    }
+                }
+                val runtimeKey = managedRuntime?.conversationKey
+                    ?: ConversationLinkRepository.CURRENT_RUNTIME_KEY
+                val endpoint = ServiceLocator.codexBridge.launch(card, managedRuntime).getOrThrow()
                 this@ChatViewModel.endpoint = endpoint
+                managedRuntime?.let {
+                    credentialBroker?.authorize(requireNotNull(endpoint.credentialToken))
+                }
                 val rpc = CodexRpcClient.connect(endpoint)
                 client = rpc
                 eventJob = viewModelScope.launch { rpc.events.collect(::handleInbound) }
                 rpc.initialize(BuildConfig.VERSION_NAME)
 
-                val linkedThread = ServiceLocator.conversationLinks.threadId(cardId)
+                val linkedThread = ServiceLocator.conversationLinks.threadId(cardId, runtimeKey)
                 val response = if (linkedThread == null) {
                     startThread(rpc, card.workspacePath)
                 } else {
                     try {
                         rpc.request(
                             "thread/resume",
-                            CodexProtocol.threadResumeParams(linkedThread, card.workspacePath),
+                            CodexProtocol.threadResumeParams(
+                                linkedThread,
+                                card.workspacePath,
+                                permissionLevel,
+                            ),
                         )
                     } catch (error: CodexRpcException) {
                         if (!error.isMissingThread() && !error.hasActiveWriter()) throw error
-                        ServiceLocator.conversationLinks.clearThreadId(cardId)
+                        ServiceLocator.conversationLinks.clearThreadId(cardId, runtimeKey)
                         startThread(rpc, card.workspacePath)
                     }
                 }
@@ -107,7 +150,16 @@ class ChatViewModel(
                 }
                 activeTurnId = null
                 val runtime = CodexProtocol.runtime(response)
-                ServiceLocator.conversationLinks.saveThreadId(cardId, requireNotNull(threadId))
+                managedRuntime?.let { expected ->
+                    require(runtime.model == expected.modelId && runtime.provider == expected.providerId) {
+                        "Codex 实际运行配置与对话绑定不一致，请检查模型服务配置"
+                    }
+                }
+                ServiceLocator.conversationLinks.saveThreadId(
+                    cardId,
+                    requireNotNull(threadId),
+                    runtimeKey,
+                )
                 mutableState.update {
                     it.copy(
                         isConnecting = false,
@@ -163,7 +215,7 @@ class ChatViewModel(
             try {
                 val response = rpc.request(
                     "turn/start",
-                    CodexProtocol.turnStartParams(currentThread, text),
+                    CodexProtocol.turnStartParams(currentThread, text, permissionLevel),
                 )
                 activeTurnId = CodexProtocol.turnId(response)
             } catch (error: CancellationException) {
@@ -239,10 +291,11 @@ class ChatViewModel(
         }
     }
 
-    suspend fun openTerminal(): LaunchResult = ServiceLocator.launcher.launch(cardId)
+    suspend fun openTerminal(): LaunchResult =
+        ServiceLocator.launcher.launch(cardId, permissionLevel)
 
     private suspend fun startThread(rpc: CodexRpcClient, cwd: String): JSONObject =
-        rpc.request("thread/start", CodexProtocol.threadStartParams(cwd))
+        rpc.request("thread/start", CodexProtocol.threadStartParams(cwd, permissionLevel))
 
     private suspend fun handleInbound(inbound: CodexInbound) {
         when (inbound) {
@@ -356,6 +409,32 @@ class ChatViewModel(
         }
         if (approval == null) {
             client?.respondUnsupported(request.id, request.method)
+        } else if (CodexProtocol.shouldAutoDecline(permissionLevel)) {
+            try {
+                client?.respond(request.id, CodexProtocol.approvalResponse(approval, "decline"))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                disconnectServer()
+                mutableState.update {
+                    it.copy(
+                        isConnected = false,
+                        isStreaming = false,
+                        error = "只读权限无法安全回绝 Codex 操作，请重新连接",
+                    )
+                }
+                return
+            }
+            mutableState.update { current ->
+                current.copy(
+                    items = current.items + ChatItem(
+                        id = "permission-blocked-${request.id}",
+                        kind = ChatItemKind.TOOL,
+                        text = "只读权限已阻止 ${approval.blockedActionLabel()}",
+                        status = "blocked",
+                    ),
+                )
+            }
         } else {
             mutableState.update { it.copy(approval = approval) }
         }
@@ -369,6 +448,8 @@ class ChatViewModel(
     private fun disconnectServer() {
         client?.close()
         client = null
+        credentialBroker?.close()
+        credentialBroker = null
         endpoint?.let { ServiceLocator.codexBridge.stop(it) }
         endpoint = null
     }
@@ -384,6 +465,12 @@ class ChatViewModel(
                     ChatViewModel(cardId) as T
             }
     }
+}
+
+private fun ChatApproval.blockedActionLabel(): String = when (kind) {
+    ApprovalKind.COMMAND -> "命令执行"
+    ApprovalKind.FILE_CHANGE -> "文件修改"
+    ApprovalKind.PERMISSIONS -> "额外权限请求"
 }
 
 private fun CodexRpcException.isMissingThread(): Boolean {

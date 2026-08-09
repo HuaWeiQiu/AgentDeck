@@ -2,6 +2,7 @@ package com.agentdeck.app.domain.cards
 
 import com.agentdeck.app.domain.launch.CodexUbuntuAdapter
 import com.agentdeck.app.domain.model.AgentCard
+import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.PathNamespace
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.ProviderType
@@ -19,6 +20,8 @@ class CardEditorTest {
             name = "  Project Codex  ",
             recipeId = "recipe_codex",
             profileId = profile.id,
+            modelId = "model",
+            permissionLevel = CodexPermissionLevel.FULL_ACCESS,
             workspacePath = "  /root/projects/demo  ",
             enabled = true,
         )
@@ -37,6 +40,8 @@ class CardEditorTest {
         assertEquals("/root/projects/demo", card.workspacePath)
         assertEquals("agentdeck-codex-1234abcd", card.termuxSessionName)
         assertEquals("codex", card.innerBin)
+        assertEquals("model", card.modelId)
+        assertEquals(CodexPermissionLevel.FULL_ACCESS, card.permissionLevel)
     }
 
     @Test
@@ -47,6 +52,7 @@ class CardEditorTest {
             name = "Renamed",
             recipeId = existing.recipeId,
             profileId = null,
+            modelId = null,
             workspacePath = "/root/next",
             enabled = false,
         )
@@ -72,6 +78,7 @@ class CardEditorTest {
             name = "Codex",
             recipeId = "recipe_codex",
             profileId = incompatible.id,
+            modelId = "model",
             workspacePath = "/root/projects/default",
             enabled = true,
         )

@@ -22,6 +22,9 @@ interface ProviderProfileDao {
     @Query("SELECT * FROM provider_profiles WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): ProviderProfileEntity?
 
+    @Query("SELECT * FROM provider_profiles WHERE baseUrl = :baseUrl LIMIT 1")
+    suspend fun getByBaseUrl(baseUrl: String): ProviderProfileEntity?
+
     @Upsert
     suspend fun upsert(entity: ProviderProfileEntity)
 
@@ -30,6 +33,24 @@ interface ProviderProfileDao {
 
     @Query("SELECT COUNT(*) FROM provider_profiles")
     suspend fun count(): Int
+}
+
+@Dao
+interface ProviderModelDao {
+    @Query("SELECT * FROM provider_models ORDER BY providerId ASC, modelId ASC")
+    fun observeAll(): Flow<List<ProviderModelEntity>>
+
+    @Query("SELECT * FROM provider_models WHERE providerId = :providerId ORDER BY modelId ASC")
+    fun observeByProvider(providerId: String): Flow<List<ProviderModelEntity>>
+
+    @Query("SELECT * FROM provider_models WHERE providerId = :providerId ORDER BY modelId ASC")
+    suspend fun getByProvider(providerId: String): List<ProviderModelEntity>
+
+    @Upsert
+    suspend fun upsertAll(models: List<ProviderModelEntity>)
+
+    @Query("DELETE FROM provider_models WHERE providerId = :providerId")
+    suspend fun deleteByProvider(providerId: String)
 }
 
 @Dao

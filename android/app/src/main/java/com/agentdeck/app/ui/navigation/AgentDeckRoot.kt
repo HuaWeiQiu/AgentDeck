@@ -3,7 +3,6 @@ package com.agentdeck.app.ui.navigation
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -26,7 +25,8 @@ import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.ui.chat.ChatScreen
 import com.agentdeck.app.ui.sessions.SessionsScreen
 import com.agentdeck.app.ui.settings.SettingsScreen
-import com.agentdeck.app.ui.store.StoreScreen
+import com.agentdeck.app.ui.models.ModelsScreen
+import com.agentdeck.app.ui.store.SetupScreen
 
 private data class Tab(
     val route: String,
@@ -36,17 +36,17 @@ private data class Tab(
 
 private val tabs = listOf(
     Tab("sessions", "对话", Icons.AutoMirrored.Filled.Chat),
-    Tab("store", "工具", Icons.Filled.Extension),
     Tab("settings", "设置", Icons.Filled.Settings),
 )
+
+internal val standardTopLevelRoutes: Set<String> = tabs.mapTo(linkedSetOf()) { it.route }
 
 @Composable
 fun AgentDeckRoot() {
     val navController = rememberNavController()
     val startDestination = remember {
         resolveStartDestination(
-            termuxInstalled = ServiceLocator.termux.isTermuxInstalled(),
-            runCommandPermissionGranted = ServiceLocator.termux.hasRunCommandPermission(),
+            runtimeReady = ServiceLocator.runtime.status().ready,
             setupPreviouslyCompleted = !ServiceLocator.onboarding.shouldOpenDoctor(),
         )
     }
@@ -67,7 +67,7 @@ fun AgentDeckRoot() {
 
     Scaffold(
         bottomBar = {
-            if (currentRoute in tabs.map { it.route }) {
+            if (currentRoute in standardTopLevelRoutes) {
                 NavigationBar {
                     tabs.forEach { tab ->
                         NavigationBarItem(
@@ -88,19 +88,30 @@ fun AgentDeckRoot() {
         ) {
             composable("sessions") {
                 SessionsScreen(
-                    onOpenSetup = { navigateTopLevel("store") },
+                    onOpenSetup = { navController.navigate("setup") { launchSingleTop = true } },
                     onOpenChat = { cardId -> navController.navigate("chat/$cardId") },
                 )
             }
-            composable("store") {
-                StoreScreen(
+            composable("setup") {
+                val canNavigateBack = navController.previousBackStackEntry != null
+                SetupScreen(
+                    onBack = if (canNavigateBack) {
+                        { navController.navigateUp() }
+                    } else {
+                        null
+                    },
                     onReady = { navigateTopLevel("sessions") },
+                    onOpenModels = { navController.navigate("models") },
                 )
             }
             composable("settings") {
                 SettingsScreen(
-                    onOpenSetup = { navigateTopLevel("store") },
+                    onOpenSetup = { navController.navigate("setup") { launchSingleTop = true } },
+                    onOpenModels = { navController.navigate("models") },
                 )
+            }
+            composable("models") {
+                ModelsScreen(onBack = navController::navigateUp)
             }
             composable("chat/{cardId}") { entry ->
                 val cardId = entry.arguments?.getString("cardId").orEmpty()
@@ -114,13 +125,10 @@ fun AgentDeckRoot() {
 }
 
 internal fun resolveStartDestination(
-    termuxInstalled: Boolean,
-    runCommandPermissionGranted: Boolean,
+    runtimeReady: Boolean,
     setupPreviouslyCompleted: Boolean,
-): String = if (
-    termuxInstalled && runCommandPermissionGranted && setupPreviouslyCompleted
-) {
+): String = if (runtimeReady && setupPreviouslyCompleted) {
     "sessions"
 } else {
-    "store"
+    "setup"
 }

@@ -1,8 +1,10 @@
 package com.agentdeck.app.domain.launch
 
 import com.agentdeck.app.domain.model.AgentCard
+import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.LaunchResult
 import com.agentdeck.app.domain.model.PathNamespace
+import com.agentdeck.app.domain.runtime.RuntimeProgram
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -56,10 +58,7 @@ class LaunchCommandFactoryTest {
 
         val command = LaunchCommandFactory.create(card).getOrThrow()
 
-        assertEquals(
-            "/data/data/com.termux/files/home/.agentdeck/wrappers/codex-ubuntu.sh",
-            command.executable,
-        )
+        assertEquals(RuntimeProgram.CODEX_TERMINAL, command.program)
         assertEquals(
             listOf(
                 "--distro",
@@ -68,6 +67,8 @@ class LaunchCommandFactoryTest {
                 workspace,
                 "--bin",
                 "codex",
+                "--approval-policy",
+                "untrusted",
                 "--",
                 "resume",
                 "thread with space",
@@ -76,7 +77,21 @@ class LaunchCommandFactoryTest {
             command.args,
         )
         assertFalse(command.background)
-        assertTrue(command.reuseExistingSession)
+        assertTrue(command.reuseExistingInstance)
+    }
+
+    @Test
+    fun `codex terminal honors full access and rejects read only`() {
+        val fullAccess = LaunchCommandFactory.create(
+            card(permissionLevel = CodexPermissionLevel.FULL_ACCESS),
+        ).getOrThrow()
+        val readOnly = LaunchCommandFactory.create(
+            card(permissionLevel = CodexPermissionLevel.READ_ONLY),
+        )
+
+        assertTrue(fullAccess.args.windowed(2).contains(listOf("--approval-policy", "never")))
+        assertTrue(readOnly.isFailure)
+        assertTrue(readOnly.exceptionOrNull()?.message.orEmpty().contains("只读权限"))
     }
 
     @Test
@@ -110,7 +125,7 @@ class LaunchCommandFactoryTest {
             ),
         ).getOrThrow()
 
-        assertEquals("/data/data/com.termux/files/usr/bin/claude", command.executable)
+        assertEquals(RuntimeProgram.CLAUDE_TERMINAL, command.program)
         assertEquals(listOf("--continue"), command.args)
         assertEquals(
             "/data/data/com.termux/files/home/project with space",
@@ -153,6 +168,7 @@ class LaunchCommandFactoryTest {
         innerArgs: List<String> = emptyList(),
         enabled: Boolean = true,
         distro: String = "ubuntu",
+        permissionLevel: CodexPermissionLevel? = null,
     ) = AgentCard(
         id = "card_test",
         name = "Test",
@@ -160,6 +176,7 @@ class LaunchCommandFactoryTest {
         recipeId = recipeId,
         templateId = templateId,
         profileId = null,
+        permissionLevel = permissionLevel,
         termuxSessionName = "agentdeck-test",
         workspaceNamespace = workspaceNamespace,
         workspacePath = workspacePath,

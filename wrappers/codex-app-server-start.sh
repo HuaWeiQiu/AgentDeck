@@ -5,9 +5,15 @@ DISTRO="ubuntu"
 INNER_CWD="/root/projects/default"
 INSTANCE_KEY=""
 MODE="start"
+PROVIDER_ID=""
+BASE_URL=""
+MODEL=""
+CREDENTIAL_REF=""
+CREDENTIAL_BROKER_PORT=""
 RUNTIME_ROOT="/data/data/com.termux/files/home/.agentdeck/runtime"
 LEGACY_BRIDGE="/data/data/com.termux/files/home/.agentdeck/wrappers/codex-app-server-bridge.py"
-START_CONTRACT_VERSION=6
+CREDENTIAL_HELPER="/data/data/com.termux/files/home/.agentdeck/wrappers/codex-provider-token.py"
+START_CONTRACT_VERSION=7
 
 fail() {
   echo "agentdeck: $*" >&2
@@ -31,6 +37,31 @@ while (($#)); do
       INSTANCE_KEY="$2"
       shift 2
       ;;
+    --provider-id)
+      (($# >= 2)) || fail "--provider-id requires a value"
+      PROVIDER_ID="$2"
+      shift 2
+      ;;
+    --base-url)
+      (($# >= 2)) || fail "--base-url requires a value"
+      BASE_URL="$2"
+      shift 2
+      ;;
+    --model)
+      (($# >= 2)) || fail "--model requires a value"
+      MODEL="$2"
+      shift 2
+      ;;
+    --credential-ref)
+      (($# >= 2)) || fail "--credential-ref requires a value"
+      CREDENTIAL_REF="$2"
+      shift 2
+      ;;
+    --credential-broker-port)
+      (($# >= 2)) || fail "--credential-broker-port requires a value"
+      CREDENTIAL_BROKER_PORT="$2"
+      shift 2
+      ;;
     --stop)
       MODE="stop"
       shift
@@ -45,6 +76,21 @@ done
 [[ "$INNER_CWD" == /* && "$INNER_CWD" != *$'\n'* && "$INNER_CWD" != *$'\r'* ]] || \
   fail "workspace must be an absolute path"
 [[ "$INSTANCE_KEY" =~ ^[a-f0-9]{1,16}$ ]] || fail "invalid instance key"
+managed_values=("$PROVIDER_ID" "$BASE_URL" "$MODEL" "$CREDENTIAL_REF" "$CREDENTIAL_BROKER_PORT")
+managed_count=0
+for value in "${managed_values[@]}"; do
+  [[ -z "$value" ]] || managed_count=$((managed_count + 1))
+done
+((managed_count == 0 || managed_count == ${#managed_values[@]})) || fail "managed provider options must be complete"
+if ((managed_count > 0)); then
+  [[ "$PROVIDER_ID" =~ ^agentdeck_[a-f0-9]{16}$ ]] || fail "invalid provider id"
+  [[ "$BASE_URL" =~ ^https://[^[:space:]]+$ && ${#BASE_URL} -le 2048 ]] || fail "invalid base URL"
+  [[ -n "$MODEL" && ${#MODEL} -le 512 && "$MODEL" != *$'\n'* && "$MODEL" != *$'\r'* ]] || fail "invalid model"
+  [[ "$CREDENTIAL_REF" =~ ^[A-Za-z0-9._-]{1,80}$ ]] || fail "invalid credential reference"
+  [[ "$CREDENTIAL_BROKER_PORT" =~ ^[0-9]+$ ]] &&
+    ((CREDENTIAL_BROKER_PORT >= 1 && CREDENTIAL_BROKER_PORT <= 65535)) || fail "invalid credential broker port"
+  [[ -x "$CREDENTIAL_HELPER" ]] || fail "provider credential helper is unavailable"
+fi
 command -v proot-distro >/dev/null 2>&1 || fail "proot-distro not found in Termux"
 
 umask 077
@@ -59,6 +105,7 @@ LEASE="$RUNTIME_ROOT/app-server.${INSTANCE_KEY}.pid"
 TOKEN_FILE="$RUNTIME_ROOT/app-server.${INSTANCE_KEY}.token"
 STATE="$RUNTIME_ROOT/app-server.${INSTANCE_KEY}.state"
 START_LOG="$RUNTIME_ROOT/app-server.${INSTANCE_KEY}.log"
+CREDENTIAL_TOKEN_FILE="$RUNTIME_ROOT/app-server.${INSTANCE_KEY}.credential-token"
 
 read_owned_pid() {
   local lease="$1"
@@ -157,7 +204,7 @@ stop_owned_server() {
   pid="$(read_owned_pid "$LEASE" "$MARKER" || true)"
   [[ -z "$pid" ]] || terminate_tree "$pid"
   stop_marked_servers "$pid"
-  rm -f -- "$LEASE" "$TOKEN_FILE" "$STATE" "$START_LOG"
+  rm -f -- "$LEASE" "$TOKEN_FILE" "$CREDENTIAL_TOKEN_FILE" "$STATE" "$START_LOG"
 }
 
 stop_legacy_bridge() {
@@ -182,14 +229,48 @@ TOKEN="$(od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')"
 [[ "$TOKEN" =~ ^[a-f0-9]{64}$ ]] || fail "failed to generate websocket token"
 printf '%s\n' "$TOKEN" > "$TOKEN_FILE"
 chmod 600 -- "$TOKEN_FILE"
+if ((managed_count > 0)); then
+  CREDENTIAL_TOKEN="$(od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')"
+  [[ "$CREDENTIAL_TOKEN" =~ ^[a-f0-9]{64}$ ]] || fail "failed to generate credential token"
+  printf '%s\n' "$CREDENTIAL_TOKEN" > "$CREDENTIAL_TOKEN_FILE"
+  chmod 600 -- "$CREDENTIAL_TOKEN_FILE"
+fi
 printf '%s\n' "starting" > "$STATE"
 
 APP_SERVER_COMMAND='set -euo pipefail
 inner_cwd="$1"
 token_file="$2"
+provider_id="$3"
+base_url="$4"
+model="$5"
+credential_ref="$6"
+credential_broker_port="$7"
+credential_token_file="$8"
+credential_helper="$9"
+toml_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf "\"%s\"" "$value"
+}
 mkdir -p -- "$inner_cwd"
 cd -- "$inner_cwd"
-exec codex -c check_for_update_on_startup=false app-server \
+codex_args=(-c check_for_update_on_startup=false)
+if [[ -n "$provider_id" ]]; then
+  auth_args="[$(toml_quote "$credential_helper"),$(toml_quote --port),$(toml_quote "$credential_broker_port"),$(toml_quote --token-file),$(toml_quote "$credential_token_file"),$(toml_quote --credential-ref),$(toml_quote "$credential_ref")]"
+  codex_args+=(
+    -c "model_provider=$(toml_quote "$provider_id")"
+    -c "model=$(toml_quote "$model")"
+    -c "model_providers.${provider_id}.name=$(toml_quote AgentDeck)"
+    -c "model_providers.${provider_id}.base_url=$(toml_quote "$base_url")"
+    -c "model_providers.${provider_id}.wire_api=$(toml_quote responses)"
+    -c "model_providers.${provider_id}.auth.command=$(toml_quote /usr/bin/python3)"
+    -c "model_providers.${provider_id}.auth.args=${auth_args}"
+    -c "model_providers.${provider_id}.auth.timeout_ms=5000"
+    -c "model_providers.${provider_id}.auth.refresh_interval_ms=0"
+  )
+fi
+exec codex "${codex_args[@]}" app-server \
   --listen ws://127.0.0.1:0 \
   --ws-auth capability-token \
   --ws-token-file "$token_file"'
@@ -198,7 +279,14 @@ SUPERVISOR_COMMAND='set -euo pipefail
 distro="$1"
 inner_cwd="$2"
 token_file="$3"
-app_server_command="$4"
+provider_id="$4"
+base_url="$5"
+model="$6"
+credential_ref="$7"
+credential_broker_port="$8"
+credential_token_file="$9"
+credential_helper="${10}"
+app_server_command="${11}"
 child_pid=0
 cleanup() {
   if ((child_pid > 0)); then
@@ -208,12 +296,16 @@ cleanup() {
 }
 trap cleanup TERM INT EXIT
 proot-distro login "$distro" -- /usr/bin/env bash -c \
-  "$app_server_command" "$0" "$inner_cwd" "$token_file" &
+  "$app_server_command" "$0" "$inner_cwd" "$token_file" "$provider_id" "$base_url" \
+  "$model" "$credential_ref" "$credential_broker_port" "$credential_token_file" \
+  "$credential_helper" &
 child_pid=$!
 wait "$child_pid"'
 
 nohup bash -c "$SUPERVISOR_COMMAND" "$MARKER" \
-  "$DISTRO" "$INNER_CWD" "$TOKEN_FILE" "$APP_SERVER_COMMAND" \
+  "$DISTRO" "$INNER_CWD" "$TOKEN_FILE" "$PROVIDER_ID" "$BASE_URL" "$MODEL" \
+  "$CREDENTIAL_REF" "$CREDENTIAL_BROKER_PORT" "$CREDENTIAL_TOKEN_FILE" \
+  "$CREDENTIAL_HELPER" "$APP_SERVER_COMMAND" \
   </dev/null >/dev/null 2>"$START_LOG" &
 server_pid=$!
 printf '%s\n' "$server_pid" > "$LEASE"
@@ -224,14 +316,20 @@ for ((attempt = 0; attempt < 200; attempt++)); do
     port="${listen_url##*:}"
     if [[ "$port" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535)); then
       printf 'ready:%s\n' "$port" > "$STATE"
-      printf '{"port":%s,"token":"%s","pid":%s}\n' "$port" "$TOKEN" "$server_pid"
+      unlink -- "$START_LOG" 2>/dev/null || true
+      if ((managed_count > 0)); then
+        printf '{"port":%s,"token":"%s","credential_token":"%s","pid":%s}\n' \
+          "$port" "$TOKEN" "$CREDENTIAL_TOKEN" "$server_pid"
+      else
+        printf '{"port":%s,"token":"%s","pid":%s}\n' "$port" "$TOKEN" "$server_pid"
+      fi
       exit 0
     fi
   fi
   if ! kill -0 "$server_pid" 2>/dev/null; then
     wait "$server_pid" 2>/dev/null || true
     detail="$(tail -c 400 -- "$START_LOG" 2>/dev/null || true)"
-    rm -f -- "$LEASE" "$TOKEN_FILE" "$STATE"
+    rm -f -- "$LEASE" "$TOKEN_FILE" "$CREDENTIAL_TOKEN_FILE" "$STATE"
     fail "Codex app-server exited during startup${detail:+: $detail}"
   fi
   sleep 0.1
@@ -239,5 +337,5 @@ done
 
 terminate_tree "$server_pid"
 detail="$(tail -c 400 -- "$START_LOG" 2>/dev/null || true)"
-rm -f -- "$LEASE" "$TOKEN_FILE" "$STATE"
+rm -f -- "$LEASE" "$TOKEN_FILE" "$CREDENTIAL_TOKEN_FILE" "$STATE"
 fail "Codex app-server startup timed out${detail:+: $detail}"

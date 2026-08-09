@@ -3,6 +3,7 @@ package com.agentdeck.app.domain.setup
 import com.agentdeck.app.data.termux.TermuxCommand
 import com.agentdeck.app.data.termux.TermuxCommandResult
 import com.agentdeck.app.data.termux.TermuxGateway
+import com.agentdeck.app.data.runtime.TermuxRuntime
 import com.agentdeck.app.domain.env.EnvironmentScanner
 import com.agentdeck.app.domain.install.InstallPhase
 import com.agentdeck.app.domain.install.RecipeInstallProgress
@@ -29,7 +30,7 @@ class SetupCoordinatorTest {
         val coordinator = SetupCoordinator(
             scanner = scanner,
             installer = installer,
-            termux = FakeTermuxGateway(),
+            runtime = TermuxRuntime(FakeTermuxGateway()),
             scope = scope,
             onReport = reports::add,
         )
@@ -50,7 +51,7 @@ class SetupCoordinatorTest {
         val coordinator = SetupCoordinator(
             scanner = FakeScanner(missingTermux, missingTermux),
             installer = installer,
-            termux = FakeTermuxGateway(),
+            runtime = TermuxRuntime(FakeTermuxGateway()),
             scope = scope,
         )
 
@@ -67,7 +68,7 @@ class SetupCoordinatorTest {
         val coordinator = SetupCoordinator(
             scanner = FakeScanner(missingCodex, missingCodex),
             installer = installer,
-            termux = FakeTermuxGateway(),
+            runtime = TermuxRuntime(FakeTermuxGateway()),
             scope = scope,
         )
 
@@ -85,7 +86,7 @@ class SetupCoordinatorTest {
         val coordinator = SetupCoordinator(
             scanner = FakeScanner(loginRequired, loginRequired),
             installer = FakeInstaller(),
-            termux = gateway,
+            runtime = TermuxRuntime(gateway),
             scope = scope,
         )
 

@@ -1,11 +1,13 @@
 package com.agentdeck.app.domain.launch
 
 import android.annotation.SuppressLint
-import com.agentdeck.app.data.termux.TermuxCommand
 import com.agentdeck.app.domain.model.AgentCard
+import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.PathNamespace
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.ProviderType
+import com.agentdeck.app.domain.runtime.RuntimeCommand
+import com.agentdeck.app.domain.runtime.RuntimeProgram
 
 data class CliAdapterDescriptor(
     val recipeId: String,
@@ -21,7 +23,10 @@ data class CliAdapterDescriptor(
 interface CliAdapter {
     val descriptor: CliAdapterDescriptor
     fun validateCard(card: AgentCard): Result<Unit>
-    fun createCommand(card: AgentCard): Result<TermuxCommand>
+    fun createCommand(
+        card: AgentCard,
+        permissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT,
+    ): Result<RuntimeCommand>
 
     fun validateProfile(profile: ProviderProfile?): Result<Unit> = runCatching {
         if (profile != null) {
@@ -67,9 +72,6 @@ class CliAdapterRegistry(
 
 @SuppressLint("SdCardPath")
 object CodexUbuntuAdapter : CliAdapter {
-    private const val WRAPPER =
-        "/data/data/com.termux/files/home/.agentdeck/wrappers/codex-ubuntu.sh"
-
     override val descriptor = CliAdapterDescriptor(
         recipeId = "recipe_codex",
         templateId = "tpl_codex_ubuntu",
@@ -81,16 +83,23 @@ object CodexUbuntuAdapter : CliAdapter {
         defaultInnerBin = "codex",
     )
 
-    override fun createCommand(card: AgentCard): Result<TermuxCommand> = runCatching {
+    override fun createCommand(
+        card: AgentCard,
+        permissionLevel: CodexPermissionLevel,
+    ): Result<RuntimeCommand> = runCatching {
         require(card.enabled) { "卡片已停用" }
         validateCard(card).getOrThrow()
-        TermuxCommand(
-            sessionName = card.termuxSessionName,
-            executable = WRAPPER,
+        val approvalPolicy = requireNotNull(permissionLevel.terminalApprovalPolicy) {
+            "只读权限不会打开终端；请在对话中查看文件，或先更改权限等级"
+        }
+        RuntimeCommand(
+            instanceId = card.termuxSessionName,
+            program = RuntimeProgram.CODEX_TERMINAL,
             args = buildList {
                 addAll(listOf("--distro", card.distro))
                 addAll(listOf("--cwd", card.workspacePath))
                 addAll(listOf("--bin", card.innerBin))
+                addAll(listOf("--approval-policy", approvalPolicy))
                 add("--")
                 addAll(card.innerArgs)
             },
@@ -109,8 +118,6 @@ object CodexUbuntuAdapter : CliAdapter {
 
 @SuppressLint("SdCardPath")
 object ClaudeTermuxAdapter : CliAdapter {
-    private const val CLAUDE_BIN = "/data/data/com.termux/files/usr/bin/claude"
-
     override val descriptor = CliAdapterDescriptor(
         recipeId = "recipe_claude_code",
         templateId = "tpl_claude_termux",
@@ -122,12 +129,15 @@ object ClaudeTermuxAdapter : CliAdapter {
         defaultInnerBin = "claude",
     )
 
-    override fun createCommand(card: AgentCard): Result<TermuxCommand> = runCatching {
+    override fun createCommand(
+        card: AgentCard,
+        permissionLevel: CodexPermissionLevel,
+    ): Result<RuntimeCommand> = runCatching {
         require(card.enabled) { "卡片已停用" }
         validateCard(card).getOrThrow()
-        TermuxCommand(
-            sessionName = card.termuxSessionName,
-            executable = CLAUDE_BIN,
+        RuntimeCommand(
+            instanceId = card.termuxSessionName,
+            program = RuntimeProgram.CLAUDE_TERMINAL,
             args = card.innerArgs,
             workDir = card.workspacePath,
         )

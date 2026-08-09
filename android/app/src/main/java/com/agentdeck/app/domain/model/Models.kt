@@ -5,6 +5,25 @@ enum class ProviderType {
     ANTHROPIC,
 }
 
+enum class ProviderAdapterId {
+    SUB2API,
+    OPENAI_RESPONSES,
+    ANTHROPIC,
+}
+
+enum class ProviderConnectionStatus {
+    UNVERIFIED,
+    READY,
+    CREDENTIAL_REJECTED,
+    FORBIDDEN,
+    DISCOVERY_UNSUPPORTED,
+    RATE_LIMITED,
+    NETWORK_ERROR,
+    TLS_ERROR,
+    INVALID_RESPONSE,
+    UNSUPPORTED,
+}
+
 enum class PathNamespace {
     UBUNTU,
     TERMUX,
@@ -23,7 +42,23 @@ data class ProviderProfile(
     val type: ProviderType,
     val baseUrl: String,
     val defaultModel: String,
+    val adapterId: ProviderAdapterId = if (type == ProviderType.ANTHROPIC) {
+        ProviderAdapterId.ANTHROPIC
+    } else {
+        ProviderAdapterId.OPENAI_RESPONSES
+    },
+    val credentialRef: String? = null,
+    val connectionStatus: ProviderConnectionStatus = ProviderConnectionStatus.UNVERIFIED,
+    val lastCheckedAtEpochMs: Long? = null,
     val createdAtEpochMs: Long = System.currentTimeMillis(),
+    val updatedAtEpochMs: Long = createdAtEpochMs,
+)
+
+data class ProviderModel(
+    val providerId: String,
+    val id: String,
+    val displayName: String = id,
+    val discoveredAtEpochMs: Long,
 )
 
 data class AgentCard(
@@ -33,6 +68,8 @@ data class AgentCard(
     val recipeId: String,
     val templateId: String,
     val profileId: String?,
+    val modelId: String? = null,
+    val permissionLevel: CodexPermissionLevel? = null,
     val termuxSessionName: String,
     val workspaceNamespace: PathNamespace,
     val workspacePath: String,
@@ -117,6 +154,16 @@ data class EnvironmentReport(
 
     val canLaunchSessions: Boolean
         get() {
+            if (check("embedded_supported") != null) {
+                return setOf(
+                    "embedded_supported",
+                    "embedded_runtime",
+                    "ubuntu_installed",
+                    "embedded_tools",
+                    "codex_installed",
+                    "codex_wrapper",
+                ).all { id -> check(id)?.ok == true }
+            }
             val launchIds = setOf(
                 "termux_installed",
                 "termux_run_command_permission",
@@ -132,6 +179,9 @@ data class EnvironmentReport(
 
     val allCriticalOk: Boolean
         get() {
+            if (check("embedded_supported") != null) {
+                return canLaunchSessions && check("codex_authenticated")?.ok == true
+            }
             val criticalIds = setOf(
                 "termux_installed",
                 "termux_run_command_permission",

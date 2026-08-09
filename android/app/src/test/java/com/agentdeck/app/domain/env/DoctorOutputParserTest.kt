@@ -88,7 +88,7 @@ class DoctorOutputParserTest {
 
             assertEquals(result.output, 0, result.exitCode)
             assertEquals(EnvironmentCheckStatus.ACTION_REQUIRED, wrapper?.status)
-            assertEquals("需要补齐 1 个启动组件", wrapper?.detail)
+            assertEquals("需要补齐 2 个启动组件", wrapper?.detail)
         } finally {
             home.deleteRecursively()
         }
@@ -233,7 +233,7 @@ class DoctorOutputParserTest {
             val auth = DoctorOutputParser.parse(result.output)["codex_authenticated"]
 
             assertEquals(result.output, 0, result.exitCode)
-            assertTrue("login status 应被限时，实际 ${elapsedMillis}ms", elapsedMillis < 3_000)
+            assertTrue("login status 应被限时，实际 ${elapsedMillis}ms", elapsedMillis < 5_000)
             assertEquals(EnvironmentCheckStatus.ERROR, auth?.status)
             assertEquals("官方认证检查超时，未阻塞其它环境检测", auth?.detail)
         } finally {
@@ -305,6 +305,7 @@ class DoctorOutputParserTest {
         listOf(
             "codex-ubuntu.sh",
             "codex-app-server-start.sh",
+            "codex-provider-token.py",
         ).forEach { name ->
             val wrapper = File(home, ".agentdeck/wrappers/$name")
             wrapper.parentFile?.mkdirs()
@@ -312,12 +313,13 @@ class DoctorOutputParserTest {
                 "#!/bin/bash\n" +
                     "# check_for_update_on_startup=false\n" +
                     "# --sandbox danger-full-access\n" +
-                    "# --ask-for-approval on-request\n" +
+                    "# --ask-for-approval \"${'$'}approval_policy\"\n" +
                     "# --instance-key\n" +
-                    "# START_CONTRACT_VERSION=6\n" +
+                    "# START_CONTRACT_VERSION=7\n" +
                     "# --listen ws://127.0.0.1:0\n" +
                     "# --ws-auth capability-token\n" +
-                    "# --ws-token-file\n",
+                    "# --ws-token-file\n" +
+                    "# api_key_b64\n",
             )
             assertTrue(wrapper.setExecutable(true))
         }

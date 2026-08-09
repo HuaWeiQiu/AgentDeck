@@ -53,6 +53,24 @@ class SetupActionResolverTest {
         assertEquals(true, SetupState(readyReport(), isScanning = true).isReady)
     }
 
+    @Test
+    fun `embedded setup installs runtime before authentication`() {
+        val missingRuntime = embeddedReport().checks.map { check ->
+            if (check.id == "embedded_runtime") {
+                check.copy(status = EnvironmentCheckStatus.ACTION_REQUIRED)
+            } else if (check.id != "embedded_supported") {
+                check.copy(status = EnvironmentCheckStatus.BLOCKED)
+            } else {
+                check
+            }
+        }
+        assertEquals(
+            SetupAction.INSTALL_CODEX,
+            SetupState(EnvironmentReport(missingRuntime)).action,
+        )
+        assertEquals(SetupAction.READY, SetupState(embeddedReport()).action)
+    }
+
     private fun stateWith(id: String, status: EnvironmentCheckStatus): SetupState {
         val checks = readyReport().checks.map { check ->
             if (check.id == id) check.copy(status = status) else check
@@ -60,6 +78,20 @@ class SetupActionResolverTest {
         return SetupState(EnvironmentReport(checks))
     }
 }
+
+private fun embeddedReport(): EnvironmentReport = EnvironmentReport(
+    listOf(
+        "embedded_supported",
+        "embedded_runtime",
+        "ubuntu_installed",
+        "embedded_tools",
+        "codex_installed",
+        "codex_wrapper",
+        "codex_authenticated",
+    ).map { id ->
+        EnvironmentCheck(id, id, EnvironmentCheckStatus.READY, "ready")
+    },
+)
 
 internal fun readyReport(): EnvironmentReport = EnvironmentReport(
     listOf(

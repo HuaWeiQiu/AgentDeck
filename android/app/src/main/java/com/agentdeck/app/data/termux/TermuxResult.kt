@@ -4,22 +4,10 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import kotlinx.coroutines.CompletableDeferred
+import com.agentdeck.app.domain.runtime.RuntimeCommandResult
 import java.util.concurrent.ConcurrentHashMap
 
-data class TermuxCommandResult(
-    val stdout: String,
-    val stderr: String,
-    val exitCode: Int,
-    val stdoutOriginalLength: Int?,
-    val stderrOriginalLength: Int?,
-) {
-    val commandSucceeded: Boolean
-        get() = exitCode == 0
-
-    val outputWasTruncated: Boolean
-        get() = (stdoutOriginalLength ?: stdout.length) > stdout.length ||
-            (stderrOriginalLength ?: stderr.length) > stderr.length
-}
+typealias TermuxCommandResult = RuntimeCommandResult
 
 internal data class TermuxResultPayload(
     val stdout: String,

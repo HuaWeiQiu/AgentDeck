@@ -2,22 +2,29 @@ package com.agentdeck.app.domain.launch
 
 import com.agentdeck.app.data.repo.CardRepository
 import com.agentdeck.app.data.repo.ProfileRepository
-import com.agentdeck.app.data.termux.TermuxCommand
-import com.agentdeck.app.data.termux.TermuxGateway
 import com.agentdeck.app.domain.model.AgentCard
+import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.LaunchResult
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.recipe.RecipeCatalog
+import com.agentdeck.app.domain.runtime.AgentRuntime
+import com.agentdeck.app.domain.runtime.RuntimeCommand
 
 object LaunchCommandFactory {
     fun create(
         card: AgentCard,
         profile: ProviderProfile? = null,
+        defaultPermissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT,
         registry: CliAdapterRegistry = CliAdapterRegistry.default,
-    ): Result<TermuxCommand> = registry.forCard(card).fold(
+    ): Result<RuntimeCommand> = registry.forCard(card).fold(
         onSuccess = { adapter ->
             adapter.validateProfile(profile).fold(
-                onSuccess = { adapter.createCommand(card) },
+                onSuccess = {
+                    adapter.createCommand(
+                        card,
+                        CodexPermissionLevel.effective(card.permissionLevel, defaultPermissionLevel),
+                    )
+                },
                 onFailure = { Result.failure(it) },
             )
         },
@@ -29,18 +36,22 @@ class LaunchInteractor(
     private val cards: CardRepository,
     private val profiles: ProfileRepository,
     private val recipes: RecipeCatalog,
-    private val termux: TermuxGateway,
+    private val runtime: AgentRuntime,
     private val adapters: CliAdapterRegistry = CliAdapterRegistry.default,
 ) {
-    suspend fun launch(cardId: String): LaunchResult {
+    suspend fun launch(
+        cardId: String,
+        defaultPermissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT,
+    ): LaunchResult {
         val card = cards.getCard(cardId)
             ?: return LaunchResult.Failed("卡片不存在: $cardId")
 
-        if (!termux.isTermuxInstalled()) {
-            return LaunchResult.Failed("未安装 Termux，请先到设置页安装 F-Droid 版")
+        val runtimeStatus = runtime.status()
+        if (!runtimeStatus.installed) {
+            return LaunchResult.Failed("本机运行环境尚未安装，请先到设置页完成准备")
         }
-        if (!termux.hasRunCommandPermission()) {
-            return LaunchResult.Failed("尚未授予 Termux RUN_COMMAND 权限，请到设置页处理")
+        if (!runtimeStatus.ready) {
+            return LaunchResult.Failed(runtimeStatus.detail)
         }
 
         val recipe = recipes.loadRecipes().firstOrNull { it.id == card.recipeId }
@@ -52,12 +63,17 @@ class LaunchInteractor(
             profiles.getProfile(profileId)
                 ?: return LaunchResult.Failed("卡片绑定的 CLI 配置已不存在，请重新编辑卡片")
         }
-        val command = LaunchCommandFactory.create(card, profile, adapters).getOrElse {
+        val command = LaunchCommandFactory.create(
+            card,
+            profile,
+            defaultPermissionLevel,
+            adapters,
+        ).getOrElse {
             return LaunchResult.Failed(it.message ?: "启动配置无效")
         }
         return foregroundLaunchResult(
-            commandResult = termux.runCommand(command),
-            openTermux = termux::openTermux,
+            commandResult = runtime.runCommand(command),
+            openTermux = runtime::openConsole,
         )
     }
 

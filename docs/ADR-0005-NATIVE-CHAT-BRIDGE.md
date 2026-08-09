@@ -20,9 +20,12 @@ OpenAI 官方 `codex app-server` 已提供 Thread / Turn / Item、历史读取�
 7. 客户端按 Item 类型渲染 Agent 消息、reasoning、命令、文件变更、MCP 调用和错误。server-initiated command、file change 和 permissions approval 在当前 turn 内联展示并回送各自的结构化响应。
 8. 流式状态必须可重建。socket 断开会触发 supervisor 终止它拥有的完整 app-server/PRoot 进程树；重连后通过 `thread/resume` 恢复 history，并主动中断 rollout 中残留的 `inProgress` turn，避免旧状态阻塞新消息。若 Codex 明确返回 active-writer 错误，只废弃该 conversation 的旧 thread 映射并创建新 thread。页面内存不是唯一状态源。
 9. “在终端中打开”始终可用，用于 Codex 登录、桥接不兼容、诊断和官方 TUI 新能力。原生聊天失败不得损坏或删除 Codex 的现有会话。
-10. PRoot Ubuntu 是 Android 端的外层隔离边界。线程初始化保持 legacy `read-only`，避免仅打开会话就写入项目 trust；每个可执行 turn 按官方建议原子覆盖为 `externalSandbox` 并声明网络可用，同时保留 `on-request` 用户审批。这样既不启动依赖 Linux namespace 的内层 bubblewrap，也不扩大打开页面本身的副作用。
+10. PRoot Ubuntu 是 Android 端的外层隔离边界。线程初始化保持 legacy `read-only`，避免仅打开会话就写入项目 trust；每个可执行 turn 原子覆盖为 `externalSandbox` 并声明网络可用，避免启动 PRoot 内不可用的嵌套 Linux sandbox。固定 Codex 0.147.0 的官方源码明确说明 `externalSandbox` 仍拥有完整磁盘访问，因此 AgentDeck 不把它描述为文件级隔离，实际限制由下列审批预设和客户端响应共同执行：
+    - `只读`：`untrusted`，Codex 只自动运行官方识别的安全只读命令；AgentDeck 自动拒绝其余命令、文件修改和额外权限请求。
+    - `推荐`：`untrusted`，非安全操作必须显示客户可理解的审批；标准模式只能单次允许或拒绝。
+    - `完全访问`：`never`，不发起审批，仅供明确知晓风险的用户选择。
 11. app-server 使用 `check_for_update_on_startup=false`，不允许后台进程弹出升级交互；兼容性检测和升级由 AgentDeck Doctor/配方显式完成。
-12. 由 AgentDeck 打开的 Codex TUI 同样运行在 PRoot 外层边界内，因此 wrapper 使用 CLI 支持的 `danger-full-access` + `on-request` 组合绕开不可用的 bubblewrap；手动在 Termux 中启动的 Codex 不受 AgentDeck 参数影响。
+12. 由 AgentDeck 打开的 Codex TUI 同样运行在 PRoot 外层边界内，因此 wrapper 固定使用 CLI 支持的 `danger-full-access` 绕开不可用的 bubblewrap，并把“推荐/完全访问”分别映射为 `untrusted/never`。TUI 无法由 Android 客户端强制回绝审批，所以“只读”禁止打开终端；手动在 Termux 中启动的 Codex 不受 AgentDeck 参数影响。
 13. 每个 AgentDeck conversation 使用稳定的非敏感 instance key、唯一进程 marker 和私有 PID lease。启动新 app-server 前只匹配同一 marker 并递归终止其子进程树，防止 Android 进程被杀后残留 app-server 与新实例并发写同一 rollout，也避免通配杀死用户手动运行的 Codex。
 
 ## 分期

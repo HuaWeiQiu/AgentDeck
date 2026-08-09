@@ -1,11 +1,12 @@
 package com.agentdeck.app.domain.env
 
 import android.annotation.SuppressLint
-import com.agentdeck.app.data.termux.TermuxCommand
-import com.agentdeck.app.data.termux.TermuxGateway
 import com.agentdeck.app.domain.model.EnvironmentCheck
 import com.agentdeck.app.domain.model.EnvironmentCheckStatus
 import com.agentdeck.app.domain.model.EnvironmentReport
+import com.agentdeck.app.domain.runtime.AgentRuntime
+import com.agentdeck.app.domain.runtime.RuntimeCommand
+import com.agentdeck.app.domain.runtime.RuntimeProgram
 
 internal data class DoctorMarker(
     val id: String,
@@ -45,7 +46,7 @@ interface EnvironmentScanner {
 
 @SuppressLint("SdCardPath")
 class EnvironmentProbe(
-    private val termux: TermuxGateway,
+    private val runtime: AgentRuntime,
 ) : EnvironmentScanner {
     override fun initialReport(): EnvironmentReport = preflightReport(EnvironmentCheckStatus.UNKNOWN)
 
@@ -91,14 +92,14 @@ class EnvironmentProbe(
         script: String,
         timeoutMillis: Long,
     ): DoctorPhaseResult {
-        val command = TermuxCommand(
-            sessionName = sessionName,
-            executable = "/data/data/com.termux/files/usr/bin/bash",
-            args = listOf("-c", script),
+        val command = RuntimeCommand(
+            instanceId = sessionName,
+            program = RuntimeProgram.HOST_SHELL,
+            script = script,
             background = true,
-            reuseExistingSession = false,
+            reuseExistingInstance = false,
         )
-        return termux.runCommandForResult(command, timeoutMillis).fold(
+        return runtime.runCommandForResult(command, timeoutMillis).fold(
             onSuccess = { commandResult ->
                 val markers = DoctorOutputParser.parse(commandResult.stdout)
                 val error = when {
@@ -125,8 +126,9 @@ class EnvironmentProbe(
     }
 
     private fun preflightReport(shellStatus: EnvironmentCheckStatus): EnvironmentReport {
-        val installed = termux.isTermuxInstalled()
-        val permission = installed && termux.hasRunCommandPermission()
+        val runtimeStatus = runtime.status()
+        val installed = runtimeStatus.installed
+        val permission = installed && runtimeStatus.ready
         val shellDetail = when {
             !installed -> "先安装 Termux"
             !permission -> "先授予 RUN_COMMAND 权限"
@@ -327,7 +329,8 @@ class EnvironmentProbe(
             missing_wrapper=0
             for wrapper in \
               codex-ubuntu.sh \
-              codex-app-server-start.sh; do
+              codex-app-server-start.sh \
+              codex-provider-token.py; do
               if [[ ! -x "${'$'}HOME/.agentdeck/wrappers/${'$'}wrapper" ]]; then
                 missing_wrapper=${'$'}((missing_wrapper + 1))
               fi
@@ -335,9 +338,11 @@ class EnvironmentProbe(
             if [[ "${'$'}missing_wrapper" -eq 0 ]] &&
               grep -Fq 'check_for_update_on_startup=false' "${'$'}HOME/.agentdeck/wrappers/codex-ubuntu.sh" &&
               grep -Fq -- '--sandbox danger-full-access' "${'$'}HOME/.agentdeck/wrappers/codex-ubuntu.sh" &&
-              grep -Fq -- '--ask-for-approval on-request' "${'$'}HOME/.agentdeck/wrappers/codex-ubuntu.sh" &&
+              grep -Fq -- '--ask-for-approval "${'$'}approval_policy"' "${'$'}HOME/.agentdeck/wrappers/codex-ubuntu.sh" &&
               grep -Fq -- '--instance-key' "${'$'}HOME/.agentdeck/wrappers/codex-app-server-start.sh" &&
-              grep -Fq 'START_CONTRACT_VERSION=6' "${'$'}HOME/.agentdeck/wrappers/codex-app-server-start.sh" &&
+              test -x "${'$'}HOME/.agentdeck/wrappers/codex-provider-token.py" &&
+              grep -Fq 'START_CONTRACT_VERSION=7' "${'$'}HOME/.agentdeck/wrappers/codex-app-server-start.sh" &&
+              grep -Fq 'api_key_b64' "${'$'}HOME/.agentdeck/wrappers/codex-provider-token.py" &&
               grep -Fq -- '--listen ws://127.0.0.1:0' "${'$'}HOME/.agentdeck/wrappers/codex-app-server-start.sh" &&
               grep -Fq -- '--ws-auth capability-token' "${'$'}HOME/.agentdeck/wrappers/codex-app-server-start.sh" &&
               grep -Fq -- '--ws-token-file' "${'$'}HOME/.agentdeck/wrappers/codex-app-server-start.sh"; then
