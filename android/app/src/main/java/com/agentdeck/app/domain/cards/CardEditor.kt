@@ -1,8 +1,10 @@
 package com.agentdeck.app.domain.cards
 
 import com.agentdeck.app.domain.launch.CliAdapter
+import com.agentdeck.app.domain.chat.ConversationIdentityPolicy
 import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.CodexPermissionLevel
+import com.agentdeck.app.domain.model.ConversationIdentity
 import com.agentdeck.app.domain.model.ProviderProfile
 
 data class CardDraft(
@@ -12,6 +14,7 @@ data class CardDraft(
     val profileId: String?,
     val modelId: String?,
     val permissionLevel: CodexPermissionLevel? = null,
+    val identity: ConversationIdentity? = null,
     val workspacePath: String,
     val enabled: Boolean,
 )
@@ -42,6 +45,7 @@ object CardEditor {
             require(draft.modelId.none { it.isISOControl() }) { "模型 ID 包含非法字符" }
         }
 
+        val identity = ConversationIdentityPolicy.normalize(draft.identity)
         val id = existing?.id ?: newId
         require(id.matches(CARD_ID_PATTERN)) { "卡片 ID 无效" }
         val descriptor = adapter.descriptor
@@ -61,6 +65,7 @@ object CardEditor {
             innerBin = descriptor.defaultInnerBin,
             innerArgs = existing?.innerArgs ?: emptyList(),
             enabled = draft.enabled,
+            identity = identity,
         )
         adapter.validateCard(card).getOrThrow()
         card

@@ -1,6 +1,5 @@
 package com.agentdeck.app.ui.setup
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -59,12 +58,9 @@ fun customerSetupPresentation(state: SetupState): CustomerSetupPresentation {
         state.isInstalling -> "正在安装并验证所需组件"
         else -> when (state.action) {
             SetupAction.SCAN -> "正在确认本机运行环境和模型连接"
-            SetupAction.INSTALL_TERMUX -> "当前版本需要安装一个本机运行组件"
-            SetupAction.GRANT_PERMISSION -> "允许 AgentDeck 在本机运行 Codex"
-            SetupAction.ALLOW_TERMUX_BACKGROUND -> "系统限制了后台任务，请调整运行权限"
-            SetupAction.ENABLE_EXTERNAL_APPS -> "完成运行组件设置后即可继续"
             SetupAction.INSTALL_CODEX -> "将安装或修复所需组件，不会删除对话和项目"
-            SetupAction.CONFIGURE_CODEX_AUTH -> "尚未检测到可用账号或 API Key"
+            SetupAction.CONFIGURE_CODEX_AUTH ->
+                "选择 ChatGPT、OpenAI API Key 或第三方 Responses 服务"
             SetupAction.UNSUPPORTED_DEVICE -> "当前测试版仅支持 ARM64 Android 设备"
             SetupAction.READY -> "可以开始新的对话"
         }
@@ -74,10 +70,6 @@ fun customerSetupPresentation(state: SetupState): CustomerSetupPresentation {
         state.isInstalling -> "准备中"
         else -> when (state.action) {
             SetupAction.SCAN -> "重新检查"
-            SetupAction.INSTALL_TERMUX -> "安装运行组件"
-            SetupAction.GRANT_PERMISSION -> "允许本机运行"
-            SetupAction.ALLOW_TERMUX_BACKGROUND -> "调整后台限制"
-            SetupAction.ENABLE_EXTERNAL_APPS -> "完成组件设置"
             SetupAction.INSTALL_CODEX -> "安装或修复"
             SetupAction.CONFIGURE_CODEX_AUTH -> "连接模型服务"
             SetupAction.UNSUPPORTED_DEVICE -> "设备不支持"
@@ -95,45 +87,16 @@ fun customerSetupPresentation(state: SetupState): CustomerSetupPresentation {
 }
 
 fun customerSetupSteps(report: EnvironmentReport): List<SetupDisplayStep> {
-    if (report.check("embedded_supported") != null) {
-        return listOf(
-            report.combinedStep(
-                id = "device_ready",
-                label = "设备准备",
-                checkIds = listOf("embedded_supported"),
-            ),
-            report.combinedStep(
-                id = "local_runtime",
-                label = "本机运行环境",
-                checkIds = listOf("embedded_runtime", "ubuntu_installed", "embedded_tools"),
-            ),
-            report.combinedStep(
-                id = "agent_ready",
-                label = "Codex",
-                checkIds = listOf("codex_installed", "codex_wrapper"),
-            ),
-            report.combinedStep(
-                id = "model_connection",
-                label = "模型连接",
-                checkIds = listOf("codex_authenticated"),
-            ),
-        )
-    }
     return listOf(
         report.combinedStep(
             id = "device_ready",
             label = "设备准备",
-            checkIds = listOf(
-                "termux_installed",
-                "termux_run_command_permission",
-                "termux_background_execution",
-                "allow_external_apps",
-            ),
+            checkIds = listOf("embedded_supported"),
         ),
         report.combinedStep(
             id = "local_runtime",
             label = "本机运行环境",
-            checkIds = listOf("proot_distro", "ubuntu_installed"),
+            checkIds = listOf("embedded_runtime", "ubuntu_installed", "embedded_tools"),
         ),
         report.combinedStep(
             id = "agent_ready",
@@ -228,7 +191,7 @@ private fun statusAppearance(status: EnvironmentCheckStatus): StatusAppearance =
     EnvironmentCheckStatus.READY -> StatusAppearance(
         Icons.Filled.CheckCircle,
         "完成",
-        if (isSystemInDarkTheme()) Color(0xFF6EE7B7) else Color(0xFF16825D),
+        MaterialTheme.colorScheme.secondary,
     )
     EnvironmentCheckStatus.ACTION_REQUIRED -> StatusAppearance(
         Icons.Filled.WarningAmber,

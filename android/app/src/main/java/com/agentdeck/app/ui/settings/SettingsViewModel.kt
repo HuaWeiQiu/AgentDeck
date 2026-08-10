@@ -5,7 +5,6 @@ import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.settings.ExperienceLevel
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.setup.SetupState
-import com.agentdeck.app.domain.runtime.RuntimeSelection
 import kotlinx.coroutines.flow.StateFlow
 
 class SettingsViewModel : ViewModel() {
@@ -15,7 +14,6 @@ class SettingsViewModel : ViewModel() {
     val experienceLevel: StateFlow<ExperienceLevel> = ServiceLocator.experienceSettings.level
     val codexPermissionLevel: StateFlow<CodexPermissionLevel> =
         ServiceLocator.experienceSettings.codexPermissionLevel
-    val runtimeSelection: StateFlow<RuntimeSelection> = ServiceLocator.runtimeSettings.selection
 
     fun setAdvancedEnabled(enabled: Boolean) {
         ServiceLocator.experienceSettings.setLevel(
@@ -27,12 +25,4 @@ class SettingsViewModel : ViewModel() {
         ServiceLocator.experienceSettings.setCodexPermissionLevel(level)
     }
 
-    fun setRuntimeSelection(selection: RuntimeSelection) {
-        ServiceLocator.runtimeSettings.setSelection(selection)
-        setup.scan()
-    }
-
-    fun scan() = setup.scan()
-
-    fun openTermux(): Boolean = setup.openTermux()
 }

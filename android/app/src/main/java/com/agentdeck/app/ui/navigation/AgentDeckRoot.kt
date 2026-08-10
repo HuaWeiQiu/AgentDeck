@@ -10,6 +10,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -23,8 +24,10 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.ui.chat.ChatScreen
+import com.agentdeck.app.ui.config.CodexConfigScreen
 import com.agentdeck.app.ui.sessions.SessionsScreen
 import com.agentdeck.app.ui.settings.SettingsScreen
+import com.agentdeck.app.ui.settings.ConversationDefaultsScreen
 import com.agentdeck.app.ui.models.ModelsScreen
 import com.agentdeck.app.ui.store.SetupScreen
 
@@ -42,11 +45,10 @@ private val tabs = listOf(
 internal val standardTopLevelRoutes: Set<String> = tabs.mapTo(linkedSetOf()) { it.route }
 
 @Composable
-fun AgentDeckRoot() {
+fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
     val navController = rememberNavController()
     val startDestination = remember {
         resolveStartDestination(
-            runtimeReady = ServiceLocator.runtime.status().ready,
             setupPreviouslyCompleted = !ServiceLocator.onboarding.shouldOpenDoctor(),
         )
     }
@@ -63,6 +65,15 @@ fun AgentDeckRoot() {
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         ServiceLocator.setup.scan()
+    }
+
+    // Chat event notifications deep-link straight back into the conversation. The key
+    // includes the arrival timestamp, so re-tapping a card's notification navigates
+    // again even for the same card.
+    LaunchedEffect(deepLink) {
+        deepLink?.first?.let { cardId ->
+            navController.navigate("chat/$cardId") { launchSingleTop = true }
+        }
     }
 
     Scaffold(
@@ -100,7 +111,14 @@ fun AgentDeckRoot() {
                     } else {
                         null
                     },
-                    onReady = { navigateTopLevel("sessions") },
+                    onReady = {
+                        // setup 作为 startDestination 时必须 inclusive 弹出，
+                        // 否则它留在栈底，sessions 页按返回会回到 setup
+                        navController.navigate("sessions") {
+                            popUpTo("setup") { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
                     onOpenModels = { navController.navigate("models") },
                 )
             }
@@ -108,10 +126,20 @@ fun AgentDeckRoot() {
                 SettingsScreen(
                     onOpenSetup = { navController.navigate("setup") { launchSingleTop = true } },
                     onOpenModels = { navController.navigate("models") },
+                    onOpenCodexConfig = { navController.navigate("codex-config") },
+                    onOpenConversationDefaults = {
+                        navController.navigate("conversation-defaults")
+                    },
                 )
+            }
+            composable("conversation-defaults") {
+                ConversationDefaultsScreen(onBack = navController::navigateUp)
             }
             composable("models") {
                 ModelsScreen(onBack = navController::navigateUp)
+            }
+            composable("codex-config") {
+                CodexConfigScreen(onBack = navController::navigateUp)
             }
             composable("chat/{cardId}") { entry ->
                 val cardId = entry.arguments?.getString("cardId").orEmpty()
@@ -125,9 +153,8 @@ fun AgentDeckRoot() {
 }
 
 internal fun resolveStartDestination(
-    runtimeReady: Boolean,
     setupPreviouslyCompleted: Boolean,
-): String = if (runtimeReady && setupPreviouslyCompleted) {
+): String = if (setupPreviouslyCompleted) {
     "sessions"
 } else {
     "setup"

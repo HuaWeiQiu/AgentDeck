@@ -26,7 +26,7 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migration3To5PreservesDataAndAddsInheritedPermission() {
+    fun migration3To7PreservesDataAndAddsConversationMetadata() {
         context.openOrCreateDatabase(DATABASE_NAME, Context.MODE_PRIVATE, null).use { db ->
             db.execSQL(
                 """
@@ -82,7 +82,12 @@ class AppDatabaseMigrationTest {
         }
 
         val room = Room.databaseBuilder(context, AppDatabase::class.java, DATABASE_NAME)
-            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
+            )
             .build()
         try {
             val database = room.openHelper.writableDatabase
@@ -109,6 +114,22 @@ class AppDatabaseMigrationTest {
                 assertTrue(cursor.moveToFirst())
                 assertEquals("provider_profiles", cursor.getString(cursor.getColumnIndexOrThrow("table")))
                 assertEquals("CASCADE", cursor.getString(cursor.getColumnIndexOrThrow("on_delete")))
+            }
+            database.query(
+                "SELECT customTitle, pinned, archived FROM agent_cards WHERE id = 'card_old'",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.isNull(0))
+                assertEquals(0, cursor.getInt(1))
+                assertEquals(0, cursor.getInt(2))
+                }
+            database.query(
+                "SELECT lastActiveAtEpochMs, roleName, roleSelfDefinition, roleObjective, " +
+                    "roleCommunicationStyle, roleBoundaries FROM agent_cards WHERE id = 'card_old'",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0L, cursor.getLong(0))
+                for (index in 1..5) assertTrue(cursor.isNull(index))
             }
         } finally {
             room.close()

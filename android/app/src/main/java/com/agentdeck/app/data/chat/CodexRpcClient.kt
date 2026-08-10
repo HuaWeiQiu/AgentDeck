@@ -66,7 +66,7 @@ class CodexRpcTimeoutException(
     val timeoutMillis: Long,
 ) : Exception(
     "Codex 请求 $method 在 ${timeoutMillis / 1_000} 秒内没有响应；" +
-        "Termux 可能被系统冻结，请检查其后台耗电设置",
+        "内嵌运行环境可能已被系统暂停，请重试连接",
 )
 
 internal sealed interface CodexSocketEvent {
@@ -128,7 +128,8 @@ private class OkHttpCodexTransport(
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     val error = IllegalStateException("Codex WebSocket 已关闭（$code）")
                     if (!opened.completeExceptionally(error)) {
-                        eventChannel.trySend(
+                        deliverDisconnected(
+                            eventChannel,
                             CodexSocketEvent.Disconnected(
                                 reason.ifBlank { "Codex WebSocket 已关闭（$code）" },
                             ),
@@ -141,7 +142,10 @@ private class OkHttpCodexTransport(
                         ?: error.message
                         ?: "Codex WebSocket 连接失败"
                     if (!opened.completeExceptionally(IllegalStateException(detail, error))) {
-                        eventChannel.trySend(CodexSocketEvent.Disconnected(detail, error))
+                        deliverDisconnected(
+                            eventChannel,
+                            CodexSocketEvent.Disconnected(detail, error),
+                        )
                     }
                 }
             }
@@ -160,6 +164,21 @@ private class OkHttpCodexTransport(
                 throw error
             }
         }
+    }
+}
+
+/**
+ * OkHttp listener callbacks cannot suspend, so a full buffer cannot be awaited.
+ * If the disconnected event does not fit, close the channel with the same error
+ * instead: the consumer drains buffered messages first and then throws the close
+ * cause, so the disconnect is never silently dropped.
+ */
+private fun deliverDisconnected(
+    eventChannel: Channel<CodexSocketEvent>,
+    event: CodexSocketEvent.Disconnected,
+) {
+    if (eventChannel.trySend(event).isFailure) {
+        eventChannel.close(IllegalStateException(event.message, event.cause))
     }
 }
 
@@ -188,6 +207,9 @@ class CodexRpcClient internal constructor(
                     .put("name", "agentdeck")
                     .put("title", "AgentDeck")
                     .put("version", version),
+            ).put(
+                "capabilities",
+                JSONObject().put("experimentalApi", true),
             ),
         )
         notify("initialized", JSONObject())
@@ -259,7 +281,10 @@ class CodexRpcClient internal constructor(
         } catch (error: Exception) {
             if (!closed.get()) {
                 failPending(IllegalStateException("Codex 连接已断开", error))
-                inbound.trySend(CodexInbound.Disconnected(error.message ?: "Codex 连接已断开"))
+                // Suspending send: the disconnect must always reach the collector,
+                // even when the inbound buffer is momentarily full. close() cancels
+                // this scope, so a dead collector cannot deadlock the loop.
+                inbound.send(CodexInbound.Disconnected(error.message ?: "Codex 连接已断开"))
             }
         }
     }

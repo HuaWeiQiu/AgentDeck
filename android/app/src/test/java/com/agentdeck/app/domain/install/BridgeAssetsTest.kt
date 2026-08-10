@@ -41,6 +41,7 @@ class BridgeAssetsTest {
         val start = File(repoRoot, "wrappers/codex-app-server-start.sh").readText()
 
         assertTrue(start.contains("START_CONTRACT_VERSION=7"))
+        assertFalse(start.contains("--profile agentdeck"))
         assertTrue(start.contains("--listen ws://127.0.0.1:0"))
         assertTrue(start.contains("--ws-auth capability-token"))
         assertTrue(start.contains("--ws-token-file"))

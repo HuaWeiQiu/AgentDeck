@@ -7,4 +7,9 @@ Embedded ARM64 runtime components:
 - PRoot (Termux fork), GPL-2.0, executed as a separate process.
 - talloc 2.4.3, LGPL-3.0, loaded by PRoot.
 
+Codex profile validation components:
+- tomlj 1.1.1, Apache-2.0.
+- ANTLR 4 Runtime 4.11.1, BSD-3-Clause.
+- Checker Qual 3.21.2, MIT.
+
 See third_party/EMBEDDED_RUNTIME.md and the license files packaged in the APK.

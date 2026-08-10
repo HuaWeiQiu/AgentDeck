@@ -1,5 +1,7 @@
 package com.agentdeck.app.data.chat
 
+import com.agentdeck.app.data.config.CodexProfileSynchronizer
+import com.agentdeck.app.data.config.CodexProfileRuntimeConfig
 import com.agentdeck.app.data.termux.TermuxCommand
 import com.agentdeck.app.data.termux.TermuxCommandResult
 import com.agentdeck.app.data.termux.TermuxGateway
@@ -11,6 +13,7 @@ import com.agentdeck.app.domain.model.ProviderType
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -66,6 +69,7 @@ class CodexBridgeLauncherTest {
     @Test
     fun `launcher gives each card a validated bridge instance key`() = runBlocking {
         var captured: TermuxCommand? = null
+        var synchronizedDistro: String? = null
         val gateway = object : TermuxGateway {
             override fun isTermuxInstalled() = true
             override fun hasRunCommandPermission() = true
@@ -101,7 +105,17 @@ class CodexBridgeLauncherTest {
             workspacePath = "/root/projects/default",
         )
 
-        CodexBridgeLauncher(TermuxRuntime(gateway)).launch(card).getOrThrow()
+        val profileConfig = CodexProfileRuntimeConfig.fromValidatedToml(
+            "model_reasoning_effort = \"high\"\n",
+        )
+        val launcher = CodexBridgeLauncher(
+            TermuxRuntime(gateway),
+            CodexProfileSynchronizer { distro ->
+                synchronizedDistro = distro
+                Result.success(profileConfig)
+            },
+        )
+        val endpoint = launcher.launch(card).getOrThrow()
 
         val command = requireNotNull(captured)
         val keyIndex = command.args.indexOf("--instance-key")
@@ -109,6 +123,17 @@ class CodexBridgeLauncherTest {
         assertTrue(keyIndex >= 0)
         assertTrue(instanceKey.matches(Regex("[a-f0-9]{1,16}")))
         assertEquals("agentdeck-chat-$instanceKey", command.sessionName)
+        assertEquals("ubuntu", synchronizedDistro)
+        assertEquals(
+            "high",
+            endpoint.profileConfig.sessionConfig(managedProvider = false)
+                .getString("model_reasoning_effort"),
+        )
+
+        synchronizedDistro = null
+        val accountEndpoint = launcher.launchForAccount(card).getOrThrow()
+        assertNull(synchronizedDistro)
+        assertEquals(0, accountEndpoint.profileConfig.sessionConfig(false).length())
     }
 
     @Test

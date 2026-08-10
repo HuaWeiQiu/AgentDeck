@@ -11,7 +11,6 @@ class RoutingEnvironmentScanner(
 ) : EnvironmentScanner {
     override fun initialReport(): EnvironmentReport = selected().initialReport()
     override suspend fun scan(): EnvironmentReport = selected().scan()
-    override fun allowExternalAppsFixCommand(): String = selected().allowExternalAppsFixCommand()
     override fun errorReport(message: String): EnvironmentReport = selected().errorReport(message)
 
     private fun selected(): EnvironmentScanner = when (selection.value) {

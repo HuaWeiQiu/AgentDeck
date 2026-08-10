@@ -74,6 +74,7 @@ class WrapperContractTest {
             assertFalse(fixedInnerScript.contains(workspace))
             assertFalse(fixedInnerScript.contains(cliArg))
             assertTrue(fixedInnerScript.contains("check_for_update_on_startup=false"))
+            assertFalse(fixedInnerScript.contains("--profile agentdeck"))
             assertTrue(fixedInnerScript.contains("--sandbox danger-full-access"))
             assertTrue(fixedInnerScript.contains("--ask-for-approval \"${'$'}approval_policy\""))
             assertEquals("agentdeck", captured[7])

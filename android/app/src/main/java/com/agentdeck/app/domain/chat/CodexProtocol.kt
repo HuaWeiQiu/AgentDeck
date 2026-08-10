@@ -2,35 +2,168 @@ package com.agentdeck.app.domain.chat
 
 import org.json.JSONArray
 import org.json.JSONObject
+import com.agentdeck.app.data.chat.RpcRequestId
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 
 object CodexProtocol {
+    fun modelListParams(cursor: String? = null): JSONObject = JSONObject()
+        .put("limit", MODEL_LIST_PAGE_SIZE)
+        .put("includeHidden", false)
+        .apply { cursor?.let { put("cursor", it) } }
+
+    fun modelPage(response: JSONObject): CodexModelPage {
+        val models = response.optJSONArray("data")?.objects().orEmpty().mapNotNull { value ->
+            val model = value.nullableString("model") ?: value.nullableString("id")
+                ?: return@mapNotNull null
+            if (model.length > MAX_MODEL_ID_LENGTH || model.any(Char::isISOControl)) {
+                return@mapNotNull null
+            }
+            val displayName = value.nullableString("displayName")
+                ?.take(MAX_MODEL_DISPLAY_NAME_LENGTH)
+                ?: model
+            CodexModelOption(
+                id = model,
+                displayName = displayName,
+                isDefault = value.optBoolean("isDefault", false),
+            )
+        }.distinctBy { it.id }
+        return CodexModelPage(
+            models = models,
+            nextCursor = response.nullableString("nextCursor"),
+        )
+    }
+
     fun threadStartParams(
         cwd: String,
         permissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT,
-    ): JSONObject = runtimeThreadParams(cwd, permissionLevel)
+        profileConfig: JSONObject? = null,
+        modelOverride: String? = null,
+        modelProviderOverride: String? = null,
+    ): JSONObject = runtimeThreadParams(
+        cwd,
+        permissionLevel,
+        profileConfig,
+        modelOverride,
+        modelProviderOverride,
+        clearMissingDeveloperInstructions = false,
+    )
 
     fun threadResumeParams(
         threadId: String,
         cwd: String,
         permissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT,
-    ): JSONObject = runtimeThreadParams(cwd, permissionLevel).put("threadId", threadId)
+        profileConfig: JSONObject? = null,
+        modelOverride: String? = null,
+        modelProviderOverride: String? = null,
+    ): JSONObject = runtimeThreadParams(
+        cwd,
+        permissionLevel,
+        profileConfig,
+        modelOverride,
+        modelProviderOverride,
+        clearMissingDeveloperInstructions = true,
+    ).put("threadId", threadId)
 
     fun turnStartParams(
         threadId: String,
         text: String,
         permissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT,
+        modelOverride: String? = null,
+        collaborationModel: String? = modelOverride,
+        reasoningEffort: String? = null,
+        developerInstructions: String? = null,
     ): JSONObject =
         JSONObject()
             .put("threadId", threadId)
             .put("input", JSONArray().put(JSONObject().put("type", "text").put("text", text)))
             .put("approvalPolicy", permissionLevel.approvalPolicy)
+            .apply {
+                if (modelOverride != null) put("model", modelOverride)
+                collaborationModel?.let { model ->
+                    put(
+                        "collaborationMode",
+                        JSONObject()
+                            .put("mode", "default")
+                            .put(
+                                "settings",
+                                JSONObject()
+                                    .put("model", model)
+                                    .apply {
+                                        reasoningEffort?.let {
+                                            put("reasoning_effort", it)
+                                        }
+                                    }
+                                    .put(
+                                        "developer_instructions",
+                                        developerInstructions ?: JSONObject.NULL,
+                                    ),
+                            ),
+                    )
+                }
+            }
             .put(
                 "sandboxPolicy",
                 JSONObject()
                     .put("type", "externalSandbox")
                     .put("networkAccess", "enabled"),
             )
+
+    /** Inject a message into an in-progress turn; `expectedTurnId` must match. */
+    fun turnSteerParams(threadId: String, turnId: String, text: String): JSONObject =
+        JSONObject()
+            .put("threadId", threadId)
+            .put("expectedTurnId", turnId)
+            .put("input", JSONArray().put(JSONObject().put("type", "text").put("text", text)))
+
+    fun parseUserInputRequest(id: RpcRequestId, params: JSONObject): ChatUserInputRequest? {
+        val questionsJson = params.optJSONArray("questions") ?: return null
+        val questions = buildList {
+            for (index in 0 until questionsJson.length()) {
+                val question = questionsJson.optJSONObject(index) ?: continue
+                val questionId = question.nullableString("id") ?: continue
+                add(
+                    ToolUserInputQuestion(
+                        id = questionId,
+                        header = question.nullableString("header").orEmpty(),
+                        question = question.nullableString("question").orEmpty(),
+                        options = question.optJSONArray("options")
+                            ?.objects()
+                            ?.mapNotNull { option ->
+                                val label = option.nullableString("label") ?: return@mapNotNull null
+                                ToolUserInputOption(
+                                    label = label,
+                                    description = option.nullableString("description").orEmpty(),
+                                )
+                            }
+                            .orEmpty(),
+                        isOther = question.optBoolean("isOther", false),
+                        isSecret = question.optBoolean("isSecret", false),
+                    ),
+                )
+            }
+        }
+        if (questions.isEmpty()) return null
+        return ChatUserInputRequest(
+            requestId = id,
+            itemId = params.optString("itemId"),
+            questions = questions,
+        )
+    }
+
+    /** `{answers: {questionId: {answers: [String]}}}` per the 0.147.0 schema. */
+    fun userInputResponse(request: ChatUserInputRequest, answers: Map<String, List<String>>): JSONObject {
+        val answersJson = JSONObject()
+        request.questions.forEach { question ->
+            answersJson.put(
+                question.id,
+                JSONObject().put(
+                    "answers",
+                    JSONArray(answers[question.id].orEmpty()),
+                ),
+            )
+        }
+        return JSONObject().put("answers", answersJson)
+    }
 
     fun shouldAutoDecline(permissionLevel: CodexPermissionLevel): Boolean =
         permissionLevel == CodexPermissionLevel.READ_ONLY
@@ -53,6 +186,16 @@ object CodexProtocol {
         requireNotNull(response.optJSONObject("thread")?.nullableString("id")) {
             "Codex 响应缺少 thread id"
         }
+
+    fun threadUpdatedAtEpochMs(response: JSONObject): Long? {
+        val thread = response.optJSONObject("thread") ?: return null
+        val turns = thread.optJSONArray("turns") ?: return null
+        if (turns.length() == 0) return null
+        val seconds = thread.optLong("updatedAt", 0L)
+        return seconds.takeIf { it > 0L }?.let { value ->
+            if (value > EPOCH_SECONDS_UPPER_BOUND) value else value * 1_000L
+        }
+    }
 
     fun turnId(response: JSONObject): String =
         requireNotNull(response.optJSONObject("turn")?.nullableString("id")) {
@@ -130,7 +273,8 @@ object CodexProtocol {
 
             "fileChange" -> {
                 val changes = value.optJSONArray("changes")?.objects().orEmpty()
-                val paths = changes.mapNotNull { it.nullableString("path") }.distinct()
+                val patches = fileChangePatches(changes)
+                val paths = patches.map { it.path }.distinct()
                 ChatItem(
                     id,
                     ChatItemKind.FILE_CHANGE,
@@ -140,6 +284,7 @@ object CodexProtocol {
                         else -> "准备文件修改"
                     },
                     status = value.nullableString("status"),
+                    patches = patches,
                 )
             }
 
@@ -186,7 +331,15 @@ object CodexProtocol {
     fun upsert(current: List<ChatItem>, incoming: ChatItem): List<ChatItem> {
         val existingIndex = current.indexOfFirst { it.id == incoming.id }
         if (existingIndex >= 0) {
-            return current.toMutableList().apply { set(existingIndex, incoming) }
+            val existing = current[existingIndex]
+            // Live patch updates arrive via item/fileChange/patchUpdated; keep them
+            // when a later item snapshot (e.g. item/completed) carries no patches.
+            val merged = if (incoming.patches.isEmpty() && existing.patches.isNotEmpty()) {
+                incoming.copy(patches = existing.patches)
+            } else {
+                incoming
+            }
+            return current.toMutableList().apply { set(existingIndex, merged) }
         }
         if (incoming.kind == ChatItemKind.USER) {
             val optimisticIndex = current.indexOfFirst {
@@ -217,16 +370,73 @@ object CodexProtocol {
             ?: "Codex 返回了错误"
     }
 
+    /**
+     * Patches from an `item/fileChange/patchUpdated` notification:
+     * `changes: [{path, kind: {type}, diff}]`.
+     */
+    fun patchUpdatedPatches(params: JSONObject): List<FilePatch> =
+        params.optJSONArray("changes")?.objects().orEmpty().mapNotNull { change ->
+            val path = change.nullableString("path") ?: return@mapNotNull null
+            val diff = change.nullableString("diff").orEmpty()
+            val kind = change.optJSONObject("kind")?.nullableString("type") ?: "update"
+            FilePatch(path = path, kind = kind, diff = diff)
+        }
+
+    /**
+     * Patches embedded in a fileChange item: `changes: [{type, path?, unified_diff?, content?}]`.
+     * Add/delete changes carry full file content instead of a diff; synthesize one.
+     */
+    private fun fileChangePatches(changes: List<JSONObject>): List<FilePatch> =
+        changes.mapNotNull { change ->
+            val kind = change.nullableString("type") ?: return@mapNotNull null
+            val path = change.nullableString("path").orEmpty()
+            val diff = when (kind) {
+                "update" -> change.nullableString("unified_diff").orEmpty()
+                "add" -> synthesizeDiff(change.nullableString("content").orEmpty(), added = true)
+                "delete" -> synthesizeDiff(change.nullableString("content").orEmpty(), added = false)
+                else -> return@mapNotNull null
+            }
+            FilePatch(path = path, kind = kind, diff = diff)
+        }
+
+    private fun synthesizeDiff(content: String, added: Boolean): String =
+        content.lineSequence().joinToString("\n") { line ->
+            (if (added) "+" else "-") + line
+        }
+
     private fun runtimeThreadParams(
         cwd: String,
         permissionLevel: CodexPermissionLevel,
-    ): JSONObject =
-        JSONObject()
+        profileConfig: JSONObject?,
+        modelOverride: String?,
+        modelProviderOverride: String?,
+        clearMissingDeveloperInstructions: Boolean,
+    ): JSONObject {
+        val config = profileConfig?.let { JSONObject(it.toString()) }
+        val developerInstructions = config?.opt(DEVELOPER_INSTRUCTIONS_CONFIG_KEY)?.let { value ->
+            require(value is String) { "developer_instructions 必须是字符串" }
+            config.remove(DEVELOPER_INSTRUCTIONS_CONFIG_KEY)
+            value
+        }
+        return JSONObject()
             .put("cwd", cwd)
             .put("approvalPolicy", permissionLevel.approvalPolicy)
             // Keep thread bootstrap read-only so opening a chat does not mark the project
             // trusted. Every executable turn atomically overrides this with externalSandbox.
             .put("sandbox", "read-only")
+            .apply {
+                if (config != null && config.length() > 0) {
+                    put("config", config)
+                }
+                if (developerInstructions != null || clearMissingDeveloperInstructions) {
+                    // Codex 0.147.0 exposes this as a direct ThreadStart/Resume field.
+                    // Keeping it only inside `config` silently drops conversation identities.
+                    put("developerInstructions", developerInstructions.orEmpty())
+                }
+                modelOverride?.let { put("model", it) }
+                modelProviderOverride?.let { put("modelProvider", it) }
+            }
+    }
 
     private fun JSONArray?.objects(): List<JSONObject> = buildList {
         if (this@objects == null) return@buildList
@@ -248,4 +458,9 @@ object CodexProtocol {
     }
 
     private const val MAX_DETAIL_LENGTH = 8_000
+    private const val MODEL_LIST_PAGE_SIZE = 100
+    private const val MAX_MODEL_ID_LENGTH = 160
+    private const val MAX_MODEL_DISPLAY_NAME_LENGTH = 160
+    private const val EPOCH_SECONDS_UPPER_BOUND = 10_000_000_000L
+    private const val DEVELOPER_INSTRUCTIONS_CONFIG_KEY = "developer_instructions"
 }

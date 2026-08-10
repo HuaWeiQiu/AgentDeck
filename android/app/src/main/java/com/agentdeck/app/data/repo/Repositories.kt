@@ -7,6 +7,7 @@ import com.agentdeck.app.data.db.AppMetadataEntity
 import com.agentdeck.app.data.db.AppDatabase
 import com.agentdeck.app.data.db.ProviderProfileEntity
 import com.agentdeck.app.data.db.ProviderModelEntity
+import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.AgentRecipe
 import com.agentdeck.app.domain.model.PathNamespace
@@ -26,6 +27,9 @@ class ProfileRepository(
 ) {
     fun observeProfiles(): Flow<List<ProviderProfile>> =
         db.providerProfileDao().observeAll().map { list -> list.map { it.toDomain() } }
+
+    suspend fun getProfiles(): List<ProviderProfile> =
+        db.providerProfileDao().getAll().map { it.toDomain() }
 
     suspend fun getProfile(id: String): ProviderProfile? =
         db.providerProfileDao().getById(id)?.toDomain()
@@ -170,6 +174,11 @@ internal fun defaultSeedProfiles(@Suppress("UNUSED_PARAMETER") createdAtEpochMs:
 
 class CardRepository(
     private val db: AppDatabase,
+    // 删除卡片时必须级联清理 threadId 关联；ServiceLocator 构造本仓库时不传参，
+    // 通过惰性默认回调在删除时解析，避免构造期循环依赖。
+    private val linkCleaner: (String) -> Unit = { cardId ->
+        ServiceLocator.conversationLinks.clearThreadId(cardId)
+    },
 ) {
     fun observeCards(): Flow<List<AgentCard>> =
         db.agentCardDao().observeAll().map { list -> list.map { it.toDomain() } }
@@ -181,8 +190,30 @@ class CardRepository(
         db.agentCardDao().upsert(AgentCardEntity.from(card))
     }
 
+    suspend fun renameCard(id: String, title: String?) {
+        require(title == null || title.isNotBlank()) { "对话名称不能为空" }
+        requireNotNull(getCard(id)) { "卡片不存在" }
+        db.agentCardDao().updateCustomTitle(id, title?.trim())
+    }
+
+    suspend fun setPinned(id: String, pinned: Boolean) {
+        requireNotNull(getCard(id)) { "卡片不存在" }
+        db.agentCardDao().updatePinned(id, pinned)
+    }
+
+    suspend fun setArchived(id: String, archived: Boolean) {
+        requireNotNull(getCard(id)) { "卡片不存在" }
+        db.agentCardDao().updateArchived(id, archived)
+    }
+
+    suspend fun touchActivity(id: String, timestamp: Long = System.currentTimeMillis()) {
+        require(timestamp > 0) { "对话活动时间无效" }
+        db.agentCardDao().touchActivity(id, timestamp)
+    }
+
     suspend fun deleteCard(id: String) {
         db.agentCardDao().delete(id)
+        linkCleaner(id)
     }
 
     suspend fun ensureSeedCards() {

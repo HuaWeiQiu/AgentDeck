@@ -5,14 +5,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Required to launch commands in Termux sessions -->
-    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
-    <queries>
-        <package android:name="com.termux" />
-        <intent>
-            <action android:name="com.termux.RUN_COMMAND" />
-        </intent>
-    </queries>
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name=".AgentDeckApp"
@@ -24,10 +17,6 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
         android:theme="@style/Theme.AgentDeck">
-        <receiver
-            android:name=".data.termux.TermuxResultReceiver"
-            android:exported="false" />
-
         <service
             android:name=".data.runtime.EmbeddedRuntimeService"
             android:exported="false"

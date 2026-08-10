@@ -132,6 +132,8 @@ internal class EmbeddedProotProcess(
             add("--bind=/sys")
             add("--bind=${paths.stateDir.absolutePath}:/run/agentdeck")
             add("--bind=${paths.tempDir.absolutePath}:/tmp")
+            add("--bind=${paths.codexHome.absolutePath}:/root/.codex")
+            add("--bind=${paths.projectsHome.absolutePath}:/root/projects")
             add("-w")
             add(workingDirectory)
             add("/usr/bin/env")

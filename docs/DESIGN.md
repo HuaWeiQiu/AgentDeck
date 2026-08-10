@@ -3,7 +3,7 @@
 > 状态：0.2.0-beta.1 内嵌 Runtime 已通过单台 ARM64 真机关键路径；稳定门禁仍在继续
 > 平台：Android
 > 形态：**聊天优先的本地 Agent 客户端**
-> 运行时：新测试安装默认 `EmbeddedProotRuntime`；`TermuxRuntime` 保留为高级兼容后端
+> 运行时：产品只使用 App 私有的 `EmbeddedProotRuntime`
 > 产品原则：标准模式不要求用户理解 CLI、Linux、端口、协议或安装细节
 
 ---
@@ -13,10 +13,10 @@
 | # | 决策点 | 结论 |
 |---|---|---|
 | 1 | 产品形态 | **聊天优先客户端**：不自建 Agent 推理循环；App 管原生会话 UI，`AgentRuntime` 跑真实 CLI |
-| 2 | 运行时 | 新安装目标默认内嵌 Linux Runtime；Termux 是完成验证前的当前后端和之后的高级兼容选项 |
+| 2 | 运行时 | 只使用内嵌 Linux Runtime；不提供 Termux 选择、权限或启动入口 |
 | 3 | 首批 CLI | **以 Codex 为 P0**；Claude Code / Kimi CLI 同模型扩展（P1） |
 | 4 | 主交互 | 首页 **对话列表** → app-server 原生 transcript；终端和 Runtime 诊断只在高级模式出现 |
-| 4b | 启动链 | UI 只依赖 `AgentRuntime`；当前实现经 Termux/Ubuntu，目标实现经 App 私有 PRoot/rootfs |
+| 4b | 启动链 | UI 只依赖 `AgentRuntime`；实现经 App 私有 PRoot/rootfs 启动 Codex |
 | 5 | 认证与模型 | 默认复用 CLI 官方配置；用户可添加受管 Responses Provider，密钥由 Keystore 与鉴权 broker 管理；App 以 app-server 实际值校验结果 |
 | 6 | 体验层级 | 标准模式面向客户；高级模式面向懂技术的用户；开发者模式提供脱敏诊断且不绕过安全边界 |
 | 7 | 交付 | 每个阶段完成实现、测试、审查、修复、复测和本地提交；Runtime 默认切换必须通过真机门禁 |
@@ -31,7 +31,7 @@
 
 ### 1.2 Runtime 启动链
 
-目标默认路径：
+当前路径：
 
 ```text
 AgentDeck
@@ -40,13 +40,7 @@ AgentDeck
       -> codex app-server
 ```
 
-迁移期兼容路径：
-
-```text
-AgentDeck -> TermuxRuntime -> proot-distro Ubuntu -> codex app-server
-```
-
-上层只提交结构化 `AgentProcessRequest`，不得判断 Termux Intent、PRoot 参数或 rootfs 路径。
+上层只提交结构化 `AgentProcessRequest`，不得判断 PRoot 参数或 rootfs 路径。
 
 ---
 
@@ -86,7 +80,7 @@ AgentDeck -> TermuxRuntime -> proot-distro Ubuntu -> codex app-server
   -> 开始对话
 ```
 
-标准模式只显示“检查设备、下载运行组件、初始化、验证”这些客户阶段。选择 Termux 兼容后端时，其专用权限和外部调用步骤只在高级流程出现。
+标准模式只显示“检查设备、下载运行组件、初始化、验证”这些客户阶段；没有外部终端权限或 Runtime 选择步骤。
 
 ### 3.2 日常使用
 
@@ -141,7 +135,7 @@ AgentDeck -> TermuxRuntime -> proot-distro Ubuntu -> codex app-server
 **编辑卡片页**
 
 - 标准模式：名称、项目、推荐模型
-- 高级模式：CLI、Provider、模型 ID、工作区、权限策略和 Runtime
+- 高级模式：CLI、Provider、模型 ID、工作区和权限策略
 - 启动模板由 adapter 固定；任何模式都不接受任意 shell 源码
 
 ### 4.3 准备与修复页面
@@ -151,14 +145,17 @@ AgentDeck -> TermuxRuntime -> proot-distro Ubuntu -> codex app-server
 ### 4.4 模型服务
 
 - “当前 Codex 配置”继续复用 Codex CLI 的 Provider、模型和官方认证
+- AgentDeck 只维护独立的 `agentdeck.config.toml` 配置层；高级设置保存后在下次内嵌会话启动前重新校验，通过 `thread/start.config` / `thread/resume.config` 叠加，不覆盖全局 `config.toml`
 - Sub2API 与 OpenAI Responses 兼容服务可以保存名称、HTTPS Base URL、默认模型和独立 credential 引用
 - 受管 API Key 只以 Android Keystore 密文存在；模型发现成功后显示可搜索列表，并保留手动模型 ID
+- 当前 Codex 配置的模型目录来自 app-server `model/list`；对话内的模型选择作为 turn override 发送，并随后台会话重附着恢复
+- 已验证且凭据仍存在的 AgentDeck 模型服务直接满足“模型连接”状态；保存或删除后立即重新检测，不要求额外终端操作
 - 聊天页以 app-server 返回的实际 Provider 与模型校验运行配置，不用本地占位值伪造成功
 
 ### 4.5 设置 Tab
 
-- 标准：模型服务摘要、本机运行环境状态、隐私、安全和关于
-- 高级：自定义 Endpoint、模型 ID、工作区、代理、权限策略、Runtime 后端和更新通道
+- 首页：模型连接、内嵌运行环境、对话默认值、Codex 参数和关于；每项进入独立子页后才加载详细内容
+- 高级：Codex TOML 配置、自定义 Endpoint、模型 ID、工作区、代理、权限策略和更新通道
 - 开发者：Runtime/CLI 版本、脱敏协议与进程日志、重新验证/重建、诊断包和 Feature Flags
 - 连续点击版本号开启开发者模式；关闭后隐藏入口但不改变安全策略
 
@@ -226,7 +223,7 @@ icon: codex
 recipe_id: recipe_codex
 template_id: tpl_codex_ubuntu
 profile_id: prof_openai_main
-termux_session_name: "agentdeck-codex-default"
+termux_session_name: "agentdeck-codex-default" # 仅保留的旧数据库字段，不参与当前启动
 workspace:
   # 标准模式只通过项目选择器产生；高级模式才显示命名空间
   namespace: runtime
@@ -238,7 +235,7 @@ enabled: true
 
 卡片支持新建、编辑、启停和删除。`profile_id` 是可空外键，删除 Profile 时使用 `ON DELETE SET NULL`；adapter 在保存与启动时同时校验 recipe/template、Provider 类型、工作区命名空间和固定 CLI 可执行文件。
 
-### 5.5 AgentRecipe（工具）
+### 5.5 AgentRecipe 与内嵌安装清单
 
 ```yaml
 schema_version: 1
@@ -262,79 +259,40 @@ verify:
     # 同时验证 wrapper、codex 命令和精确版本
 ```
 
-配方只从 APK assets 加载并严格校验。安装器按依赖顺序执行“探测、安装、再验证”；不可用条目（如当前 Claude Code P1）不能携带或执行安装脚本。远程配方和热更新不属于当前信任边界。
+上述 YAML 是 0.1.x 的历史配方格式，当前仍用其摘要提供 Codex adapter 元数据，但不会执行其中的 Termux 脚本。内嵌安装器使用代码中固定的 ARM64 rootfs/Codex URL、大小与 SHA-256，按“下载、校验、安全解包、验证、原子启用”执行；不可用条目（如当前 Claude Code P1）不能安装或启动。
 
 ### 5.6 环境检测项（EnvironmentReport）
 
 | 检查 ID | 层级 | 命令/条件 | 失败时引导 |
 |---|---|---|---|
-| `runtime_supported` | Android | 架构、API 和 native loader 支持 | 说明不支持原因或高级兼容后端 |
-| `runtime_storage` | Android | 安装与回滚所需空间 | 客户可理解的清理空间说明 |
-| `runtime_ready` | Runtime | rootfs、wrapper 和基础工具功能探测 | 自动安装或修复 |
+| `embedded_supported` | Android | 架构、API 和 native loader 支持 | 说明当前测试版仅支持 ARM64 |
+| `embedded_runtime` | Android | 私有 rootfs 与宿主 loader 状态 | 自动安装或修复 |
+| `ubuntu_installed` / `embedded_tools` | Runtime | Ubuntu、TLS、Git 与 Python 功能探测 | 自动修复内嵌环境 |
 | `codex_installed` | Runtime | `command -v codex` 与固定版本 | 安装或更新 Agent |
 | `codex_authenticated` | Runtime | `codex login status`、官方认证环境变量、当前 Provider `env_key` | 复用已有认证；缺失时连接模型服务 |
-| `termux_compatibility` | Android/Termux | 仅选择兼容后端时检查包、权限和外部调用 | 高级设置中的兼容流程 |
 
 每项内部检查使用 `UNKNOWN / CHECKING / READY / ACTION_REQUIRED / BLOCKED / ERROR` 状态，并映射为有限客户状态。任何后端都必须以功能探测和退出结果判断成功；进程被接受启动不代表环境可用。
 
 ---
 
-## 6. 启动链路（当前 Termux 兼容实现）
+## 6. 内嵌启动链路
 
-本节记录 0.1.x 已验证实现，只允许存在于 `TermuxRuntime` 内。目标默认实现和迁移门禁见 ADR-0009。
-
-### 6.1 Wrapper 脚本（安装配方时写入 Termux）
-
-路径：`$PREFIX/../home/.agentdeck/wrappers/codex-ubuntu.sh`
-（即 Termux `~/.agentdeck/wrappers/codex-ubuntu.sh`）
-
-```bash
-#!/data/data/com.termux/files/usr/bin/bash
-set -euo pipefail
-
-# 参数由 App 作为 argv 传入：
-# codex-ubuntu.sh --distro ubuntu --cwd /root/project --bin codex -- <codex args>
-# wrapper 负责逐项解析和校验，不执行 App 生成的 shell 源码。
-```
-
-同一配方还安装 `codex-app-server-start.sh`。它在 Termux 中作为稳定 supervisor，进入 Ubuntu 后直接启动官方 `codex app-server --listen ws://127.0.0.1:0 --ws-auth capability-token`。token 文件与 PID lease 位于 Termux 私有运行目录；supervisor 负责离开页面或异常退出后的精确进程树清理。
-
-### 6.2 App 侧原生聊天步骤
+### 6.1 App 侧原生聊天步骤
 
 ```text
-1. 校验卡片 → 模板 → CLI 配置 → Termux 安装与权限
-2. 后台执行固定 codex-app-server-start.sh，动态 cwd/distro 只通过 argv 传入
-3. Termux 回调只返回 port、一次性 token 与 instance key；Android 以 bearer token 连接 127.0.0.1 WebSocket
-4. 发送 initialize / initialized，随后 thread/resume 或 thread/start
-5. Android 按 Item 与 delta 更新时间线，按 server request 内联审批，turn/interrupt 停止回复
-6. 离开页面关闭 socket并停止 lease；supervisor 终止其完整 PRoot/app-server 进程树。再次进入按本地 card ID → Codex thread ID 映射恢复历史与活动 turn
+1. 校验卡片、内嵌 Runtime、持久 Codex home 与会话配置快照
+2. 前台服务在 App 私有 PRoot/rootfs 中启动固定 `codex app-server`，动态 cwd 作为结构化参数传入
+3. app-server 仅监听 127.0.0.1，启动结果返回一次性 capability token 与精确 instance lease
+4. Android 发送 initialize / initialized，随后 thread/resume 或 thread/start
+5. Android 按 Item 与 delta 更新时间线，按 server request 处理审批与提问，turn/interrupt 停止回复
+6. 忙碌会话离开页面后由后台注册表继续接收；完成后通知并延迟清理。再次进入按本地 card ID → Codex thread ID 映射恢复历史
 ```
 
-终端兜底继续使用 `codex-ubuntu.sh`、前台命名会话和 `no-shell-with-name`，不与 Codex thread ID 混用。
+### 6.2 持久化与安全边界
 
-### 6.3 Termux Intent 约定
-
-- Action：`com.termux.RUN_COMMAND`
-- Extra：
-  - `com.termux.RUN_COMMAND_PATH`
-  - `com.termux.RUN_COMMAND_ARGUMENTS`
-  - `com.termux.RUN_COMMAND_WORKDIR`
-  - `com.termux.RUN_COMMAND_SESSION_ACTION`（字符串 `"0"`）
-  - `com.termux.RUN_COMMAND_SHELL_NAME`
-  - `com.termux.RUN_COMMAND_SHELL_CREATE_MODE`（`no-shell-with-name`）
-- 权限：`com.termux.permission.RUN_COMMAND`
-- 前置：`~/.termux/termux.properties` 中 `allow-external-apps=true`
-
-> 常量与 termux-app 当前 `termux-shared` 契约保持一致；会话进入、恢复、新回复与退出清理已在 Android 16 / iQOO Neo8 上验证。
-
-### 6.4 为什么必须 wrapper
-
-| 问题 | 直接拼长命令 | wrapper |
-|---|---|---|
-| `proot-distro login` + 内层 `codex` | 引号/换行易炸 | 稳定 |
-| 传递 API Key | 易进 Intent、进程列表或日志 | CLI 密钥不传递；受管密钥只由鉴权 broker 提供给固定 helper |
-| 多发行版/多项目 | 难复用 | 模板参数化 |
-| 安装后修复 | 难 | 重写 wrapper 即可 |
+- 版本化 rootfs 与 `codex-home` 分离，后者绑定为 `/root/.codex`；Runtime 更新不删除认证、配置或 thread 数据。
+- 进程参数、日志和持久文件中不包含第三方 API Key；受管密钥由 Android 回环 broker 按实例提供给固定 helper。
+- Manifest 不声明 Termux 权限、包查询或结果接收器，产品流程也没有外部 Runtime 入口。
 
 ---
 
@@ -354,7 +312,7 @@ set -euo pipefail
 
 ### 7.3 安全
 
-- Intent、argv、stdin、shell 源码、日志和 Termux 持久文件中不得包含凭据。
+- Intent、argv、stdin、shell 源码和日志中不得包含凭据。
 - Room 和备份不保存 API Key；受管密文放在 `noBackupFilesDir`，加密密钥由 Android Keystore 持有。
 - 凭据输入使用密码字段并为窗口启用 `FLAG_SECURE`，离开即清空且默认不回显；回环 broker 只在对应聊天实例生命周期内可用。
 
@@ -379,7 +337,7 @@ app/
   data/
     db/           Room
     runtime/      EmbeddedProotRuntime / Runtime installer
-    termux/       TermuxRuntime 兼容实现
+    termux/       0.1.x 历史实现（当前产品不注入）
     repo/         CardRepo / ProfileRepo / RecipeRepo
   main/assets/    内置配方和 wrapper
 ```
@@ -402,7 +360,7 @@ interface CliAdapter {
 }
 ```
 
-`TermuxGateway` 继续作为 `TermuxRuntime` 内部依赖，但不再是 UI、Doctor、安装器或 adapter 的公共边界。
+旧 `TermuxGateway` 不再由 Manifest、UI、Doctor、安装器、adapter 或依赖注入引用；遗留 Room 字段只用于非破坏升级。
 
 ---
 
@@ -412,7 +370,7 @@ interface CliAdapter {
 
 1. 0.1.4 的 Compose 三 Tab、卡片 CRUD、原生聊天与底部导航
 2. Room v3、非破坏迁移、Profile 外键与一次性初始化
-3. 统一设置状态、一步安装、Termux 命名兜底会话和后台结果回调
+3. 统一设置状态、一步安装，以及 0.1.x 的 Termux 命名兜底会话和后台结果回调
 4. 严格配方 schema、依赖排序、版本/摘要固定和安装后验证
 5. Codex adapter、固定 supervisor wrapper、鉴权回环 WebSocket 和 argv 安全边界
 6. Thread 恢复、Item 时间线、Markdown、流式 delta、停止和 command/file approval
@@ -424,7 +382,7 @@ interface CliAdapter {
 2. 标准模式体验：两项主导航、轻量会话列表、客户状态和上下文准备/修复。
 3. 移动聊天：无边框 Agent 回复、活动三级详情、审批 Sheet、IME 与阅读锚点。
 4. 高级与开发者设置：Provider、模型、Runtime、脱敏日志和诊断分层。
-5. 内嵌 Runtime：`AgentRuntime`、`TermuxRuntime` 适配、ARM64 PRoot/rootfs、版本化安装和 Codex。
+5. 内嵌 Runtime：`AgentRuntime`、ARM64 PRoot/rootfs、版本化安装和 Codex。
 6. 真机硬化与发布：首次安装、升级/回滚、断网、锁屏、OEM 后台、性能、安全和发布验收。
 
 Claude Code、Kimi、桌面 Widget、远程配方和完整 Linux 桌面不进入上述主链路。
@@ -439,11 +397,10 @@ Claude Code、Kimi、桌面 Widget、远程配方和完整 Linux 桌面不进入
 | Android 10+ 执行限制 | 下载的宿主二进制无法启动 | PRoot/loader 来自 APK native library，保持现代 target SDK 并做真机门禁 |
 | GPL/第三方许可证遗漏 | 无法合规分发 | 独立二进制、来源与源码获取说明；复制实现前逐文件审查 |
 | OEM 杀后台进程 | Agent 中断 | AgentDeck 前台服务、精确 lease、恢复提示和 thread history 恢复 |
-| Termux 来源/版本不兼容 | 兼容后端失败 | 只在高级设置开放并由 Doctor 给出明确修复；不阻塞已就绪内嵌 Runtime |
 | CLI 资产/参数变更 | 配方失效 | 固定版本与 SHA-256；升级必须显式更新配方和测试 |
 | API Key 出现在进程参数 | 泄露 | 受管密钥只存 Keystore 密文，并通过鉴权 broker 按需返回给 `auth.command` |
 | Codex 配置键变更 | App 显示错误模型 | 固定 0.147.0 配置契约，以 app-server 实际返回值校验请求配置 |
-| app-server 被系统杀死或协议变化 | 原生聊天断开 | 明确错误与重试；按 thread history 恢复；始终保留官方 TUI 兜底 |
+| app-server 被系统杀死或协议变化 | 原生聊天断开 | 明确错误与重试；按 thread history 恢复；后台任务用前台服务与精确 lease 持有 |
 | 回环端口被其它 App 尝试连接 | 控制 Codex | 仅 127.0.0.1、一次性高熵 token、单客户端、消息上限和空闲退出 |
 
 ---
@@ -462,8 +419,8 @@ AgentDeck/
     codex.yaml
     claude-code.yaml       # P1
   wrappers/
-    codex-ubuntu.sh              # TUI 兜底
-    codex-app-server-start.sh    # 当前 TermuxRuntime 启动入口
+    codex-ubuntu.sh              # 0.1.x 历史启动资产
+    codex-app-server-start.sh    # 0.1.x 历史启动资产
   android/                 # Kotlin + Compose 工程
     app/
     ...
@@ -484,8 +441,8 @@ AgentDeck/
 6. 服务端声明的 command/file/network/user-input 决定完整可用；标准文案说明目的和影响，技术详情可展开。
 7. 离开、锁屏、杀进程和断网后有明确状态；能恢复同一 thread 或说明为何不能恢复。
 8. Runtime 安装中断、校验失败和更新失败不会破坏上一可用版本或用户项目。
-9. 高级模式可管理 Provider、模型、工作区和 Runtime；开发者模式可导出脱敏诊断但不能绕过安全策略。
-10. 选择 TermuxRuntime 的既有用户仍能使用已验证的 0.1.x 链路，迁移不破坏 Room、Keystore 或 Codex thread 映射。
+9. 高级模式可管理 Provider、模型、工作区和内嵌 Runtime；开发者模式可导出脱敏诊断但不能绕过安全策略。
+10. 从旧版本升级不会破坏 Room、Keystore 或 Codex thread 映射，但运行统一迁移到内嵌 Runtime。
 
 ---
 
@@ -507,8 +464,8 @@ AgentDeck/
 ## 14. 发布前剩余工作
 
 1. 完成标准模式和移动聊天重构，并在小屏、深色、键盘和横屏截图下验收
-2. 完成 `AgentRuntime` 零行为迁移和 EmbeddedProotRuntime ARM64 技术验证
-3. 验证 v0.1.0 APK 数据升级、Termux 兼容用户迁移和 Runtime 更新/回滚
+2. 完成 EmbeddedProotRuntime ARM64 的多设备、审批和异常恢复验证
+3. 验证 v0.1.0 APK 数据升级和 Runtime 更新/回滚
 4. 在更多 OEM/Android 版本上完成 `docs/RELEASE_CHECKLIST.md` 的稳定版验收
 5. 配置正式 release 签名，并在真机清单通过后发布稳定版
 
@@ -517,6 +474,6 @@ AgentDeck/
 ## 15. 已固定默认值
 
 1. 第二个 CLI 预留 Claude Code，但默认不可用
-2. 当前 TermuxRuntime 的 distro 名固定 `ubuntu`；EmbeddedProotRuntime 的 rootfs 版本由签名 manifest 固定
+2. EmbeddedProotRuntime 的 rootfs 版本由签名 manifest 固定
 3. 默认工作区 `/root/projects/default`
 4. 应用名 AgentDeck

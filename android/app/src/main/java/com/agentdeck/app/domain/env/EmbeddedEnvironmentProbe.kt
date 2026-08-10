@@ -44,8 +44,6 @@ class EmbeddedEnvironmentProbe(
         )
     }
 
-    override fun allowExternalAppsFixCommand(): String = ""
-
     override fun errorReport(message: String): EnvironmentReport = EnvironmentReport(
         baseChecks(EnvironmentCheckStatus.ERROR) + RUNTIME_CHECKS.map { definition ->
             EnvironmentCheck(
@@ -132,7 +130,13 @@ class EmbeddedEnvironmentProbe(
             if command -v codex >/dev/null && codex --version 2>/dev/null | grep -Eq '0[.]147[.]0'; then
               emit codex_installed ready "Codex 0.147.0"
               emit codex_wrapper ready "App 内 app-server 启动器可用"
-              if timeout --kill-after=1s 5s codex login status >/dev/null 2>&1; then
+              auth_probe=""
+              if command -v python3 >/dev/null 2>&1; then
+                auth_probe="${'$'}(timeout --kill-after=1s 3s python3 -c 'import os,pathlib,tomllib; home=pathlib.Path(os.environ.get("CODEX_HOME", pathlib.Path.home() / ".codex")); base=home / "config.toml"; profile=home / "agentdeck.config.toml"; base_data=tomllib.loads(base.read_text()) if base.is_file() else {}; profile_data=tomllib.loads(profile.read_text()) if profile.is_file() else {}; provider=str(profile_data.get("model_provider", base_data.get("model_provider", "openai"))); base_providers=base_data.get("model_providers", {}); profile_providers=profile_data.get("model_providers", {}); base_info=base_providers.get(provider, {}) if isinstance(base_providers, dict) else {}; profile_info=profile_providers.get(provider, {}) if isinstance(profile_providers, dict) else {}; info={**(base_info if isinstance(base_info, dict) else {}), **(profile_info if isinstance(profile_info, dict) else {})}; env_key=info.get("env_key"); ready=(isinstance(env_key, str) and bool(os.environ.get(env_key))) or (provider != "openai" and bool(info) and not env_key and info.get("requires_openai_auth") is not True); print("ready" if ready else "missing")' 2>/dev/null)"
+              fi
+              if [[ "${'$'}auth_probe" == "ready" ]]; then
+                emit codex_authenticated ready "已检测到可用 Provider 配置"
+              elif timeout --kill-after=1s 5s codex login status >/dev/null 2>&1; then
                 emit codex_authenticated ready "已检测到 Codex 认证"
               else
                 emit codex_authenticated action_required "可连接模型服务或登录 ChatGPT"

@@ -61,6 +61,14 @@ data class ProviderModel(
     val discoveredAtEpochMs: Long,
 )
 
+data class ConversationIdentity(
+    val roleName: String,
+    val selfDefinition: String,
+    val objective: String = "",
+    val communicationStyle: String = "",
+    val boundaries: String = "",
+)
+
 data class AgentCard(
     val id: String,
     val name: String,
@@ -77,6 +85,12 @@ data class AgentCard(
     val innerBin: String = "codex",
     val innerArgs: List<String> = emptyList(),
     val enabled: Boolean = true,
+    /** 用户自定义标题；null 时 UI 回退到 [name] 派生的标题。 */
+    val customTitle: String? = null,
+    val pinned: Boolean = false,
+    val archived: Boolean = false,
+    val lastActiveAtEpochMs: Long = 0L,
+    val identity: ConversationIdentity? = null,
 )
 
 data class RecipeSummary(
@@ -147,54 +161,20 @@ data class EnvironmentCheck(
 data class EnvironmentReport(
     val checks: List<EnvironmentCheck>,
 ) {
-    val isTermuxReady: Boolean
-        get() = checks.firstOrNull { it.id == "termux_installed" }?.ok == true
-
     fun check(id: String): EnvironmentCheck? = checks.firstOrNull { it.id == id }
 
     val canLaunchSessions: Boolean
-        get() {
-            if (check("embedded_supported") != null) {
-                return setOf(
-                    "embedded_supported",
-                    "embedded_runtime",
-                    "ubuntu_installed",
-                    "embedded_tools",
-                    "codex_installed",
-                    "codex_wrapper",
-                ).all { id -> check(id)?.ok == true }
-            }
-            val launchIds = setOf(
-                "termux_installed",
-                "termux_run_command_permission",
-                "termux_background_execution",
-                "allow_external_apps",
-                "proot_distro",
-                "ubuntu_installed",
-                "codex_installed",
-                "codex_wrapper",
-            )
-            return launchIds.all { id -> check(id)?.ok == true }
-        }
+        get() = setOf(
+            "embedded_supported",
+            "embedded_runtime",
+            "ubuntu_installed",
+            "embedded_tools",
+            "codex_installed",
+            "codex_wrapper",
+        ).all { id -> check(id)?.ok == true }
 
     val allCriticalOk: Boolean
-        get() {
-            if (check("embedded_supported") != null) {
-                return canLaunchSessions && check("codex_authenticated")?.ok == true
-            }
-            val criticalIds = setOf(
-                "termux_installed",
-                "termux_run_command_permission",
-                "termux_background_execution",
-                "allow_external_apps",
-                "proot_distro",
-                "ubuntu_installed",
-                "codex_installed",
-                "codex_authenticated",
-                "codex_wrapper",
-            )
-            return criticalIds.all { id -> check(id)?.ok == true }
-        }
+        get() = canLaunchSessions && check("codex_authenticated")?.ok == true
 }
 
 sealed class LaunchResult {

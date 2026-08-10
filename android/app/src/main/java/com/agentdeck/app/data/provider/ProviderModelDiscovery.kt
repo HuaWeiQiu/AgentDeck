@@ -181,7 +181,7 @@ class OkHttpProviderModelDiscovery(
             ProviderConnectionStatus.FORBIDDEN,
             "当前 API Key 没有访问该分组或模型的权限",
         )
-        404 -> ProviderDiscoveryException(
+        404, 405, 501 -> ProviderDiscoveryException(
             ProviderConnectionStatus.DISCOVERY_UNSUPPORTED,
             "该地址不支持 /models，可手动填写模型 ID",
         )

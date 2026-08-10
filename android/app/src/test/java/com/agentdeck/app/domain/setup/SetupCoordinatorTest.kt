@@ -1,9 +1,5 @@
 package com.agentdeck.app.domain.setup
 
-import com.agentdeck.app.data.termux.TermuxCommand
-import com.agentdeck.app.data.termux.TermuxCommandResult
-import com.agentdeck.app.data.termux.TermuxGateway
-import com.agentdeck.app.data.runtime.TermuxRuntime
 import com.agentdeck.app.domain.env.EnvironmentScanner
 import com.agentdeck.app.domain.install.InstallPhase
 import com.agentdeck.app.domain.install.RecipeInstallProgress
@@ -30,7 +26,6 @@ class SetupCoordinatorTest {
         val coordinator = SetupCoordinator(
             scanner = scanner,
             installer = installer,
-            runtime = TermuxRuntime(FakeTermuxGateway()),
             scope = scope,
             onReport = reports::add,
         )
@@ -45,20 +40,19 @@ class SetupCoordinatorTest {
     }
 
     @Test
-    fun `install does not start before runtime prerequisites`() {
-        val missingTermux = reportWith("termux_installed", EnvironmentCheckStatus.ACTION_REQUIRED)
+    fun `install does not start on unsupported device`() {
+        val unsupported = reportWith("embedded_supported", EnvironmentCheckStatus.BLOCKED)
         val installer = FakeInstaller()
         val coordinator = SetupCoordinator(
-            scanner = FakeScanner(missingTermux, missingTermux),
+            scanner = FakeScanner(unsupported, unsupported),
             installer = installer,
-            runtime = TermuxRuntime(FakeTermuxGateway()),
             scope = scope,
         )
 
         coordinator.installCodex()
 
         assertEquals(0, installer.calls)
-        assertEquals(SetupAction.INSTALL_TERMUX, coordinator.state.value.action)
+        assertEquals(SetupAction.UNSUPPORTED_DEVICE, coordinator.state.value.action)
     }
 
     @Test
@@ -68,7 +62,6 @@ class SetupCoordinatorTest {
         val coordinator = SetupCoordinator(
             scanner = FakeScanner(missingCodex, missingCodex),
             installer = installer,
-            runtime = TermuxRuntime(FakeTermuxGateway()),
             scope = scope,
         )
 
@@ -80,32 +73,54 @@ class SetupCoordinatorTest {
     }
 
     @Test
-    fun `authentication opens fixed helper through wrapper`() {
+    fun `verified AgentDeck provider satisfies model connection automatically`() {
         val loginRequired = reportWith("codex_authenticated", EnvironmentCheckStatus.ACTION_REQUIRED)
-        val gateway = FakeTermuxGateway()
         val coordinator = SetupCoordinator(
             scanner = FakeScanner(loginRequired, loginRequired),
             installer = FakeInstaller(),
-            runtime = TermuxRuntime(gateway),
+            scope = scope,
+            managedProviderReady = { true },
+        )
+
+        coordinator.scan(force = true)
+
+        val auth = coordinator.state.value.report.check("codex_authenticated")
+        assertEquals(EnvironmentCheckStatus.READY, auth?.status)
+        assertEquals(
+            "AgentDeck 模型服务已验证，将在会话启动时自动连接",
+            auth?.detail,
+        )
+        assertEquals(SetupAction.READY, coordinator.state.value.action)
+    }
+
+    @Test
+    fun `scan within cache window reuses last result`() {
+        val scanner = FakeScanner(readyReport(), readyReport())
+        val coordinator = SetupCoordinator(
+            scanner = scanner,
+            installer = FakeInstaller(),
             scope = scope,
         )
 
-        val result = coordinator.startCodexAuthentication()
+        coordinator.scan()
+        coordinator.scan()
 
-        assertTrue(result.isSuccess)
-        assertTrue(gateway.opened)
-        assertEquals(1, gateway.commands.size)
-        assertEquals(
-            "/data/data/com.termux/files/home/.agentdeck/wrappers/codex-ubuntu.sh",
-            gateway.commands.single().executable,
+        assertEquals(1, scanner.scans)
+    }
+
+    @Test
+    fun `forced scan bypasses cache window`() {
+        val scanner = FakeScanner(readyReport(), readyReport())
+        val coordinator = SetupCoordinator(
+            scanner = scanner,
+            installer = FakeInstaller(),
+            scope = scope,
         )
-        assertEquals("bash", gateway.commands.single().args[5])
-        assertEquals("-lc", gateway.commands.single().args[7])
-        val script = gateway.commands.single().args.last()
-        assertTrue(script.contains("codex login --with-api-key"))
-        assertTrue(script.contains("timeout --kill-after=1s 5s codex login status"))
-        assertTrue(script.indexOf("OPENAI_API_KEY") < script.indexOf("codex login status"))
-        assertTrue(script.indexOf("model_providers") < script.indexOf("codex login status"))
+
+        coordinator.scan()
+        coordinator.scan(force = true)
+
+        assertEquals(2, scanner.scans)
     }
 
     private fun reportWith(id: String, status: EnvironmentCheckStatus): EnvironmentReport =
@@ -119,9 +134,14 @@ class SetupCoordinatorTest {
         private val initial: EnvironmentReport,
         private val scanned: EnvironmentReport,
     ) : EnvironmentScanner {
+        var scans = 0
+            private set
+
         override fun initialReport() = initial
-        override suspend fun scan() = scanned
-        override fun allowExternalAppsFixCommand() = "fix"
+        override suspend fun scan(): EnvironmentReport {
+            scans += 1
+            return scanned
+        }
         override fun errorReport(message: String) = initial
     }
 
@@ -148,25 +168,4 @@ class SetupCoordinatorTest {
         }
     }
 
-    private class FakeTermuxGateway : TermuxGateway {
-        val commands = mutableListOf<TermuxCommand>()
-        var opened = false
-
-        override fun isTermuxInstalled() = true
-        override fun hasRunCommandPermission() = true
-        override fun openTermux(): Boolean {
-            opened = true
-            return true
-        }
-        override fun openTermuxInstallPage() = true
-        override fun openTermuxAppSettings() = true
-        override fun runCommand(command: TermuxCommand): Result<Unit> {
-            commands += command
-            return Result.success(Unit)
-        }
-        override suspend fun runCommandForResult(
-            command: TermuxCommand,
-            timeoutMillis: Long,
-        ) = Result.success(TermuxCommandResult("", "", 0, 0, 0))
-    }
 }

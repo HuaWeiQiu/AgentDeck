@@ -5,6 +5,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -26,6 +28,11 @@ class CodexRpcClientTest {
             assertEquals(
                 "agentdeck",
                 initialize.getJSONObject("params").getJSONObject("clientInfo").getString("name"),
+            )
+            assertTrue(
+                initialize.getJSONObject("params")
+                    .getJSONObject("capabilities")
+                    .getBoolean("experimentalApi"),
             )
             transport.receive(
                 JSONObject()
@@ -104,6 +111,36 @@ class CodexRpcClientTest {
         assertEquals("Bearer $token", request.header("Authorization"))
     }
 
+    @Test
+    fun `disconnect event is delivered even when inbound buffer is full`() = runBlocking {
+        val transport = FakeTransport()
+        val client = CodexRpcClient(transport)
+        val overflow = Channel.BUFFERED + 10
+
+        try {
+            repeat(overflow) { index ->
+                transport.receive(
+                    JSONObject(
+                        """{"method":"item/agentMessage/delta","params":{"itemId":"i$index","delta":"x"}}""",
+                    ),
+                )
+            }
+            transport.fail(IllegalStateException("socket lost"))
+
+            val received = mutableListOf<CodexInbound>()
+            withTimeout(2_000) {
+                client.events.take(overflow + 1).toList(received)
+            }
+
+            assertEquals(overflow, received.count { it is CodexInbound.Notification })
+            val last = received.last()
+            assertTrue(last is CodexInbound.Disconnected)
+            assertEquals("socket lost", (last as CodexInbound.Disconnected).message)
+        } finally {
+            client.close()
+        }
+    }
+
     private class FakeTransport : CodexRpcTransport {
         private val incoming = Channel<CodexSocketEvent>(Channel.BUFFERED)
         val sent = Channel<String>(Channel.BUFFERED)
@@ -113,6 +150,10 @@ class CodexRpcClientTest {
 
         suspend fun receive(payload: JSONObject) {
             incoming.send(CodexSocketEvent.Text(payload.toString()))
+        }
+
+        fun fail(cause: Throwable) {
+            incoming.close(cause)
         }
 
         override fun close() {

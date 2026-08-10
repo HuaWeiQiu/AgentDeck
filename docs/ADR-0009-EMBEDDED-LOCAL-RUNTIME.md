@@ -1,4 +1,4 @@
-# ADR-0009：内嵌本地 Runtime 与 Termux 兼容后端
+# ADR-0009：内嵌本地 Runtime
 
 - 状态：已接受
 - 日期：2026-08-09
@@ -11,10 +11,8 @@ Termux 主应用的软件包路径、Bootstrap 和仓库与包名深度绑定，
 
 ## 决策
 
-1. 引入稳定的 `AgentRuntime` 边界，聊天、安装、Doctor 和启动逻辑不得直接依赖 `TermuxGateway`。
-2. 提供两个实现：
-   - `EmbeddedProotRuntime`：目标默认后端。PRoot 与 loader 作为 APK native library 分架构打包；精简 ARM64 Linux rootfs 安装到 App 私有 `noBackupFilesDir`；官方 Linux Codex 在该 rootfs 内运行。
-   - `TermuxRuntime`：0.1.x 兼容与迁移后端。在内嵌 Runtime 完成真机验收前继续可用，之后只在高级设置中出现。
+1. 引入稳定的 `AgentRuntime` 边界，聊天、安装、Doctor 和启动逻辑不得依赖外部终端 App。
+2. 产品只注入 `EmbeddedProotRuntime`：PRoot 与 loader 作为 APK native library 分架构打包；精简 ARM64 Linux rootfs 安装到 App 私有 `noBackupFilesDir`；官方 Linux Codex 在该 rootfs 内运行。0.1.x 的 Termux 代码和数据库字段仅作为历史升级参考，不进入 Manifest、依赖注入、设置或启动流程。
 3. 保持现代 Android `targetSdk`，不得为了执行下载文件降级到 28。宿主可执行代码必须来自 APK/native library；下载的 rootfs 只由受控宿主 Runtime 使用。
 4. Runtime 包必须包含版本、架构、大小、SHA-256、签名和最低 App 版本。安装采用下载缓存、临时目录、校验、解压、功能探测和原子切换；失败保留上一可用版本。
 5. 安装状态机至少覆盖：设备检查、空间检查、下载、校验、解压、安装工具、验证、就绪、需要操作、可重试失败和回滚。进程重建后从持久化事实恢复，不信任旧 UI 状态。
@@ -22,7 +20,8 @@ Termux 主应用的软件包路径、Bootstrap 和仓库与包名深度绑定，
 7. Runtime 进程由 AgentDeck 前台服务拥有，使用私有 socket 或一次性鉴权回环通道。离开页面、App 被杀和版本切换时按 instance lease 精确清理，不使用通配进程终止。
 8. 现有 Codex app-server、Room conversation/thread 映射、Keystore vault、Provider broker 和聊天协议保持不变。Runtime 迁移不得改写或删除用户现有 Codex/项目数据。
 9. PRoot、rootfs 内 GPL 工具和其他第三方二进制按各自许可证分发，提供对应 LICENSE、NOTICE、来源和源码获取方式。复制 GPL Java/Kotlin 实现前必须另行审查；优先独立执行经过校验的上游二进制并自行实现 Android 编排层。
-10. 内嵌 Runtime 只有在当前 target SDK 的 ARM64 真机上完成 shell、DNS、TLS、git、Codex 登录、app-server、审批、锁屏恢复、更新和回滚验收后，才能成为稳定版标准默认值。预发布可以让全新测试安装默认进入内嵌 Runtime，以收集门禁证据，但必须保留 Termux 兼容回退并明确标记测试状态。
+10. 内嵌 Runtime 只有在当前 target SDK 的 ARM64 真机上完成 shell、DNS、TLS、git、Codex 登录、app-server、审批、锁屏恢复、更新和回滚验收后，才能成为稳定版默认值。测试版不提供 Termux 回退；失败时保留上一可用内嵌版本并给出可重试修复动作。
+11. Codex 用户数据和项目不得留在版本化 rootfs 内。`$CODEX_HOME` 与项目分别使用独立的 App 私有持久目录并绑定到 `/root/.codex`、`/root/projects`；首次升级只迁移普通文件且不跟随符号链接，rootfs 替换不删除认证、配置、thread 或项目数据。
 
 ## 边界
 
@@ -31,13 +30,10 @@ Android UI / Domain
         |
         v
 AgentRuntime
-  |-- EmbeddedProotRuntime
-  |     |-- packaged PRoot + loader
-  |     |-- verified private rootfs
-  |     `-- official Linux Codex app-server
-  |
-  `-- TermuxRuntime
-        `-- existing RUN_COMMAND + proot-distro path
+  `-- EmbeddedProotRuntime
+        |-- packaged PRoot + loader
+        |-- verified private rootfs
+        `-- official Linux Codex app-server
 ```
 
 建议的最小接口：
@@ -56,23 +52,24 @@ interface AgentRuntime {
 
 ## 分期
 
-1. 先抽象 `AgentRuntime`，以 `TermuxRuntime` 适配现有行为，确保零行为迁移。
-2. 在独立实现中完成 ARM64 PRoot + 最小 rootfs 技术验证。
-3. 加入版本化 installer、前台服务、Codex 和 app-server。
-4. 真机通过后切换新安装默认值；已有 Termux 用户可继续使用或显式迁移。
+1. 抽象 `AgentRuntime` 并完成 ARM64 PRoot + 最小 rootfs 技术验证。
+2. 加入版本化 installer、前台服务、Codex 和 app-server。
+3. 将 Codex home 从版本化 rootfs 分离，保留旧应用数据并移除外部 Runtime 产品入口。
+4. 通过真机门禁后再进入稳定发布。
 
 ## 后果
 
 - AgentDeck 不再要求普通客户理解或安装 Termux。
 - APK/首次下载体积、第三方许可证、后台进程和升级回滚成为新的主要风险。
-- Termux 仍是已验证的兼容路径，不会在内嵌 Runtime 未成熟时被提前删除。
-- 本决策替代 DESIGN 中“必须 Termux”和“免 Termux 属于 P2”的旧结论；ADR-0001 继续约束 `TermuxRuntime` 实现。
+- 0.1.x Termux 实现不再是可选产品路径；历史源文件和字段在后续独立迁移中清理，不得重新出现在用户界面。
+- 本决策替代 DESIGN 中“必须 Termux”和“免 Termux 属于 P2”的旧结论；ADR-0001 仅记录旧版本边界。
 
-## 2026-08-09 实现进度
+## 2026-08-10 实现进度
 
-- 已完成领域级 `AgentRuntime`、`TermuxRuntime`、`EmbeddedProotRuntime` 和运行时路由，Doctor、安装、启动与聊天桥不再直接依赖 Termux。
+- `ServiceLocator`、Doctor、安装、启动与聊天桥只接入 `EmbeddedProotRuntime`；Manifest 已移除 Termux 权限、查询和结果接收器。
 - ARM64 APK 已固定打包 PRoot、loader 与 talloc，并锁定来源提交、许可证和 SHA-256。
 - 内嵌安装器已固定 Ubuntu Base 24.04.4 与 Codex 0.147.0，执行限长下载、大小/SHA-256 校验、安全 staging 解包、基础工具安装、功能验证和原子启用。
 - app-server 由精确 instance lease 和 Android `specialUse` 前台服务持有；Provider 参数保持 argv/TOML 结构，API Key 仍只经鉴权回环 broker 提供。
-- 现有已完成设置的用户默认保留 Termux 兼容后端；完成 ARM64 真机门禁后才能把内嵌后端改为所有新安装的标准默认值。
+- Codex home 与 `/root/projects` 已从版本化 rootfs 分离并持久绑定；旧内嵌安装中的普通文件会在不覆盖目标文件的前提下迁移。AgentDeck 的独立 profile 在会话启动前校验和应用，详细边界见 ADR-0010。
+- 设置和首次准备流程已移除 Runtime 选择及 Termux 专用动作；旧 Room 字段继续保留以确保非破坏升级。
 - `0.2.0-beta.1` 已在 Android 16 / iQOO Neo8 ARM64 上通过首次准备、Provider 导入、真实 app-server 对话、IME/滚动、后台存活和精确进程树清理；新测试安装默认内嵌，稳定版门禁仍等待多 OEM、审批、异常恢复和回滚覆盖。

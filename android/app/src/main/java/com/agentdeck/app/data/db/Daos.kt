@@ -19,6 +19,9 @@ interface ProviderProfileDao {
     @Query("SELECT * FROM provider_profiles ORDER BY createdAtEpochMs DESC")
     fun observeAll(): Flow<List<ProviderProfileEntity>>
 
+    @Query("SELECT * FROM provider_profiles ORDER BY createdAtEpochMs DESC")
+    suspend fun getAll(): List<ProviderProfileEntity>
+
     @Query("SELECT * FROM provider_profiles WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): ProviderProfileEntity?
 
@@ -63,6 +66,21 @@ interface AgentCardDao {
 
     @Upsert
     suspend fun upsert(entity: AgentCardEntity)
+
+    @Query("UPDATE agent_cards SET customTitle = :title WHERE id = :id")
+    suspend fun updateCustomTitle(id: String, title: String?)
+
+    @Query("UPDATE agent_cards SET pinned = :pinned WHERE id = :id")
+    suspend fun updatePinned(id: String, pinned: Boolean)
+
+    @Query("UPDATE agent_cards SET archived = :archived WHERE id = :id")
+    suspend fun updateArchived(id: String, archived: Boolean)
+
+    @Query(
+        "UPDATE agent_cards SET lastActiveAtEpochMs = :timestamp " +
+            "WHERE id = :id AND lastActiveAtEpochMs < :timestamp",
+    )
+    suspend fun touchActivity(id: String, timestamp: Long)
 
     @Query("DELETE FROM agent_cards WHERE id = :id")
     suspend fun delete(id: String)

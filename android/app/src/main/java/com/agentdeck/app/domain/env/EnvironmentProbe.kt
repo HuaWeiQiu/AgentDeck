@@ -40,7 +40,6 @@ internal object DoctorOutputParser {
 interface EnvironmentScanner {
     fun initialReport(): EnvironmentReport
     suspend fun scan(): EnvironmentReport
-    fun allowExternalAppsFixCommand(): String
     fun errorReport(message: String): EnvironmentReport
 }
 
@@ -76,14 +75,6 @@ class EnvironmentProbe(
         val markers = host.markers + runtime.markers
         return reportFromMarkers(markers, runtime.error)
     }
-
-    override fun allowExternalAppsFixCommand(): String = """
-        mkdir -p ~/.termux
-        if ! grep -q '^allow-external-apps=true$' ~/.termux/termux.properties 2>/dev/null; then
-          printf '\nallow-external-apps=true\n' >> ~/.termux/termux.properties
-        fi
-        termux-reload-settings
-    """.trimIndent()
 
     override fun errorReport(message: String): EnvironmentReport = failedHostReport(message)
 

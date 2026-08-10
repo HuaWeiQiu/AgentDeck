@@ -1,6 +1,8 @@
 package com.agentdeck.app.data.chat
 
 import android.annotation.SuppressLint
+import com.agentdeck.app.data.config.CodexProfileRuntimeConfig
+import com.agentdeck.app.data.config.CodexProfileSynchronizer
 import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.ProviderAdapterId
@@ -18,6 +20,7 @@ data class CodexBridgeEndpoint(
     val token: String,
     val instanceKey: String,
     val credentialToken: String? = null,
+    val profileConfig: CodexProfileRuntimeConfig = CodexProfileRuntimeConfig.EMPTY,
 )
 
 data class ManagedProviderRuntime(
@@ -72,12 +75,27 @@ interface CodexBridgeLaunch {
 @SuppressLint("SdCardPath")
 class CodexBridgeLauncher(
     private val agentRuntime: AgentRuntime,
+    private val profileSynchronizer: CodexProfileSynchronizer = CodexProfileSynchronizer.NONE,
 ) : CodexBridgeLaunch {
     override suspend fun launch(
         card: AgentCard,
         runtime: ManagedProviderRuntime?,
+    ): Result<CodexBridgeEndpoint> = launchInternal(card, runtime, synchronizeProfile = true)
+
+    suspend fun launchForAccount(card: AgentCard): Result<CodexBridgeEndpoint> =
+        launchInternal(card, runtime = null, synchronizeProfile = false)
+
+    private suspend fun launchInternal(
+        card: AgentCard,
+        runtime: ManagedProviderRuntime?,
+        synchronizeProfile: Boolean,
     ): Result<CodexBridgeEndpoint> = runCatching {
         require(card.recipeId == "recipe_codex") { "该对话不支持 Codex 原生聊天" }
+        val profileConfig = if (synchronizeProfile) {
+            profileSynchronizer.synchronize(card.distro).getOrThrow()
+        } else {
+            CodexProfileRuntimeConfig.EMPTY
+        }
         val instanceKey = instanceKey(card.id)
         val args = mutableListOf(
             "--distro",
@@ -121,7 +139,7 @@ class CodexBridgeLauncher(
             .filter(String::isNotEmpty)
             .lastOrNull()
             ?: error("Codex app-server 未返回连接信息")
-        parseEndpoint(payload, instanceKey, runtime != null)
+        parseEndpoint(payload, instanceKey, runtime != null, profileConfig)
     }
 
     override fun stop(endpoint: CodexBridgeEndpoint): Result<Unit> = agentRuntime.runCommand(
@@ -141,6 +159,7 @@ class CodexBridgeLauncher(
             payload: String,
             instanceKey: String,
             expectsCredentialToken: Boolean = false,
+            profileConfig: CodexProfileRuntimeConfig = CodexProfileRuntimeConfig.EMPTY,
         ): CodexBridgeEndpoint {
             val json = JSONObject(payload)
             val port = json.getInt("port")
@@ -160,7 +179,13 @@ class CodexBridgeLauncher(
             require(expectsCredentialToken || credentialToken == null) {
                 "Codex app-server 返回了意外的凭据授权"
             }
-            return CodexBridgeEndpoint(port, token, instanceKey, credentialToken)
+            return CodexBridgeEndpoint(
+                port = port,
+                token = token,
+                instanceKey = instanceKey,
+                credentialToken = credentialToken,
+                profileConfig = profileConfig,
+            )
         }
 
         private val CREDENTIAL_TOKEN_PATTERN = Regex("[a-f0-9]{64}")

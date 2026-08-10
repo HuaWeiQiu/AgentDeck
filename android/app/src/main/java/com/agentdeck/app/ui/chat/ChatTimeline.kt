@@ -1,15 +1,19 @@
 package com.agentdeck.app.ui.chat
 
+import androidx.compose.runtime.Immutable
 import com.agentdeck.app.domain.chat.ChatItem
 import com.agentdeck.app.domain.chat.ChatItemKind
 
+@Immutable
 internal sealed interface ChatTimelineEntry {
     val key: String
 
+    @Immutable
     data class Message(val item: ChatItem) : ChatTimelineEntry {
         override val key: String = item.id
     }
 
+    @Immutable
     data class Activity(val items: List<ChatItem>) : ChatTimelineEntry {
         override val key: String = "activity-${items.first().id}"
     }

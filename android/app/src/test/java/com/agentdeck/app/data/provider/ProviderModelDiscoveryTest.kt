@@ -76,6 +76,8 @@ class ProviderModelDiscoveryTest {
             401 to ProviderConnectionStatus.CREDENTIAL_REJECTED,
             403 to ProviderConnectionStatus.FORBIDDEN,
             404 to ProviderConnectionStatus.DISCOVERY_UNSUPPORTED,
+            405 to ProviderConnectionStatus.DISCOVERY_UNSUPPORTED,
+            501 to ProviderConnectionStatus.DISCOVERY_UNSUPPORTED,
             429 to ProviderConnectionStatus.RATE_LIMITED,
         ).forEach { (code, status) ->
             server.enqueue(MockResponse().setResponseCode(code))

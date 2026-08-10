@@ -22,13 +22,13 @@ class SetupStatusUiTest {
     }
 
     @Test
-    fun `combined ubuntu step exposes first missing dependency`() {
+    fun `combined runtime step exposes first missing dependency`() {
         val report = EnvironmentReport(
             readyReport().checks.map { check ->
                 when (check.id) {
-                    "proot_distro" -> check.copy(
+                    "embedded_runtime" -> check.copy(
                         status = EnvironmentCheckStatus.ACTION_REQUIRED,
-                        detail = "missing proot",
+                        detail = "missing runtime",
                     )
                     "ubuntu_installed" -> check.copy(status = EnvironmentCheckStatus.BLOCKED)
                     else -> check

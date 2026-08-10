@@ -28,6 +28,10 @@ data class RecipeInstallProgress(
     val recipeIndex: Int,
     val recipeCount: Int,
     val phase: InstallPhase,
+    /** 已下载字节数（跨文件累计），仅 DOWNLOADING 阶段提供。 */
+    val bytesDone: Long? = null,
+    /** 下载总字节数（跨文件累计），仅 DOWNLOADING 阶段提供。 */
+    val bytesTotal: Long? = null,
 )
 
 interface RecipeInstallation {

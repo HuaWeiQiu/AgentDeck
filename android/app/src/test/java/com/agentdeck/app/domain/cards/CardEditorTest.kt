@@ -3,6 +3,7 @@ package com.agentdeck.app.domain.cards
 import com.agentdeck.app.domain.launch.CodexUbuntuAdapter
 import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.CodexPermissionLevel
+import com.agentdeck.app.domain.model.ConversationIdentity
 import com.agentdeck.app.domain.model.PathNamespace
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.ProviderType
@@ -100,6 +101,31 @@ class CardEditorTest {
 
         assertTrue(wrongType.isFailure)
         assertTrue(missing.isFailure)
+    }
+
+    @Test
+    fun `conversation identity is normalized and validated`() {
+        val draft = CardDraft(
+            id = null,
+            name = "Role chat",
+            recipeId = "recipe_codex",
+            profileId = null,
+            modelId = null,
+            identity = ConversationIdentity("  导师 ", " 帮助用户梳理思路 "),
+            workspacePath = "/root/projects/default",
+            enabled = true,
+        )
+
+        val card = CardEditor.build(
+            draft,
+            null,
+            "card_1234abcd",
+            CodexUbuntuAdapter,
+            null,
+        ).getOrThrow()
+
+        assertEquals("导师", card.identity?.roleName)
+        assertEquals("帮助用户梳理思路", card.identity?.selfDefinition)
     }
 
     private fun card(innerArgs: List<String> = emptyList()) = AgentCard(

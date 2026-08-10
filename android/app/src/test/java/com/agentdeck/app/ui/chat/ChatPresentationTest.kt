@@ -1,5 +1,6 @@
 package com.agentdeck.app.ui.chat
 
+import com.agentdeck.app.domain.chat.ChatError
 import com.agentdeck.app.domain.chat.ChatItem
 import com.agentdeck.app.domain.chat.ChatItemKind
 import org.junit.Assert.assertEquals
@@ -22,9 +23,9 @@ class ChatPresentationTest {
 
         assertEquals(
             "模型服务暂时不可用，请检查设置后重试。",
-            customerFacingChatError(raw, false),
+            customerFacingChatError(ChatError.from(raw), false),
         )
-        assertEquals(raw, customerFacingChatError(raw, true))
+        assertEquals(raw, customerFacingChatError(ChatError.from(raw), true))
     }
 
     @Test
@@ -36,5 +37,12 @@ class ChatPresentationTest {
         assertTrue(shouldFollowLatest(true, false, history))
         assertTrue(shouldFollowLatest(false, true, history))
         assertFalse(shouldFollowLatest(false, false, history))
+    }
+
+    @Test
+    fun `token counts are formatted compactly`() {
+        assertEquals("850 tokens", formatTokenCount(850))
+        assertEquals("12.3k tokens", formatTokenCount(12_345))
+        assertEquals("1.5M tokens", formatTokenCount(1_500_000))
     }
 }

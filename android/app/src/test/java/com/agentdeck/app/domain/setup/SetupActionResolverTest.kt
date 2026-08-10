@@ -8,23 +8,7 @@ import org.junit.Test
 
 class SetupActionResolverTest {
     @Test
-    fun `actions follow setup dependency order`() {
-        assertEquals(
-            SetupAction.INSTALL_TERMUX,
-            stateWith("termux_installed", EnvironmentCheckStatus.ACTION_REQUIRED).action,
-        )
-        assertEquals(
-            SetupAction.GRANT_PERMISSION,
-            stateWith("termux_run_command_permission", EnvironmentCheckStatus.ACTION_REQUIRED).action,
-        )
-        assertEquals(
-            SetupAction.ALLOW_TERMUX_BACKGROUND,
-            stateWith("termux_background_execution", EnvironmentCheckStatus.ACTION_REQUIRED).action,
-        )
-        assertEquals(
-            SetupAction.ENABLE_EXTERNAL_APPS,
-            stateWith("allow_external_apps", EnvironmentCheckStatus.ACTION_REQUIRED).action,
-        )
+    fun `actions follow embedded setup dependency order`() {
         assertEquals(
             SetupAction.INSTALL_CODEX,
             stateWith("ubuntu_installed", EnvironmentCheckStatus.BLOCKED).action,
@@ -48,7 +32,7 @@ class SetupActionResolverTest {
         )
         assertEquals(
             SetupAction.SCAN,
-            stateWith("allow_external_apps", EnvironmentCheckStatus.ERROR).action,
+            SetupState(EnvironmentReport(emptyList())).action,
         )
         assertEquals(true, SetupState(readyReport(), isScanning = true).isReady)
     }
@@ -95,12 +79,10 @@ private fun embeddedReport(): EnvironmentReport = EnvironmentReport(
 
 internal fun readyReport(): EnvironmentReport = EnvironmentReport(
     listOf(
-        "termux_installed",
-        "termux_run_command_permission",
-        "termux_background_execution",
-        "allow_external_apps",
-        "proot_distro",
+        "embedded_supported",
+        "embedded_runtime",
         "ubuntu_installed",
+        "embedded_tools",
         "codex_installed",
         "codex_authenticated",
         "codex_wrapper",

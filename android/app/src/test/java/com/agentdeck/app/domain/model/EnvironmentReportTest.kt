@@ -8,12 +8,10 @@ class EnvironmentReportTest {
     @Test
     fun `login is not required to expose the conversation entry`() {
         val readyForLaunch = setOf(
-            "termux_installed",
-            "termux_run_command_permission",
-            "termux_background_execution",
-            "allow_external_apps",
-            "proot_distro",
+            "embedded_supported",
+            "embedded_runtime",
             "ubuntu_installed",
+            "embedded_tools",
             "codex_installed",
             "codex_wrapper",
         )

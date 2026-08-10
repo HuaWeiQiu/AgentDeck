@@ -1,12 +1,9 @@
 package com.agentdeck.app.domain.setup
 
-import android.annotation.SuppressLint
 import com.agentdeck.app.domain.env.EnvironmentScanner
 import com.agentdeck.app.domain.install.RecipeInstallation
+import com.agentdeck.app.domain.model.EnvironmentCheckStatus
 import com.agentdeck.app.domain.model.EnvironmentReport
-import com.agentdeck.app.domain.runtime.AgentRuntime
-import com.agentdeck.app.domain.runtime.RuntimeCommand
-import com.agentdeck.app.domain.runtime.RuntimeProgram
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -16,17 +13,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-@SuppressLint("SdCardPath") // Fixed cross-app path required by Termux RUN_COMMAND.
 class SetupCoordinator(
     private val scanner: EnvironmentScanner,
     private val installer: RecipeInstallation,
-    private val runtime: AgentRuntime,
     private val scope: CoroutineScope,
+    private val managedProviderReady: suspend () -> Boolean = { false },
     private val onReport: (EnvironmentReport) -> Unit = {},
 ) {
     private val mutableState = MutableStateFlow(SetupState(report = scanner.initialReport()))
     private var scanJob: Job? = null
     private var installJob: Job? = null
+    private var lastScanCompletedAtMs: Long = 0L
 
     val state: StateFlow<SetupState> = mutableState.asStateFlow()
 
@@ -35,8 +32,15 @@ class SetupCoordinator(
     }
 
     @Synchronized
-    fun scan() {
+    fun scan(force: Boolean = false) {
         if (scanJob?.isActive == true || installJob?.isActive == true) return
+        // 缓存窗口内的重复触发（如每次回前台的 ON_RESUME）直接复用上次结果，
+        // 避免反复启动内嵌运行环境探测。
+        if (!force && lastScanCompletedAtMs > 0 &&
+            System.currentTimeMillis() - lastScanCompletedAtMs < SCAN_CACHE_WINDOW_MS
+        ) {
+            return
+        }
         mutableState.update {
             it.copy(
                 isScanning = true,
@@ -47,6 +51,7 @@ class SetupCoordinator(
         scanJob = scope.launch {
             val report = safeScan()
             runCatching { onReport(report) }
+            lastScanCompletedAtMs = System.currentTimeMillis()
             mutableState.update {
                 it.copy(
                     report = report,
@@ -88,6 +93,7 @@ class SetupCoordinator(
 
             val report = safeScan()
             runCatching { onReport(report) }
+            lastScanCompletedAtMs = System.currentTimeMillis()
             mutableState.update { current ->
                 result.fold(
                     onSuccess = { success ->
@@ -113,49 +119,16 @@ class SetupCoordinator(
         }
     }
 
-    fun openTermuxInstallPage(): Boolean = runtime.openInstallPage()
-
-    fun openTermux(): Boolean = runtime.openConsole()
-
-    fun openTermuxAppSettings(): Boolean = runtime.openAppSettings()
-
-    fun allowExternalAppsFixCommand(): String = scanner.allowExternalAppsFixCommand()
-
-    fun startCodexAuthentication(): Result<Unit> {
-        if (mutableState.value.action != SetupAction.CONFIGURE_CODEX_AUTH) {
-            return Result.failure(IllegalStateException("当前环境无需或尚未进入 Codex 认证步骤"))
-        }
-        val command = RuntimeCommand(
-            instanceId = "agentdeck-codex-auth",
-            program = RuntimeProgram.CODEX_TERMINAL,
-            args = listOf(
-                "--distro",
-                "ubuntu",
-                "--cwd",
-                "/root/projects/default",
-                "--bin",
-                "bash",
-                "--",
-                "-lc",
-                CODEX_AUTH_SETUP_SCRIPT,
-            ),
-            background = false,
-            reuseExistingInstance = true,
-        )
-        return runtime.runCommand(command).fold(
-            onSuccess = {
-                if (runtime.openConsole()) {
-                    Result.success(Unit)
-                } else {
-                    Result.failure(IllegalStateException("认证助手已启动，但无法打开 Termux"))
-                }
-            },
-            onFailure = { Result.failure(it) },
-        )
-    }
-
     private suspend fun safeScan(): EnvironmentReport = try {
-        scanner.scan()
+        val report = scanner.scan()
+        val providerReady = try {
+            managedProviderReady()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
+        report.withManagedProviderConnection(providerReady)
     } catch (error: CancellationException) {
         throw error
     } catch (error: Exception) {
@@ -165,58 +138,24 @@ class SetupCoordinator(
     companion object {
         private const val CODEX_RECIPE_ID = "recipe_codex"
         private const val MAX_ERROR_LENGTH = 240
-
-        private val CODEX_AUTH_SETUP_SCRIPT = """
-            set +u
-
-            auth_ready=0
-            if [[ -n "${'$'}{OPENAI_API_KEY:-}" || -n "${'$'}{CODEX_ACCESS_TOKEN:-}" ]]; then
-              auth_ready=1
-            elif command -v python3 >/dev/null 2>&1 &&
-              timeout --kill-after=1s 3s python3 -c 'import os,pathlib,tomllib; home=pathlib.Path(os.environ.get("CODEX_HOME", pathlib.Path.home() / ".codex")); path=home / "config.toml"; data=tomllib.loads(path.read_text()) if path.is_file() else {}; provider=str(data.get("model_provider", "openai")); info=data.get("model_providers", {}).get(provider, {}); env_key=info.get("env_key") if isinstance(info, dict) else None; ready=(isinstance(env_key, str) and bool(os.environ.get(env_key))) or (provider != "openai" and isinstance(info, dict) and bool(info) and not env_key and info.get("requires_openai_auth") is not True); raise SystemExit(0 if ready else 1)' 2>/dev/null; then
-              auth_ready=1
-            elif timeout --kill-after=1s 5s codex login status >/dev/null 2>&1; then
-              auth_ready=1
-            fi
-
-            if [[ "${'$'}auth_ready" -eq 1 ]]; then
-              printf '\nCodex 已检测到可用认证，无需重复配置。\n'
-              printf '返回 AgentDeck 后点击重新检测即可。\n'
-              exec bash -l
-            fi
-
-            default_choice=1
-            if command -v python3 >/dev/null 2>&1 &&
-              python3 -c 'import os, pathlib, tomllib; path=pathlib.Path(os.environ.get("CODEX_HOME", pathlib.Path.home() / ".codex")) / "config.toml"; data=tomllib.loads(path.read_text()) if path.is_file() else {}; method=str(data.get("forced_login_method", "")).lower(); raise SystemExit(0 if method in {"api", "api_key"} else 1)' 2>/dev/null; then
-              default_choice=2
-            fi
-
-            printf '\nCodex 认证\n\n'
-            printf '1  ChatGPT 设备登录\n'
-            printf '2  API Key（输入时不会显示）\n\n'
-            read -r -p "选择 [1/2]（默认 ${'$'}default_choice）: " choice
-            choice="${'$'}{choice:-${'$'}default_choice}"
-
-            case "${'$'}choice" in
-              2)
-                read -r -s -p '请输入 API Key: ' codex_api_key
-                printf '\n'
-                if [[ -n "${'$'}codex_api_key" ]]; then
-                  printf '%s' "${'$'}codex_api_key" | codex login --with-api-key
-                else
-                  printf '未输入 API Key，已取消。\n'
-                fi
-                unset codex_api_key
-                ;;
-              *)
-                codex login --device-auth
-                ;;
-            esac
-
-            printf '\n完成后返回 AgentDeck 点击重新检测。\n'
-            exec bash -l
-        """.trimIndent()
+        private const val SCAN_CACHE_WINDOW_MS = 45_000L
     }
+}
+
+internal fun EnvironmentReport.withManagedProviderConnection(ready: Boolean): EnvironmentReport {
+    if (!ready || check("codex_authenticated")?.status == EnvironmentCheckStatus.READY) return this
+    return copy(
+        checks = checks.map { check ->
+            if (check.id == "codex_authenticated") {
+                check.copy(
+                    status = EnvironmentCheckStatus.READY,
+                    detail = "AgentDeck 模型服务已验证，将在会话启动时自动连接",
+                )
+            } else {
+                check
+            }
+        },
+    )
 }
 
 private fun com.agentdeck.app.domain.install.RecipeInstallProgress.userMessage(): String {

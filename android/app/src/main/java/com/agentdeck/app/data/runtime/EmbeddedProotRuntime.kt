@@ -74,6 +74,7 @@ internal class EmbeddedProotRuntime(
         timeoutMillis: Long,
     ): Result<RuntimeCommandResult> {
         if (!status().ready) return Result.failure(IllegalStateException(status().detail))
+        paths.ensureHostLayout()
         return when (command.program) {
             RuntimeProgram.HOST_SHELL -> EmbeddedProotProcess(paths).execute(
                 script = requireNotNull(command.script) { "Shell 请求缺少脚本" },

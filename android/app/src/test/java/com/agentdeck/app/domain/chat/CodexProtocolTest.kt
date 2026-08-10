@@ -1,13 +1,50 @@
 package com.agentdeck.app.domain.chat
 
+import com.agentdeck.app.data.chat.RpcRequestId
 import com.agentdeck.app.domain.model.CodexPermissionLevel
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CodexProtocolTest {
+    @Test
+    fun `model list response becomes picker options and cursor`() {
+        val response = JSONObject()
+            .put(
+                "data",
+                JSONArray()
+                    .put(
+                        JSONObject()
+                            .put("id", "catalog-sol")
+                            .put("model", "gpt-5.6-sol")
+                            .put("displayName", "GPT-5.6-Sol")
+                            .put("isDefault", true),
+                    )
+                    .put(
+                        JSONObject()
+                            .put("id", "catalog-terra")
+                            .put("model", "gpt-5.6-terra")
+                            .put("displayName", "GPT-5.6-Terra")
+                            .put("isDefault", false),
+                    ),
+            )
+            .put("nextCursor", "page-2")
+
+        val page = CodexProtocol.modelPage(response)
+        val params = CodexProtocol.modelListParams("page-2")
+
+        assertEquals(listOf("gpt-5.6-sol", "gpt-5.6-terra"), page.models.map { it.id })
+        assertEquals("GPT-5.6-Sol", page.models.first().displayName)
+        assertTrue(page.models.first().isDefault)
+        assertEquals("page-2", page.nextCursor)
+        assertEquals("page-2", params.getString("cursor"))
+        assertFalse(params.getBoolean("includeHidden"))
+    }
+
     @Test
     fun `runtime model and provider come from app server response`() {
         val runtime = CodexProtocol.runtime(
@@ -81,6 +118,19 @@ class CodexProtocolTest {
     }
 
     @Test
+    fun `persisted thread timestamp is converted to milliseconds only when conversation exists`() {
+        val response = JSONObject(
+            """{"thread":{"id":"thread-1","updatedAt":1700000000,"turns":[{"id":"turn-1"}]}}""",
+        )
+        val empty = JSONObject(
+            """{"thread":{"id":"thread-2","updatedAt":1700000000,"turns":[]}}""",
+        )
+
+        assertEquals(1_700_000_000_000L, CodexProtocol.threadUpdatedAtEpochMs(response))
+        assertNull(CodexProtocol.threadUpdatedAtEpochMs(empty))
+    }
+
+    @Test
     fun `server user item replaces optimistic item and agent deltas append`() {
         val optimistic = ChatItem("local-user-1", ChatItemKind.USER, "hello")
         val serverUser = ChatItem("user-1", ChatItemKind.USER, "hello")
@@ -107,6 +157,93 @@ class CodexProtocolTest {
         assertEquals("enabled", turn.getJSONObject("sandboxPolicy").getString("networkAccess"))
         assertEquals("untrusted", turn.getString("approvalPolicy"))
         assertEquals("hello", turn.getJSONArray("input").getJSONObject(0).getString("text"))
+    }
+
+    @Test
+    fun `native thread start and resume carry profile config and managed model overrides`() {
+        val config = JSONObject()
+            .put("model_reasoning_effort", "high")
+            .put("features", JSONObject().put("multi_agent", true))
+
+        val started = CodexProtocol.threadStartParams(
+            cwd = "/root/project",
+            profileConfig = config,
+            modelOverride = "bound-model",
+            modelProviderOverride = "agentdeck_provider",
+        )
+        val resumed = CodexProtocol.threadResumeParams(
+            threadId = "thread-1",
+            cwd = "/root/project",
+            profileConfig = config,
+            modelOverride = "bound-model",
+            modelProviderOverride = "agentdeck_provider",
+        )
+
+        assertEquals("high", started.getJSONObject("config").getString("model_reasoning_effort"))
+        assertTrue(
+            started.getJSONObject("config").getJSONObject("features").getBoolean("multi_agent"),
+        )
+        assertEquals("bound-model", started.getString("model"))
+        assertEquals("agentdeck_provider", started.getString("modelProvider"))
+        assertEquals("thread-1", resumed.getString("threadId"))
+        assertEquals("bound-model", resumed.getString("model"))
+    }
+
+    @Test
+    fun `developer instructions use the native thread field without mutating profile config`() {
+        val config = JSONObject()
+            .put("developer_instructions", "You are 夜不修.")
+            .put("model_reasoning_effort", "high")
+
+        val started = CodexProtocol.threadStartParams(
+            cwd = "/root/project",
+            profileConfig = config,
+        )
+        val resumed = CodexProtocol.threadResumeParams(
+            threadId = "thread-1",
+            cwd = "/root/project",
+            profileConfig = config,
+        )
+
+        assertEquals("You are 夜不修.", started.getString("developerInstructions"))
+        assertEquals("You are 夜不修.", resumed.getString("developerInstructions"))
+        assertFalse(started.getJSONObject("config").has("developer_instructions"))
+        assertFalse(resumed.getJSONObject("config").has("developer_instructions"))
+        assertEquals("You are 夜不修.", config.getString("developer_instructions"))
+    }
+
+    @Test
+    fun `thread resume clears removed developer instructions`() {
+        val started = CodexProtocol.threadStartParams(
+            cwd = "/root/project",
+            profileConfig = JSONObject(),
+        )
+        val resumed = CodexProtocol.threadResumeParams(
+            threadId = "thread-1",
+            cwd = "/root/project",
+            profileConfig = JSONObject(),
+        )
+
+        assertFalse(started.has("developerInstructions"))
+        assertEquals("", resumed.getString("developerInstructions"))
+    }
+
+    @Test
+    fun `turn carries persistent identity in collaboration developer instructions`() {
+        val params = CodexProtocol.turnStartParams(
+            threadId = "thread-1",
+            text = "你是谁？",
+            collaborationModel = "deepseek-v4-flash",
+            reasoningEffort = "max",
+            developerInstructions = "You are 夜不修.",
+        )
+
+        val mode = params.getJSONObject("collaborationMode")
+        val settings = mode.getJSONObject("settings")
+        assertEquals("default", mode.getString("mode"))
+        assertEquals("deepseek-v4-flash", settings.getString("model"))
+        assertEquals("max", settings.getString("reasoning_effort"))
+        assertEquals("You are 夜不修.", settings.getString("developer_instructions"))
     }
 
     @Test
@@ -156,5 +293,161 @@ class CodexProtocolTest {
         assertEquals(true, accepted.getJSONObject("permissions").getJSONObject("network").getBoolean("enabled"))
         assertEquals(0, declined.getJSONObject("permissions").length())
         assertNull(declined.opt("decision"))
+    }
+
+    @Test
+    fun `steer params carry thread turn and text input`() {
+        val params = CodexProtocol.turnSteerParams("thread-1", "turn-9", "补充一下")
+        assertEquals("thread-1", params.getString("threadId"))
+        assertEquals("turn-9", params.getString("expectedTurnId"))
+        val input = params.getJSONArray("input").getJSONObject(0)
+        assertEquals("text", input.getString("type"))
+        assertEquals("补充一下", input.getString("text"))
+    }
+
+    @Test
+    fun `requestUserInput params parse questions options and flags`() {
+        val params = JSONObject()
+            .put("itemId", "item-1")
+            .put("threadId", "thread-1")
+            .put("turnId", "turn-1")
+            .put("isBlocking", true)
+            .put(
+                "questions",
+                JSONArray().put(
+                    JSONObject()
+                        .put("id", "q1")
+                        .put("header", "环境")
+                        .put("question", "部署到哪个环境？")
+                        .put("isOther", true)
+                        .put(
+                            "options",
+                            JSONArray().put(
+                                JSONObject().put("label", "staging").put("description", "预发"),
+                            ),
+                        ),
+                ).put(
+                    JSONObject()
+                        .put("id", "q2")
+                        .put("header", "密钥")
+                        .put("question", "提供 API Key")
+                        .put("isSecret", true),
+                ),
+            )
+
+        val request = CodexProtocol.parseUserInputRequest(RpcRequestId.Number(7), params)
+
+        assertTrue(request != null)
+        request!!
+        assertEquals("item-1", request.itemId)
+        assertEquals(2, request.questions.size)
+        val first = request.questions[0]
+        assertEquals("q1", first.id)
+        assertEquals("环境", first.header)
+        assertTrue(first.isOther)
+        assertEquals(1, first.options.size)
+        assertEquals("staging", first.options[0].label)
+        assertTrue(request.questions[1].isSecret)
+        assertTrue(request.questions[1].options.isEmpty())
+    }
+
+    @Test
+    fun `requestUserInput without questions is rejected`() {
+        val params = JSONObject().put("itemId", "item-1").put("questions", JSONArray())
+        assertNull(CodexProtocol.parseUserInputRequest(RpcRequestId.Number(7), params))
+    }
+
+    @Test
+    fun `userInput response answers every question with schema shape`() {
+        val request = ChatUserInputRequest(
+            requestId = RpcRequestId.Number(3),
+            itemId = "item-1",
+            questions = listOf(
+                ToolUserInputQuestion(id = "q1", header = "h", question = "q"),
+                ToolUserInputQuestion(id = "q2", header = "h", question = "q"),
+            ),
+        )
+
+        val response = CodexProtocol.userInputResponse(request, mapOf("q1" to listOf("staging")))
+        val answers = response.getJSONObject("answers")
+        assertEquals("staging", answers.getJSONObject("q1").getJSONArray("answers").getString(0))
+        assertEquals(0, answers.getJSONObject("q2").getJSONArray("answers").length())
+    }
+
+    @Test
+    fun `fileChange item parses update add and delete patches`() {
+        val item = JSONObject()
+            .put("id", "fc-1")
+            .put("type", "fileChange")
+            .put("status", "completed")
+            .put(
+                "changes",
+                JSONArray()
+                    .put(
+                        JSONObject()
+                            .put("type", "update")
+                            .put("path", "src/Main.kt")
+                            .put("unified_diff", "@@ -1 +1 @@\n-old\n+new"),
+                    )
+                    .put(
+                        JSONObject()
+                            .put("type", "add")
+                            .put("path", "src/New.kt")
+                            .put("content", "val x = 1"),
+                    )
+                    .put(
+                        JSONObject()
+                            .put("type", "delete")
+                            .put("path", "src/Old.kt")
+                            .put("content", "val gone = true"),
+                    ),
+            )
+
+        val parsed = CodexProtocol.item(item)!!
+        assertEquals(3, parsed.patches.size)
+        assertEquals("src/Main.kt", parsed.patches[0].path)
+        assertTrue(parsed.patches[0].diff.contains("+new"))
+        assertEquals("+val x = 1", parsed.patches[1].diff)
+        assertEquals("-val gone = true", parsed.patches[2].diff)
+        assertTrue(parsed.text.contains("src/Main.kt"))
+    }
+
+    @Test
+    fun `patchUpdated notification merges new file patches`() {
+        val params = JSONObject()
+            .put("itemId", "fc-1")
+            .put("threadId", "thread-1")
+            .put("turnId", "turn-1")
+            .put(
+                "changes",
+                JSONArray().put(
+                    JSONObject()
+                        .put("path", "src/Extra.kt")
+                        .put("kind", JSONObject().put("type", "update"))
+                        .put("diff", "+added"),
+                ),
+            )
+
+        val patches = CodexProtocol.patchUpdatedPatches(params)
+        assertEquals(1, patches.size)
+        assertEquals("src/Extra.kt", patches[0].path)
+        assertEquals("update", patches[0].kind)
+        assertEquals("+added", patches[0].diff)
+    }
+
+    @Test
+    fun `upsert keeps live patches when snapshot carries none`() {
+        val withPatch = ChatItem(
+            id = "fc-1",
+            kind = ChatItemKind.FILE_CHANGE,
+            text = "src/Main.kt",
+            patches = listOf(FilePatch("src/Main.kt", "update", "+new")),
+        )
+        val snapshot = withPatch.copy(patches = emptyList(), status = "completed")
+
+        val merged = CodexProtocol.upsert(listOf(withPatch), snapshot)
+        assertEquals(1, merged.size)
+        assertEquals(1, merged[0].patches.size)
+        assertEquals("completed", merged[0].status)
     }
 }

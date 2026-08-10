@@ -8,6 +8,7 @@ import com.agentdeck.app.domain.install.RecipeInstallProgress
 import com.agentdeck.app.domain.install.RecipeInstallation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -16,6 +17,7 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
@@ -48,8 +50,20 @@ internal class EmbeddedRuntimeInstaller(
             check(paths.stagingRootfs.mkdirs()) { "无法创建运行环境临时目录" }
             try {
                 progress(InstallPhase.DOWNLOADING, onProgress)
-                val rootfsArchive = download(EmbeddedRuntimeManifest.rootfs)
-                val codexArchive = download(EmbeddedRuntimeManifest.codex)
+                val totalBytes =
+                    EmbeddedRuntimeManifest.rootfs.sizeBytes + EmbeddedRuntimeManifest.codex.sizeBytes
+                val rootfsArchive = download(
+                    EmbeddedRuntimeManifest.rootfs,
+                    completedBytes = 0L,
+                    totalBytes = totalBytes,
+                    onProgress = onProgress,
+                )
+                val codexArchive = download(
+                    EmbeddedRuntimeManifest.codex,
+                    completedBytes = EmbeddedRuntimeManifest.rootfs.sizeBytes,
+                    totalBytes = totalBytes,
+                    onProgress = onProgress,
+                )
 
                 progress(InstallPhase.VERIFYING, onProgress)
                 verify(rootfsArchive, EmbeddedRuntimeManifest.rootfs)
@@ -96,67 +110,32 @@ internal class EmbeddedRuntimeInstaller(
     private fun checkFreeSpace() {
         val available = StatFs(paths.root.absolutePath).availableBytes
         require(available >= MIN_FREE_SPACE_BYTES) {
-            "存储空间不足；准备 Codex 至少需要 700 MB 可用空间"
+            "存储空间不足；准备 Codex 至少需要 1.1 GB 可用空间"
         }
     }
 
-    private suspend fun download(artifact: VerifiedArtifact): File = withContext(Dispatchers.IO) {
-        val target = File(paths.cacheDir, artifact.fileName)
-        if (target.isFile && runCatching { verify(target, artifact) }.isSuccess) {
-            return@withContext target
+    private suspend fun download(
+        artifact: VerifiedArtifact,
+        completedBytes: Long,
+        totalBytes: Long,
+        onProgress: (RecipeInstallProgress) -> Unit,
+    ): File = withContext(Dispatchers.IO) {
+        downloadArtifact(paths.cacheDir, artifact, client) { artifactBytesDone ->
+            progress(
+                InstallPhase.DOWNLOADING,
+                onProgress,
+                bytesDone = completedBytes + artifactBytesDone,
+                bytesTotal = totalBytes,
+            )
         }
-        val part = File(paths.cacheDir, ".${artifact.fileName}.part")
-        part.delete()
-        val request = Request.Builder().url(artifact.url).get().build()
-        client.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "下载 ${artifact.fileName} 失败（HTTP ${response.code}）" }
-            val body = response.body ?: error("下载 ${artifact.fileName} 未返回内容")
-            val declaredLength = body.contentLength()
-            require(declaredLength == -1L || declaredLength == artifact.sizeBytes) {
-                "${artifact.fileName} 服务端长度与清单不一致"
-            }
-            FileOutputStream(part).use { output ->
-                body.byteStream().use { input ->
-                    val buffer = ByteArray(128 * 1024)
-                    var total = 0L
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        total += count
-                        require(total <= artifact.sizeBytes) {
-                            "${artifact.fileName} 下载内容超过清单大小"
-                        }
-                        output.write(buffer, 0, count)
-                    }
-                }
-            }
-        }
-        verify(part, artifact)
-        target.delete()
-        check(part.renameTo(target)) { "无法保存已验证的运行组件" }
-        target
     }
 
-    private fun verify(file: File, artifact: VerifiedArtifact) {
-        require(file.isFile && file.length() == artifact.sizeBytes) {
-            "${artifact.fileName} 文件大小校验失败"
-        }
-        val digest = MessageDigest.getInstance("SHA-256")
-        FileInputStream(file).use { input ->
-            val buffer = ByteArray(128 * 1024)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
-            }
-        }
-        val actual = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
-        require(actual == artifact.sha256) { "${artifact.fileName} SHA-256 校验失败" }
-    }
+    private fun verify(file: File, artifact: VerifiedArtifact) = verifyArtifact(file, artifact)
 
     private fun configureRootfs() {
         listOf(
             "root/projects/default",
+            "root/.codex",
             "run/agentdeck",
             "tmp",
             "var/lib/apt/lists/partial",
@@ -248,6 +227,8 @@ internal class EmbeddedRuntimeInstaller(
     private fun progress(
         phase: InstallPhase,
         callback: (RecipeInstallProgress) -> Unit,
+        bytesDone: Long? = null,
+        bytesTotal: Long? = null,
     ) {
         callback(
             RecipeInstallProgress(
@@ -256,14 +237,128 @@ internal class EmbeddedRuntimeInstaller(
                 recipeIndex = 0,
                 recipeCount = 1,
                 phase = phase,
+                bytesDone = bytesDone,
+                bytesTotal = bytesTotal,
             ),
         )
     }
 
     companion object {
         private const val CODEX_RECIPE_ID = "recipe_codex"
-        private const val MIN_FREE_SPACE_BYTES = 700L * 1024 * 1024
+        // A fresh install peaks near 900 MiB on the ARM64 device once the rootfs,
+        // package metadata, Codex binary, and verified download cache coexist.
+        private const val MIN_FREE_SPACE_BYTES = 1_100L * 1024 * 1024
         private const val TOOLS_TIMEOUT_MILLIS = 20L * 60 * 1_000
         private const val VERIFY_TIMEOUT_MILLIS = 60_000L
     }
 }
+
+/**
+ * 下载 [artifact] 到 [cacheDir]，支持 `.part` 断点续传与有限次网络重试。
+ * 最终 SHA-256 校验失败或长度不符直接抛错（不重试）；仅 IOException 触发重试。
+ * [onBytes] 报告该文件已落盘字节数（含续传部分，可能反复递增）。
+ */
+internal suspend fun downloadArtifact(
+    cacheDir: File,
+    artifact: VerifiedArtifact,
+    client: OkHttpClient,
+    onBytes: (bytesDone: Long) -> Unit = {},
+): File {
+    val target = File(cacheDir, artifact.fileName)
+    if (target.isFile && runCatching { verifyArtifact(target, artifact) }.isSuccess) {
+        onBytes(artifact.sizeBytes)
+        return target
+    }
+    val part = File(cacheDir, ".${artifact.fileName}.part")
+    if (part.isFile && part.length() > artifact.sizeBytes) {
+        check(part.delete()) { "无法清理 ${artifact.fileName} 的残留下载" }
+    }
+    withNetworkRetries { downloadOnce(client, artifact, part, onBytes) }
+    verifyArtifact(part, artifact)
+    target.delete()
+    check(part.renameTo(target)) { "无法保存已验证的运行组件" }
+    return target
+}
+
+/** 单次下载尝试；`.part` 已存在时用 Range 续传，服务端忽略 Range（200）则全量重下。 */
+private fun downloadOnce(
+    client: OkHttpClient,
+    artifact: VerifiedArtifact,
+    part: File,
+    onBytes: (bytesDone: Long) -> Unit,
+) {
+    val resumedBytes = if (part.isFile) part.length() else 0L
+    if (resumedBytes == artifact.sizeBytes) {
+        onBytes(resumedBytes)
+        return
+    }
+    val request = Request.Builder().url(artifact.url).get().apply {
+        if (resumedBytes > 0) header("Range", "bytes=$resumedBytes-")
+    }.build()
+    client.newCall(request).execute().use { response ->
+        check(response.isSuccessful) { "下载 ${artifact.fileName} 失败（HTTP ${response.code}）" }
+        val resuming = resumedBytes > 0 && response.code == HTTP_PARTIAL
+        if (resumedBytes > 0 && !resuming) {
+            check(part.delete()) { "无法清理 ${artifact.fileName} 的残留下载" }
+        }
+        val body = response.body ?: error("下载 ${artifact.fileName} 未返回内容")
+        val declaredLength = body.contentLength()
+        val expectedLength = artifact.sizeBytes - if (resuming) resumedBytes else 0L
+        require(declaredLength == -1L || declaredLength == expectedLength) {
+            "${artifact.fileName} 服务端长度与清单不一致"
+        }
+        FileOutputStream(part, resuming).use { output ->
+            body.byteStream().use { input ->
+                val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+                var total = if (resuming) resumedBytes else 0L
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    require(total <= artifact.sizeBytes) {
+                        "${artifact.fileName} 下载内容超过清单大小"
+                    }
+                    output.write(buffer, 0, count)
+                    onBytes(total)
+                }
+            }
+        }
+    }
+}
+
+/** 仅对网络类异常（IOException）做指数退避重试；校验失败与取消不重试。 */
+private suspend fun <T> withNetworkRetries(block: () -> T): T {
+    var attempt = 0
+    while (true) {
+        try {
+            return block()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: IOException) {
+            if (attempt >= RETRY_BACKOFF_MILLIS.size) throw error
+            delay(RETRY_BACKOFF_MILLIS[attempt])
+            attempt += 1
+        }
+    }
+}
+
+internal fun verifyArtifact(file: File, artifact: VerifiedArtifact) {
+    require(file.isFile && file.length() == artifact.sizeBytes) {
+        "${artifact.fileName} 文件大小校验失败"
+    }
+    val digest = MessageDigest.getInstance("SHA-256")
+    FileInputStream(file).use { input ->
+        val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    val actual = digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+    require(actual == artifact.sha256) { "${artifact.fileName} SHA-256 校验失败" }
+}
+
+private const val HTTP_PARTIAL = 206
+private const val DOWNLOAD_BUFFER_BYTES = 128 * 1024
+private val RETRY_BACKOFF_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)

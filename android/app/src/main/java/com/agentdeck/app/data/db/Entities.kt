@@ -7,6 +7,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.CodexPermissionLevel
+import com.agentdeck.app.domain.model.ConversationIdentity
 import com.agentdeck.app.domain.model.PathNamespace
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.ProviderAdapterId
@@ -129,6 +130,15 @@ data class AgentCardEntity(
     val innerBin: String,
     val innerArgsCsv: String,
     val enabled: Boolean,
+    val customTitle: String?,
+    @ColumnInfo(defaultValue = "0") val pinned: Boolean,
+    @ColumnInfo(defaultValue = "0") val archived: Boolean,
+    @ColumnInfo(defaultValue = "0") val lastActiveAtEpochMs: Long,
+    val roleName: String?,
+    val roleSelfDefinition: String?,
+    val roleObjective: String?,
+    val roleCommunicationStyle: String?,
+    val roleBoundaries: String?,
 ) {
     fun toDomain(): AgentCard = AgentCard(
         id = id,
@@ -146,6 +156,19 @@ data class AgentCardEntity(
         innerBin = innerBin,
         innerArgs = if (innerArgsCsv.isBlank()) emptyList() else innerArgsCsv.split('\u0001'),
         enabled = enabled,
+        customTitle = customTitle,
+        pinned = pinned,
+        archived = archived,
+        lastActiveAtEpochMs = lastActiveAtEpochMs,
+        identity = roleName?.let { name ->
+            ConversationIdentity(
+                roleName = name,
+                selfDefinition = roleSelfDefinition.orEmpty(),
+                objective = roleObjective.orEmpty(),
+                communicationStyle = roleCommunicationStyle.orEmpty(),
+                boundaries = roleBoundaries.orEmpty(),
+            )
+        },
     )
 
     companion object {
@@ -165,6 +188,15 @@ data class AgentCardEntity(
             innerBin = domain.innerBin,
             innerArgsCsv = domain.innerArgs.joinToString("\u0001"),
             enabled = domain.enabled,
+            customTitle = domain.customTitle,
+            pinned = domain.pinned,
+            archived = domain.archived,
+            lastActiveAtEpochMs = domain.lastActiveAtEpochMs,
+            roleName = domain.identity?.roleName,
+            roleSelfDefinition = domain.identity?.selfDefinition,
+            roleObjective = domain.identity?.objective,
+            roleCommunicationStyle = domain.identity?.communicationStyle,
+            roleBoundaries = domain.identity?.boundaries,
         )
     }
 }

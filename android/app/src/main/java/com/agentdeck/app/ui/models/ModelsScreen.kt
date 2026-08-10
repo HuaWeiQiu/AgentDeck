@@ -1,10 +1,16 @@
 package com.agentdeck.app.ui.models
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.net.Uri
+import android.os.PersistableBundle
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,14 +26,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
@@ -54,12 +64,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -67,11 +78,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.agentdeck.app.domain.model.ProviderAdapterId
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
 import com.agentdeck.app.domain.model.ProviderModel
 import com.agentdeck.app.domain.model.ProviderProfile
+import com.agentdeck.app.ui.theme.AppSpacing
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,17 +93,22 @@ fun ModelsScreen(
     onBack: () -> Unit,
     vm: ModelsViewModel = viewModel(),
 ) {
-    val profiles by vm.profiles.collectAsState()
+    val profiles by vm.profiles.collectAsStateWithLifecycle()
+    val accountState by vm.accountState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var editor by remember { mutableStateOf<ProviderEditorDraft?>(null) }
     var deleting by remember { mutableStateOf<ProviderProfile?>(null) }
-    var showCurrentConfig by remember { mutableStateOf(false) }
-    var importingCurrent by remember { mutableStateOf(false) }
-    var importError by remember { mutableStateOf<String?>(null) }
+    var apiKeyDialogVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(accountState.account) {
+        if (accountState.account != null) apiKeyDialogVisible = false
+    }
 
     val activeEditor = editor
     if (activeEditor != null) {
+        // 编辑器是 early-return 假导航，拦截系统返回键关闭编辑器而不是退出页面
+        BackHandler { editor = null }
         ProviderEditorScreen(
             initial = activeEditor,
             onBack = { editor = null },
@@ -128,28 +146,145 @@ fun ModelsScreen(
             contentPadding = PaddingValues(bottom = 20.dp),
         ) {
             item {
-                ListItem(
-                    headlineContent = { Text("当前 Codex 配置") },
-                    supportingContent = { Text("导入现有 Termux / Ubuntu CLI Provider") },
-                    leadingContent = { Icon(Icons.Filled.Key, contentDescription = null) },
-                    trailingContent = {
-                        Icon(Icons.Filled.ChevronRight, contentDescription = null)
-                    },
-                    modifier = Modifier.clickable {
-                        importError = null
-                        showCurrentConfig = true
-                    },
-                )
+                SectionLabel("Codex 账号")
+            }
+            if (accountState.isLoading) {
+                item {
+                    ListItem(
+                        headlineContent = { Text("正在读取账号状态") },
+                        leadingContent = { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) },
+                    )
+                }
+            } else if (accountState.account != null) {
+                item {
+                    val account = requireNotNull(accountState.account)
+                    ListItem(
+                        headlineContent = {
+                            Text(
+                                when (account.type) {
+                                    com.agentdeck.app.data.chat.CodexAccountType.CHATGPT -> "ChatGPT 已登录"
+                                    com.agentdeck.app.data.chat.CodexAccountType.API_KEY -> "OpenAI API Key 已连接"
+                                    com.agentdeck.app.data.chat.CodexAccountType.OTHER -> "Codex 账号已连接"
+                                },
+                            )
+                        },
+                        supportingContent = {
+                            Text(
+                                listOfNotNull(account.email, account.planType?.uppercase())
+                                    .joinToString(" · ")
+                                    .ifBlank { "凭据由 Codex 保存在内嵌运行环境" },
+                            )
+                        },
+                        leadingContent = {
+                            Icon(
+                                Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        },
+                        trailingContent = {
+                            if (accountState.isWorking) {
+                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                            } else {
+                                IconButton(onClick = vm::logout) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Logout,
+                                        contentDescription = "退出 Codex 账号",
+                                    )
+                                }
+                            }
+                        },
+                    )
+                }
+            } else {
+                item {
+                    ListItem(
+                        headlineContent = { Text("使用 ChatGPT 账号") },
+                        supportingContent = { Text("推荐 · 使用 ChatGPT 套餐，通过设备码安全登录") },
+                        leadingContent = { Icon(Icons.Filled.AccountCircle, contentDescription = null) },
+                        trailingContent = {
+                            if (accountState.isWorking) {
+                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Filled.ChevronRight, contentDescription = null)
+                            }
+                        },
+                        modifier = Modifier.clickable(
+                            enabled = !accountState.isWorking,
+                            onClick = vm::startChatGptLogin,
+                        ),
+                    )
+                }
+                item { HorizontalDivider() }
+                item {
+                    ListItem(
+                        headlineContent = { Text("使用 OpenAI API Key") },
+                        supportingContent = { Text("按 API 用量计费 · 由 Codex 在内嵌环境中持久化授权") },
+                        leadingContent = { Icon(Icons.Filled.Key, contentDescription = null) },
+                        trailingContent = {
+                            Icon(Icons.Filled.ChevronRight, contentDescription = null)
+                        },
+                        modifier = Modifier.clickable(
+                            enabled = !accountState.isWorking,
+                            onClick = { apiKeyDialogVisible = true },
+                        ),
+                    )
+                }
+            }
+            accountState.error?.let { error ->
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            error,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = vm::refreshAccount) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "重试读取账号")
+                        }
+                    }
+                }
+            }
+            item {
                 HorizontalDivider()
+                SectionLabel("第三方 Responses 服务")
             }
             if (profiles.isEmpty()) {
                 item {
-                    Text(
-                        "尚未添加第三方模型服务",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 22.dp),
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(
+                            Icons.Filled.Hub,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(AppSpacing.md))
+                        Text(
+                            "尚未添加第三方模型服务",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(AppSpacing.xs))
+                        Text(
+                            "Sub2API 是预设；其他服务需兼容 OpenAI Responses，支持 /v1/models 时会自动读取模型",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(AppSpacing.lg))
+                        Button(onClick = { editor = vm.newDraft() }) {
+                            Text("添加模型服务")
+                        }
+                    }
                 }
             }
             items(profiles, key = { it.id }) { profile ->
@@ -163,62 +298,34 @@ fun ModelsScreen(
         }
     }
 
-    if (showCurrentConfig) {
-        AlertDialog(
-            onDismissRequest = { if (!importingCurrent) showCurrentConfig = false },
-            title = { Text("当前 Codex 配置") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("可从已有 Termux / Ubuntu 读取当前 CLI Provider，并用于内嵌 Codex。")
-                    Text(
-                        "API Key 会转存到 Android Keystore 加密凭据区，不会显示在页面中。",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    importError?.let { message ->
-                        Text(message, color = MaterialTheme.colorScheme.error)
-                    }
+    accountState.deviceLogin?.let { login ->
+        ChatGptDeviceLoginDialog(
+            login = login,
+            onOpen = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("ChatGPT device code", login.userCode)
+                clip.description.extras = PersistableBundle().apply {
+                    putBoolean("android.content.extra.IS_SENSITIVE", true)
+                }
+                clipboard.setPrimaryClip(clip)
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(login.verificationUrl)))
+                }.onFailure {
+                    Toast.makeText(context, "无法打开浏览器，登录代码已复制", Toast.LENGTH_LONG).show()
                 }
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        scope.launch {
-                            importingCurrent = true
-                            importError = null
-                            vm.importCurrentCodexProvider().fold(
-                                onSuccess = { imported ->
-                                    importingCurrent = false
-                                    showCurrentConfig = false
-                                    Toast.makeText(
-                                        context,
-                                        "已导入 ${imported.profile.name} · ${imported.modelId}",
-                                        Toast.LENGTH_LONG,
-                                    ).show()
-                                },
-                                onFailure = { error ->
-                                    importingCurrent = false
-                                    importError = error.message ?: "无法导入当前 Codex 配置"
-                                },
-                            )
-                        }
-                    },
-                    enabled = !importingCurrent,
-                ) {
-                    if (importingCurrent) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.padding(end = 10.dp).size(18.dp),
-                            strokeWidth = 2.dp,
-                        )
-                    }
-                    Text(if (importingCurrent) "正在导入" else "导入并用于 Codex")
-                }
+            onCancel = vm::cancelChatGptLogin,
+        )
+    }
+
+    if (apiKeyDialogVisible) {
+        ApiKeyLoginDialog(
+            working = accountState.isWorking,
+            onLogin = { apiKey ->
+                apiKeyDialogVisible = false
+                vm.loginWithApiKey(apiKey)
             },
-            dismissButton = {
-                TextButton(
-                    onClick = { showCurrentConfig = false },
-                    enabled = !importingCurrent,
-                ) { Text("取消") }
-            },
+            onDismiss = { apiKeyDialogVisible = false },
         )
     }
 
@@ -256,6 +363,110 @@ fun ModelsScreen(
 }
 
 @Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+    )
+}
+
+@Composable
+private fun ChatGptDeviceLoginDialog(
+    login: com.agentdeck.app.data.chat.CodexDeviceLogin,
+    onOpen: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("登录 ChatGPT") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("在浏览器中输入以下代码。授权完成后，此页面会自动更新。")
+                SelectionContainer {
+                    Text(login.userCode, style = MaterialTheme.typography.headlineSmall)
+                }
+                Text(
+                    login.verificationUrl,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("等待授权", modifier = Modifier.padding(start = 10.dp))
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onOpen) {
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                Text("复制代码并打开")
+            }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun ApiKeyLoginDialog(
+    working: Boolean,
+    onLogin: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var apiKey by remember { mutableStateOf("") }
+    var visible by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    DisposableEffect(Unit) {
+        val window = context.findActivity()?.window
+        val alreadySecure = window?.attributes?.flags?.and(WindowManager.LayoutParams.FLAG_SECURE) != 0
+        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose {
+            apiKey = ""
+            if (!alreadySecure) window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = { if (!working) onDismiss() },
+        title = { Text("连接 OpenAI API") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("API Key 交给 Codex 官方登录流程保存，不会写入 config.toml。")
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text("OpenAI API Key") },
+                    singleLine = true,
+                    visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { visible = !visible }) {
+                            Icon(
+                                if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (visible) "隐藏 API Key" else "显示 API Key",
+                            )
+                        }
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val submitted = apiKey
+                    apiKey = ""
+                    onLogin(submitted)
+                },
+                enabled = apiKey.isNotBlank() && !working,
+            ) { Text("连接") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !working) { Text("取消") }
+        },
+    )
+}
+
+@Composable
 private fun ProviderRow(
     profile: ProviderProfile,
     onEdit: () -> Unit,
@@ -263,18 +474,22 @@ private fun ProviderRow(
 ) {
     ListItem(
         headlineContent = {
-            Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(profile.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
         },
         supportingContent = {
             Column {
                 Text(
                     profile.baseUrl,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    profile.defaultModel,
-                    maxLines = 1,
+                    (if (profile.adapterId == ProviderAdapterId.SUB2API) {
+                        "Sub2API 预设"
+                    } else {
+                        "Responses"
+                    }) + " · ${profile.defaultModel}",
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -289,13 +504,9 @@ private fun ProviderRow(
             )
         },
         trailingContent = {
-            Row {
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Filled.Edit, contentDescription = "编辑 ${profile.name}")
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Filled.Delete, contentDescription = "删除 ${profile.name}")
-                }
+            // 整行 clickable 已进入编辑，仅保留删除按钮，避免重复焦点
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, contentDescription = "删除 ${profile.name}")
             }
         },
         modifier = Modifier.clickable(onClick = onEdit),
@@ -348,32 +559,33 @@ private fun ProviderEditorScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                     FilterChip(
                         selected = draft.adapterId == ProviderAdapterId.SUB2API,
                         onClick = {
-                            draft = draft.copy(
-                                adapterId = ProviderAdapterId.SUB2API,
-                                validated = false,
-                                models = emptyList(),
-                                error = null,
-                            )
+                            draft = draft.selectAdapter(ProviderAdapterId.SUB2API)
                         },
-                        label = { Text("Sub2API") },
+                        label = { Text("Sub2API 预设") },
                     )
                     FilterChip(
                         selected = draft.adapterId == ProviderAdapterId.OPENAI_RESPONSES,
                         onClick = {
-                            draft = draft.copy(
-                                adapterId = ProviderAdapterId.OPENAI_RESPONSES,
-                                validated = false,
-                                models = emptyList(),
-                                error = null,
-                            )
+                            draft = draft.selectAdapter(ProviderAdapterId.OPENAI_RESPONSES)
                         },
-                        label = { Text("Responses 兼容") },
+                        label = { Text("其他 Responses 服务") },
                     )
                 }
+            }
+            item {
+                Text(
+                    if (draft.adapterId == ProviderAdapterId.SUB2API) {
+                        "适用于 Sub2API 部署；按 Responses 标准连接，并自动从 /v1/models 读取模型。"
+                    } else {
+                        "适用于 OpenAI Responses 兼容服务；没有 /v1/models 时，验证后可手填模型 ID。"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             item {
                 OutlinedTextField(
@@ -396,7 +608,15 @@ private fun ProviderEditorScreen(
                         )
                     },
                     label = { Text("API Base URL") },
-                    placeholder = { Text("https://example.com/v1") },
+                    placeholder = {
+                        Text(
+                            if (draft.adapterId == ProviderAdapterId.SUB2API) {
+                                "https://你的-sub2api-域名/v1"
+                            } else {
+                                "https://api.example.com/v1"
+                            },
+                        )
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -561,7 +781,7 @@ private fun ModelDropdown(
                 DropdownMenuItem(
                     text = {
                         Column {
-                            Text(model.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(model.displayName, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             if (model.displayName != model.id) {
                                 Text(
                                     model.id,

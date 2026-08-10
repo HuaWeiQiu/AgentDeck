@@ -80,6 +80,74 @@ class SessionsScreenTest {
     }
 
     @Test
+    fun `search filters by title summary and model, pinned sorts first`() {
+        val alpha = sessionItem("Alpha", model = "gpt-5", lastActive = 20)
+        val beta = sessionItem("Beta", pinned = true, model = "claude", lastActive = 10)
+        val archived = sessionItem("Alpha-old", archived = true, model = "gpt-5", lastActive = 30)
+
+        // 置顶优先，其余按最近活动时间
+        val all = filterAndSortSessions(listOf(alpha, beta, archived), "")
+        assertEquals(listOf("Beta", "Alpha-old", "Alpha"), all.map { it.card.name })
+
+        // 命中标题
+        val byTitle = filterAndSortSessions(listOf(alpha, beta, archived), "alpha")
+        assertEquals(listOf("Alpha-old", "Alpha"), byTitle.map { it.card.name })
+
+        // 命中模型名
+        val byModel = filterAndSortSessions(listOf(alpha, beta), "claude")
+        assertEquals(listOf("Beta"), byModel.map { it.card.name })
+
+        // 大小写不敏感
+        assertEquals(1, filterAndSortSessions(listOf(alpha, beta), "GPT-5").size)
+
+        // 无匹配
+        assertTrue(filterAndSortSessions(listOf(alpha, beta), "不存在的词").isEmpty())
+    }
+
+    private fun sessionItem(
+        name: String,
+        pinned: Boolean = false,
+        archived: Boolean = false,
+        model: String? = null,
+        lastActive: Long = 0L,
+    ) = SessionCardUi(
+        card = AgentCard(
+            id = name,
+            name = name,
+            icon = "codex",
+            recipeId = "recipe_codex",
+            templateId = "template",
+            profileId = null,
+            termuxSessionName = "session",
+            workspaceNamespace = PathNamespace.UBUNTU,
+            workspacePath = "/root/project",
+            pinned = pinned,
+            archived = archived,
+            lastActiveAtEpochMs = lastActive,
+        ),
+        recipeAvailable = true,
+        cliDisplayName = "Codex",
+        profile = null,
+        modelDisplayName = model,
+        displayTitle = name,
+        summary = model ?: "当前 Codex 配置",
+        lastActiveLabel = formatLastActivity(lastActive),
+    )
+
+    @Test
+    fun `last activity displays an explicit date and time`() {
+        assertEquals("尚未开始", formatLastActivity(0L))
+        assertEquals(
+            "2023/11/14 22:13",
+            formatLastActivity(
+                timestamp = 1_700_000_000_000L,
+                locale = java.util.Locale.CHINA,
+                timeZone = java.util.TimeZone.getTimeZone("UTC"),
+            ),
+        )
+    }
+
+    @Test
     fun `permission selection distinguishes inherited and overridden values`() {
         assertEquals(
             "使用默认 · 推荐",

@@ -8,6 +8,7 @@ import com.agentdeck.app.domain.runtime.RuntimeKind
 import com.agentdeck.app.domain.runtime.RuntimeStatus
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EmbeddedEnvironmentProbeTest {
@@ -46,12 +47,17 @@ class EmbeddedEnvironmentProbeTest {
         assertEquals(true, report.canLaunchSessions)
         assertEquals(false, report.allCriticalOk)
         assertEquals(EnvironmentCheckStatus.ACTION_REQUIRED, report.check("codex_authenticated")?.status)
+        assertTrue(runtime.lastCommand?.script.orEmpty().contains("agentdeck.config.toml"))
+        assertTrue(runtime.lastCommand?.script.orEmpty().contains("codex login status"))
     }
 
     private class FakeRuntime(
         private val status: RuntimeStatus,
         private val result: RuntimeCommandResult = RuntimeCommandResult("", "", 0),
     ) : AgentRuntime {
+        var lastCommand: RuntimeCommand? = null
+            private set
+
         override val kind = RuntimeKind.EMBEDDED_PROOT
         override fun status() = status
         override fun openConsole() = false
@@ -59,7 +65,7 @@ class EmbeddedEnvironmentProbeTest {
         override fun openAppSettings() = false
         override fun runCommand(command: RuntimeCommand) = Result.success(Unit)
         override suspend fun runCommandForResult(command: RuntimeCommand, timeoutMillis: Long) =
-            Result.success(result)
+            Result.success(result).also { lastCommand = command }
         override fun stop(instanceId: String) = Result.success(Unit)
     }
 }

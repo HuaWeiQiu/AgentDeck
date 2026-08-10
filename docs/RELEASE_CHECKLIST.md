@@ -3,6 +3,9 @@
 ## Automated baseline
 
 - [ ] `./scripts/verify-release.sh` passes from a clean checkout with JDK 17.
+- [ ] Run `connectedDebugAndroidTest` only on a disposable test device or emulator. The Gradle
+      connected-test task can uninstall the target package after the run and therefore must never
+      be pointed at a device containing the only copy of conversations, Runtime state, or credentials.
 - [ ] GitHub Actions `Android CI` passes.
 - [ ] GitHub private vulnerability reporting is enabled and the reporting flow is tested.
 - [ ] Recipe and wrapper sources match packaged APK assets.
@@ -26,9 +29,7 @@
 - [ ] Reasoning and tool activity are collapsed by default, approvals explain impact before confirmation, and the composer remains above the IME.
 - [ ] Advanced and Developer settings are opt-in, reversible, and cannot expose secret values in UI, exports, screenshots, or logs.
 
-## Embedded runtime default gate
-
-Complete this section before changing the default from `TermuxRuntime` to `EmbeddedProotRuntime`.
+## Embedded runtime gate
 
 - [ ] Runtime packs and manifests are signed, versioned, checksum-verified, installed atomically, and recover after process death.
 - [ ] The previous known-good Base, Codex, and wrapper versions can be rolled back independently without deleting user configuration or conversations.
@@ -36,28 +37,39 @@ Complete this section before changing the default from `TermuxRuntime` to `Embed
 - [ ] APK/AAB packaging, native library extraction, ABI coverage, target-SDK behavior, licenses, notices, and corresponding source obligations are verified.
 - [ ] Fresh install, upgrade, rollback, no-space, corrupt-pack, offline, lock-screen, OEM background, and reboot scenarios pass on representative ARM64 devices.
 
-## F-Droid Termux device (compatibility backend)
+## ARM64 Android device
 
-- [ ] Test a supported Android device with F-Droid Termux 0.118.3 (current stable baseline) or newer.
-- [ ] Grant `RUN_COMMAND` only from the contextual Doctor action.
-- [ ] Verify the Doctor states before and after `allow-external-apps=true`.
-- [ ] Fresh-install `ubuntu:24.04`, then Codex 0.147.0 on arm64.
+- [ ] Fresh-install only AgentDeck on a supported ARM64 device; do not install or configure Termux.
+- [ ] Complete the one-button download, checksum verification, extraction, Codex installation, and
+      functional self-test; leaving and reopening the app must resume an interrupted download.
+- [ ] Confirm the installed Runtime and persistent Codex home remain app-private and survive an
+      AgentDeck upgrade and Runtime repair.
 - [ ] Confirm a checksum or download failure is shown as failure, never success.
-- [ ] Confirm existing ChatGPT login, API Key environment, and active Provider `env_key` are detected without exposing credential values.
-- [ ] With no usable credential, complete ChatGPT device auth or hidden API Key input, rerun the environment scan, and confirm authentication is ready.
-- [ ] Enter a card and confirm native chat creates a Codex thread, streams Markdown, and restores the same history after leaving and reopening.
+- [ ] With no Codex files on first use, verify ChatGPT device login, hidden OpenAI API Key input, and
+      third-party Responses setup are offered without creating fake authentication state.
+- [ ] Confirm official ChatGPT/API Key login is stored by Codex in its auth store, separately from
+      `config.toml`; verify AgentDeck-managed Provider keys remain in Android Keystore.
+- [ ] Open the Codex parameters editor and confirm its first-use template distinguishes optional
+      values, contains commented examples, rejects malformed TOML and credentials, and is applied
+      to the next session without overwriting the global Codex config.
+- [ ] Add both a Sub2API preset and a generic Responses service; verify their labels/help differ,
+      `/v1/models` discovery works, and the selected Provider/model reaches the real chat turn.
+- [ ] Create a conversation with a role identity, start and reconnect native chat, and confirm each
+      turn receives the identity as developer instructions rather than displaying a fake user message.
+- [ ] Confirm the conversation list sorts and displays the actual last activity date and time.
+- [ ] Enter a conversation and confirm native chat creates a Codex thread, streams Markdown, offers
+      a real model selector, and restores the same history after leaving and reopening.
 - [ ] Kill the Android app during a long turn, reopen the conversation, and confirm the orphan app-server tree is replaced, the persisted `inProgress` turn is interrupted, and a new message can run.
 - [ ] Trigger command and file-change approvals; confirm accept, session accept, and decline reach Codex exactly once.
 - [ ] Confirm app-server listens only on `127.0.0.1`, rejects a wrong capability token, and its supervised process tree exits after disconnect.
-- [ ] Use the terminal icon and confirm the named Termux fallback session opens in the same workspace.
 - [ ] Test workspace paths and CLI args containing spaces and quotes.
-- [ ] Add a Sub2API Provider, retrieve its `/v1/models` list, select a model, and complete a real native-chat turn with the returned Provider/model matching the selection.
 - [ ] Run two managed Providers sequentially and confirm credentials, model caches, thread mappings, and app-server processes do not cross over.
 - [ ] Verify wrong keys, forbidden groups, rate limits, malformed model responses, TLS failures, and model-list timeouts terminate with actionable UI states.
 
 ## Final review
 
-- [ ] No CLI or managed Provider credentials appear in `adb logcat`, process lists, Room, preferences, Codex config, or persistent Termux files.
+- [ ] No CLI or managed Provider credentials appear in `adb logcat`, process lists, Room,
+      preferences, AgentDeck's TOML profile, or other persistent Runtime files.
 - [ ] Confirm the managed credential ciphertext is under `noBackupFilesDir`, Keystore invalidation fails closed, deleting a Provider removes its ciphertext, and screenshots are blocked while the API Key editor is visible.
 - [ ] UI remains usable on a compact phone viewport and with large font scaling.
 - [ ] Known limitations are included in release notes.
