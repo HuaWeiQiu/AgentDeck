@@ -5,6 +5,7 @@ import com.agentdeck.app.domain.chat.ChatItemKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.runBlocking
 
 class ChatTimelineTest {
     @Test
@@ -63,4 +64,48 @@ class ChatTimelineTest {
         assertEquals("raw internal reasoning", activityDetailText(reasoning, true))
         assertEquals("pwd", activityDetailText(command, false))
     }
+
+    @Test
+    fun `parsed assistant message expands into parent timeline blocks`() {
+        val assistant = ChatItem(
+            "answer",
+            ChatItemKind.ASSISTANT,
+            "# Title\n\nParagraph\n\n```\ncode\n```",
+        )
+        val document = runBlocking { ChatMarkdownParser().parse(assistant.id, assistant.text) }
+
+        val timeline = groupChatTimeline(
+            items = listOf(assistant),
+            markdownDocuments = mapOf(assistant.id to document),
+        )
+
+        assertEquals(document.blocks.size, timeline.size)
+        assertTrue(timeline.all { it is ChatTimelineEntry.AssistantBlock })
+        assertEquals(1, timeline.count { (it as ChatTimelineEntry.AssistantBlock).isFirst })
+    }
+
+    @Test
+    fun `streaming assistant stays one plain message item`() {
+        val assistant = ChatItem("answer", ChatItemKind.ASSISTANT, "partial")
+        val document = runBlocking { ChatMarkdownParser().parse(assistant.id, assistant.text) }
+
+        val timeline = groupChatTimeline(
+            items = listOf(assistant),
+            markdownDocuments = mapOf(assistant.id to document),
+            streamingItemId = assistant.id,
+        )
+
+        assertEquals(1, timeline.size)
+        assertTrue(timeline.single() is ChatTimelineEntry.Message)
+    }
+
+    @Test
+    fun `empty completed assistant message does not leave a loading row`() {
+        val timeline = groupChatTimeline(
+            items = listOf(ChatItem("empty", ChatItemKind.ASSISTANT, "")),
+        )
+
+        assertTrue(timeline.isEmpty())
+    }
+
 }

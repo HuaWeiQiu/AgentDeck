@@ -10,7 +10,7 @@ Requirements: JDK 17 and Android SDK platform/build-tools 36.
 ./scripts/verify-release.sh
 ```
 
-This command verifies packaged recipe/wrapper synchronization, runs JVM tests, builds the debug APK, and runs Android Lint.
+This command verifies packaged recipe/wrapper synchronization, runs JVM tests, builds the R8-optimized, test-signed Beta APK, and runs Android Lint.
 
 ## Change rules
 

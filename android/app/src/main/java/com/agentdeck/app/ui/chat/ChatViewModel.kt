@@ -1,5 +1,6 @@
 package com.agentdeck.app.ui.chat
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -17,6 +18,7 @@ import com.agentdeck.app.data.secure.ProviderCredentialBroker
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.chat.ApprovalKind
 import com.agentdeck.app.domain.chat.ChatApproval
+import com.agentdeck.app.domain.chat.ChatAttachment
 import com.agentdeck.app.domain.chat.ChatError
 import com.agentdeck.app.domain.chat.ChatItem
 import com.agentdeck.app.domain.chat.ChatItemKind
@@ -31,24 +33,42 @@ import com.agentdeck.app.domain.model.ProviderConnectionStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.UUID
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModel(
     private val cardId: String,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = mutableState.asStateFlow()
+    private val transcriptRepository = ChatTranscriptRepository()
+    internal val transcriptState: StateFlow<ChatTranscriptUiState> = combine(
+        state,
+        transcriptRepository.state,
+    ) { current, transcript ->
+        current.toTranscriptState(transcript)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = ChatUiState().toTranscriptState(ChatTranscriptStoreState()),
+    )
 
     // Streamed assistant text lives outside ChatUiState so per-token updates only
     // recompose the message that is actually streaming.
@@ -56,6 +76,15 @@ class ChatViewModel(
     val streamingText: StateFlow<String?> = mutableStreamingText.asStateFlow()
     private val streamingCoalescer = StreamingDeltaCoalescer(STREAM_FLUSH_INTERVAL_MS)
     private var streamingFlushJob: Job? = null
+
+    private val markdownParser = ChatMarkdownParser()
+    private val markdownCache = ChatMarkdownCache()
+    private val markdownParseDispatcher = Dispatchers.Default.limitedParallelism(1)
+    private val markdownParseJobs = mutableMapOf<String, Job>()
+    private val markdownParseContents = mutableMapOf<String, String>()
+    private val mutableMarkdownDocuments = MutableStateFlow<Map<String, ChatMarkdownDocument>>(emptyMap())
+    internal val markdownDocuments: StateFlow<Map<String, ChatMarkdownDocument>> =
+        mutableMarkdownDocuments.asStateFlow()
 
     private var client: CodexRpcClient? = null
     private var endpoint: CodexBridgeEndpoint? = null
@@ -74,7 +103,114 @@ class ChatViewModel(
     private var steerFailedForTurn: String? = null
 
     init {
+        observeMarkdownItems()
         connect()
+    }
+
+    internal fun requestMarkdown(messageId: String, content: String) {
+        if (content.isEmpty()) return
+        markdownCache.get(messageId, content)?.let { cached ->
+            if (mutableMarkdownDocuments.value[messageId] !== cached) {
+                mutableMarkdownDocuments.value = markdownCache.snapshot()
+            }
+            return
+        }
+        if (markdownParseContents[messageId] == content && markdownParseJobs[messageId]?.isActive == true) {
+            return
+        }
+        markdownParseJobs.remove(messageId)?.cancel()
+        markdownParseContents[messageId] = content
+        markdownParseJobs[messageId] = viewModelScope.launch {
+            try {
+                val document = withContext(markdownParseDispatcher) {
+                    markdownParser.parse(messageId, content)
+                }
+                if (markdownParseContents[messageId] == content) {
+                    mutableMarkdownDocuments.value = markdownCache.put(document)
+                }
+            } finally {
+                if (markdownParseContents[messageId] == content) {
+                    markdownParseJobs.remove(messageId)
+                    markdownParseContents.remove(messageId)
+                }
+            }
+        }
+    }
+
+    internal fun touchMarkdown(messageId: String) {
+        markdownCache.touch(messageId)
+    }
+
+    internal fun loadOlderHistory() {
+        val request = transcriptRepository.beginLoadOlder() ?: return
+        val rpc = client
+        val currentThread = threadId
+        if (rpc == null || currentThread == null) {
+            transcriptRepository.failLoadOlder(request)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val response = rpc.request(
+                    "thread/turns/list",
+                    CodexProtocol.threadTurnsListParams(currentThread, request.cursor),
+                )
+                val page = withContext(Dispatchers.Default) {
+                    CodexProtocol.historyPage(response)
+                }
+                preheatMarkdown(page.items)
+                transcriptRepository.finishLoadOlder(request, page)
+            } catch (error: CancellationException) {
+                transcriptRepository.failLoadOlder(request)
+                throw error
+            } catch (error: Exception) {
+                transcriptRepository.failLoadOlder(request)
+                mutableState.update {
+                    it.copy(error = ChatError.from(error.message ?: "无法加载更早的对话"))
+                }
+            }
+        }
+    }
+
+    internal fun approvalPatches(itemId: String): List<com.agentdeck.app.domain.chat.FilePatch> =
+        transcriptRepository.patchesFor(itemId)
+
+    private suspend fun preheatMarkdown(items: List<ChatItem>) {
+        val candidates = items.filter {
+            it.kind == ChatItemKind.ASSISTANT && it.text.isNotEmpty()
+        }.takeLast(INITIAL_MARKDOWN_PREPARSE_COUNT)
+        if (candidates.isEmpty()) return
+        val documents = withContext(markdownParseDispatcher) {
+            candidates.map { item -> markdownParser.parse(item.id, item.text) }
+        }
+        documents.forEach(markdownCache::put)
+        mutableMarkdownDocuments.value = markdownCache.snapshot()
+    }
+
+    private fun observeMarkdownItems() {
+        viewModelScope.launch {
+            transcriptState.map { current ->
+                MarkdownWindow(current.items, current.streamingItemId)
+            }.distinctUntilChanged().collect { window ->
+                val eligible = window.items.filter {
+                    it.kind == ChatItemKind.ASSISTANT &&
+                        it.id != window.streamingItemId &&
+                        it.text.isNotEmpty()
+                }
+                val retainedIds = eligible.mapTo(mutableSetOf()) { it.id }
+                markdownParseJobs.keys.filterNot(retainedIds::contains).forEach { messageId ->
+                    markdownParseJobs.remove(messageId)?.cancel()
+                    markdownParseContents.remove(messageId)
+                }
+                val retained = markdownCache.retain(retainedIds)
+                if (retained != mutableMarkdownDocuments.value) {
+                    mutableMarkdownDocuments.value = retained
+                }
+                eligible.takeLast(INITIAL_MARKDOWN_PREPARSE_COUNT).forEach { item ->
+                    requestMarkdown(item.id, item.text)
+                }
+            }
+        }
     }
 
     fun connect() {
@@ -109,10 +245,19 @@ class ChatViewModel(
                 )
             }
             try {
+                val card = withContext(Dispatchers.IO) {
+                    requireNotNull(ServiceLocator.cards.getCard(cardId)) { "对话不存在" }
+                }
+                // The title is useful immediately; bridge startup and history restore continue below.
+                mutableState.update {
+                    it.copy(card = card, runtimeModel = card.modelId ?: it.runtimeModel)
+                }
+                transcriptRepository.showPreview(
+                    ChatTranscriptPreviewCache.get(cardId, card.profileId, card.modelId),
+                )
                 // Card/profile validation and bridge launch do file and process work;
                 // keep them off the main thread.
-                val (card, managedRuntime, endpoint, modelOptions, providerLabel) = withContext(Dispatchers.IO) {
-                    val card = requireNotNull(ServiceLocator.cards.getCard(cardId)) { "对话不存在" }
+                val (managedRuntime, endpoint, modelOptions, providerLabel) = withContext(Dispatchers.IO) {
                     permissionLevel = CodexPermissionLevel.effective(
                         card.permissionLevel,
                         ServiceLocator.experienceSettings.codexPermissionLevel.value,
@@ -152,9 +297,8 @@ class ChatViewModel(
                             CodexModelOption(model.id, model.displayName)
                         }
                     }.orEmpty()
-                    ConnectPrep(card, managedRuntime, endpoint, modelOptions, profile?.name)
+                    ConnectPrep(managedRuntime, endpoint, modelOptions, profile?.name)
                 }
-                mutableState.update { it.copy(card = card) }
                 val runtimeKey = managedRuntime?.conversationKey
                     ?: ConversationLinkRepository.CURRENT_RUNTIME_KEY
                 val rpc = CodexRpcClient.connect(endpoint)
@@ -236,12 +380,17 @@ class ChatViewModel(
                         "Codex 实际运行配置与对话绑定不一致，请检查模型服务配置"
                     }
                 }
+                val historyPage = withContext(Dispatchers.Default) {
+                    CodexProtocol.initialHistoryPage(response)
+                }
+                preheatMarkdown(historyPage.items)
                 ServiceLocator.conversationLinks.saveThreadId(
                     cardId,
                     requireNotNull(threadId),
                     runtimeKey,
                 )
                 resetStreaming()
+                transcriptRepository.reset(historyPage)
                 val availableModels = availableModels(
                     managed = managedRuntime != null,
                     configured = modelOptions,
@@ -256,10 +405,8 @@ class ChatViewModel(
                         isConnected = true,
                         isStreaming = false,
                         isReconnecting = false,
-                        streamingItemId = null,
                         runtimeModel = runtime.model,
                         runtimeProvider = providerLabel ?: runtime.provider,
-                        items = CodexProtocol.historyItems(response),
                         availableModels = availableModels,
                         error = null,
                     )
@@ -292,9 +439,62 @@ class ChatViewModel(
         }
     }
 
+    fun addAttachments(uris: List<Uri>) {
+        if (uris.isEmpty() || state.value.isImportingAttachment) return
+        val available = com.agentdeck.app.data.chat.ChatAttachmentStore.MAX_ATTACHMENTS -
+            state.value.attachments.size
+        if (available <= 0) {
+            mutableState.update { it.copy(error = ChatError.from("单次最多添加 4 个附件")) }
+            return
+        }
+        mutableState.update { it.copy(isImportingAttachment = true, error = null) }
+        viewModelScope.launch {
+            try {
+                uris.take(available).forEach { uri ->
+                    val attachment = ServiceLocator.chatAttachments.import(cardId, uri)
+                    if (attachment.kind == com.agentdeck.app.domain.chat.ChatAttachmentKind.IMAGE &&
+                        !supportsImageInput(
+                            state.value.availableModels,
+                            state.value.selectedModel ?: state.value.runtimeModel,
+                        )
+                    ) {
+                        ServiceLocator.chatAttachments.remove(attachment)
+                        error("当前模型明确不支持图片输入")
+                    }
+                    mutableState.update { current ->
+                        current.copy(attachments = current.attachments + attachment)
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                mutableState.update {
+                    it.copy(error = ChatError.from(error.message ?: "无法添加附件"))
+                }
+            } finally {
+                mutableState.update { it.copy(isImportingAttachment = false) }
+            }
+        }
+    }
+
+    fun removeAttachment(id: String) {
+        val attachment = state.value.attachments.firstOrNull { it.id == id } ?: return
+        mutableState.update { current ->
+            current.copy(attachments = current.attachments.filterNot { it.id == id })
+        }
+        viewModelScope.launch { ServiceLocator.chatAttachments.remove(attachment) }
+    }
+
     /** In-chat model override for subsequent turns; null restores the card model. */
     fun setModelOverride(modelId: String?) {
         if (modelId != null && state.value.availableModels.none { it.id == modelId }) return
+        if (state.value.attachments.any {
+                it.kind == com.agentdeck.app.domain.chat.ChatAttachmentKind.IMAGE
+            } && !supportsImageInput(state.value.availableModels, modelId ?: state.value.runtimeModel)
+        ) {
+            mutableState.update { it.copy(error = ChatError.from("该模型不支持已添加的图片")) }
+            return
+        }
         mutableState.update { it.copy(selectedModel = modelId) }
     }
 
@@ -315,7 +515,8 @@ class ChatViewModel(
             return
         }
         val text = state.value.composer.trim()
-        if (text.isBlank()) return
+        val attachments = state.value.attachments
+        if (text.isBlank() && attachments.isEmpty()) return
         val rpc = client ?: return
         val currentThread = threadId ?: return
         // While a turn is running, steer it with the new instruction. If steering is
@@ -324,33 +525,40 @@ class ChatViewModel(
         val turn = activeTurnId
         if (state.value.isStreaming && turn != null && turnStartJob?.isActive != true) {
             if (steerFailedForTurn == turn) {
-                enqueue(text)
+                enqueue(text, attachments)
                 return
             }
-            mutableState.update { it.copy(composer = "", error = null) }
+            mutableState.update { it.copy(composer = "", attachments = emptyList(), error = null) }
             viewModelScope.launch {
                 try {
                     rpc.request(
                         "turn/steer",
-                        CodexProtocol.turnSteerParams(currentThread, turn, text),
+                        CodexProtocol.turnSteerParams(currentThread, turn, text, attachments),
                     )
                     ServiceLocator.cards.touchActivity(cardId)
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
                     steerFailedForTurn = turn
-                    enqueue(text)
+                    enqueue(text, attachments)
                 }
             }
             return
         }
         if (!state.value.canSend) return
-        startTurn(text, rpc, currentThread)
+        startTurn(text, attachments, rpc, currentThread)
     }
 
     /** Remove a queued message before it is auto-sent. */
     fun cancelQueued() {
-        mutableState.update { it.copy(queued = null) }
+        mutableState.update { current ->
+            val queued = current.queued ?: return@update current
+            current.copy(
+                composer = current.composer.ifBlank { queued.text },
+                attachments = if (current.attachments.isEmpty()) queued.attachments else current.attachments,
+                queued = null,
+            )
+        }
     }
 
     /** Answer a pending `item/tool/requestUserInput` request. */
@@ -372,30 +580,42 @@ class ChatViewModel(
         }
     }
 
-    private fun enqueue(text: String) {
+    private fun enqueue(text: String, attachments: List<ChatAttachment>) {
         mutableState.update {
             it.copy(
                 composer = "",
-                queued = QueuedChatMessage(id = UUID.randomUUID().toString(), text = text),
+                attachments = emptyList(),
+                queued = QueuedChatMessage(
+                    id = UUID.randomUUID().toString(),
+                    text = text,
+                    attachments = attachments,
+                ),
             )
         }
     }
 
-    private fun startTurn(text: String, rpc: CodexRpcClient, currentThread: String) {
+    private fun startTurn(
+        text: String,
+        attachments: List<ChatAttachment>,
+        rpc: CodexRpcClient,
+        currentThread: String,
+    ) {
+        val messageText = CodexProtocol.userMessageText(text, attachments)
         val localItem = ChatItem(
             id = "local-user-${UUID.randomUUID()}",
             kind = ChatItemKind.USER,
-            text = text,
+            text = messageText,
         )
         mutableState.update {
             it.copy(
                 composer = "",
+                attachments = emptyList(),
                 queued = null,
                 isStreaming = true,
                 error = null,
-                items = it.items + localItem,
             )
         }
+        transcriptRepository.updateItems { it + localItem }
         turnStartJob = viewModelScope.launch {
             try {
                 val response = rpc.request(
@@ -404,6 +624,7 @@ class ChatViewModel(
                         currentThread,
                         text,
                         permissionLevel,
+                        attachments = attachments,
                         modelOverride = mutableState.value.selectedModel,
                         collaborationModel = mutableState.value.selectedModel
                             ?: mutableState.value.runtimeModel,
@@ -411,7 +632,13 @@ class ChatViewModel(
                         developerInstructions = developerInstructions,
                     ),
                 )
-                activeTurnId = CodexProtocol.turnId(response)
+                val startedTurnId = CodexProtocol.turnId(response)
+                activeTurnId = startedTurnId
+                transcriptRepository.updateItems { items ->
+                    items.map { item ->
+                        if (item.id == localItem.id) item.copy(turnId = startedTurnId) else item
+                    }
+                }
                 steerFailedForTurn = null
                 ServiceLocator.cards.touchActivity(cardId)
             } catch (error: CancellationException) {
@@ -423,11 +650,14 @@ class ChatViewModel(
                 mutableState.update {
                     it.copy(
                         composer = it.composer.ifBlank { text },
+                        attachments = if (it.attachments.isEmpty()) attachments else it.attachments,
                         isConnected = error !is CodexRpcTimeoutException,
                         isStreaming = false,
-                        items = it.items.filterNot { item -> item.id == localItem.id },
                         error = ChatError.from(error.message ?: "消息发送失败"),
                     )
+                }
+                transcriptRepository.updateItems { items ->
+                    items.filterNot { item -> item.id == localItem.id }
                 }
             } finally {
                 turnStartJob = null
@@ -522,6 +752,12 @@ class ChatViewModel(
             val card = withContext(Dispatchers.IO) {
                 requireNotNull(ServiceLocator.cards.getCard(cardId)) { "对话不存在" }
             }
+            mutableState.update {
+                it.copy(card = card, runtimeModel = card.modelId ?: it.runtimeModel)
+            }
+            transcriptRepository.showPreview(
+                ChatTranscriptPreviewCache.get(cardId, card.profileId, card.modelId),
+            )
             permissionLevel = held.permissionLevel
             client = held.client
             endpoint = held.endpoint
@@ -531,25 +767,42 @@ class ChatViewModel(
             threadId = held.threadId
             activeTurnId = held.activeTurnId
             ActiveCodexConnections.register(cardId, held.client)
-            eventJob?.cancel()
-            eventJob = viewModelScope.launch { held.client.events.collect(::handleInbound) }
+
+            // The registry intentionally does not retain a second copy of transcript
+            // history. Rebuild the recent page from the still-live app-server before
+            // replaying authoritative events completed while the screen was detached.
+            val historyResponse = held.client.request(
+                "thread/turns/list",
+                CodexProtocol.threadTurnsListParams(
+                    threadId = held.threadId,
+                    limit = INITIAL_HISTORY_TURNS,
+                ),
+            )
+            val historyPage = withContext(Dispatchers.Default) {
+                CodexProtocol.historyPage(historyResponse)
+            }
+            preheatMarkdown(historyPage.items)
+            transcriptRepository.reset(historyPage)
 
             val replayed: List<ChatItem> = buildList {
                 held.bufferedItems.toList().forEach { json -> CodexProtocol.item(json)?.let(::add) }
                 held.bufferedTurns.toList().forEach { json -> addAll(CodexProtocol.turnItems(json)) }
             }
+            transcriptRepository.updateItems { current ->
+                replayed.fold(current, CodexProtocol::upsert)
+            }
+            eventJob?.cancel()
+            eventJob = viewModelScope.launch { held.client.events.collect(::handleInbound) }
             resetStreaming()
             autoReconnecting = false
             reconnectAttempts = 0
             mutableState.update { current ->
-                val merged = replayed.fold(current.items, CodexProtocol::upsert)
                 current.copy(
                     card = card,
                     isConnecting = false,
                     isConnected = true,
                     isStreaming = held.isBusy,
                     isReconnecting = false,
-                    streamingItemId = null,
                     runtimeModel = held.runtimeModel,
                     runtimeProvider = held.runtimeProvider,
                     availableModels = held.availableModels,
@@ -558,13 +811,12 @@ class ChatViewModel(
                     approval = held.pendingApproval,
                     userInputRequest = held.pendingUserInput,
                     queued = held.queued,
-                    items = merged,
                     error = null,
                 )
             }
             held.pendingRequests.toList().forEach { request -> handleServerRequest(request) }
             if (!held.isBusy && held.queued != null) {
-                startTurn(held.queued.text, held.client, held.threadId)
+                startTurn(held.queued.text, held.queued.attachments, held.client, held.threadId)
             }
         } catch (error: CancellationException) {
             throw error
@@ -620,26 +872,29 @@ class ChatViewModel(
             }
 
             "item/started", "item/completed" -> {
-                val item = params.optJSONObject("item")?.let(CodexProtocol::item) ?: return
+                val notificationTurnId = params.optString("turnId")
+                    .takeIf(String::isNotBlank)
+                    ?: activeTurnId
+                val item = params.optJSONObject("item")?.let(CodexProtocol::item)
+                    ?.copy(turnId = notificationTurnId)
+                    ?: return
                 if (method == "item/completed") discardStreaming(item.id)
-                mutableState.update { it.copy(items = CodexProtocol.upsert(it.items, item)) }
+                transcriptRepository.updateItems { CodexProtocol.upsert(it, item) }
             }
 
             "item/fileChange/patchUpdated" -> {
                 val itemId = params.optString("itemId")
                 val patches = CodexProtocol.patchUpdatedPatches(params)
                 if (itemId.isBlank() || patches.isEmpty()) return
-                mutableState.update { current ->
-                    val index = current.items.indexOfFirst { it.id == itemId }
-                    if (index < 0) return@update current
-                    val item = current.items[index]
+                transcriptRepository.updateItems { items ->
+                    val index = items.indexOfFirst { it.id == itemId }
+                    if (index < 0) return@updateItems items
+                    val item = items[index]
                     val existingPaths = item.patches.mapTo(mutableSetOf()) { it.path }
                     val merged = item.patches + patches.filterNot { it.path in existingPaths }
-                    current.copy(
-                        items = current.items.toMutableList().apply {
-                            set(index, item.copy(patches = merged))
-                        },
-                    )
+                    items.toMutableList().apply {
+                        set(index, item.copy(patches = merged))
+                    }
                 }
             }
 
@@ -656,14 +911,17 @@ class ChatViewModel(
             "item/agentMessage/delta" -> {
                 val itemId = params.optString("itemId")
                 val delta = params.optString("delta")
+                val notificationTurnId = params.optString("turnId")
+                    .takeIf(String::isNotBlank)
+                    ?: activeTurnId
                 if (itemId.isBlank() || delta.isEmpty()) return
-                if (state.value.streamingItemId != itemId) {
+                if (transcriptRepository.state.value.streamingItemId != itemId) {
                     // A different message started streaming: commit what we have so far.
                     commitStreaming()
-                    mutableState.update {
+                    transcriptRepository.update {
                         it.copy(
                             streamingItemId = itemId,
-                            items = it.items.ensureAssistantItem(itemId),
+                            items = it.items.ensureAssistantItem(itemId, notificationTurnId),
                         )
                     }
                 }
@@ -682,14 +940,15 @@ class ChatViewModel(
                 commitStreaming()
                 val completed = params.optJSONObject("turn")
                 val authoritative = completed?.let(CodexProtocol::turnItems).orEmpty()
+                transcriptRepository.updateItems { current ->
+                    authoritative.fold(current, CodexProtocol::upsert)
+                }
                 mutableState.update { current ->
-                    val merged = authoritative.fold(current.items, CodexProtocol::upsert)
                     val turnError = completed?.optJSONObject("error")
                         ?.optString("message")
                         ?.takeIf(String::isNotBlank)
                     current.copy(
                         isStreaming = false,
-                        items = merged,
                         error = turnError?.let(ChatError::from) ?: current.error,
                     )
                 }
@@ -699,7 +958,12 @@ class ChatViewModel(
                 if (method == "turn/completed" && queued != null &&
                     client != null && threadId != null
                 ) {
-                    startTurn(queued.text, requireNotNull(client), requireNotNull(threadId))
+                    startTurn(
+                        queued.text,
+                        queued.attachments,
+                        requireNotNull(client),
+                        requireNotNull(threadId),
+                    )
                 }
             }
 
@@ -734,13 +998,13 @@ class ChatViewModel(
      * item, then leave streaming mode. No-op when nothing is streaming.
      */
     private fun commitStreaming() {
-        val itemId = state.value.streamingItemId ?: return
+        val itemId = transcriptRepository.state.value.streamingItemId ?: return
         streamingFlushJob?.cancel()
         streamingFlushJob = null
         flushStreaming()
         val text = mutableStreamingText.value
         mutableStreamingText.value = null
-        mutableState.update {
+        transcriptRepository.update {
             it.copy(
                 streamingItemId = null,
                 items = if (text.isNullOrEmpty()) {
@@ -754,12 +1018,12 @@ class ChatViewModel(
 
     /** Drop streaming state without committing; the server sent authoritative text. */
     private fun discardStreaming(itemId: String) {
-        if (state.value.streamingItemId != itemId) return
+        if (transcriptRepository.state.value.streamingItemId != itemId) return
         streamingFlushJob?.cancel()
         streamingFlushJob = null
         streamingCoalescer.drain()
         mutableStreamingText.value = null
-        mutableState.update { it.copy(streamingItemId = null) }
+        transcriptRepository.setStreamingItemId(null)
     }
 
     private fun resetStreaming() {
@@ -882,14 +1146,12 @@ class ChatViewModel(
                 }
                 return
             }
-            mutableState.update { current ->
-                current.copy(
-                    items = current.items + ChatItem(
-                        id = "permission-blocked-${request.id}",
-                        kind = ChatItemKind.TOOL,
-                        text = "只读权限已阻止 ${approval.blockedActionLabel()}",
-                        status = "blocked",
-                    ),
+            transcriptRepository.updateItems { items ->
+                items + ChatItem(
+                    id = "permission-blocked-${request.id}",
+                    kind = ChatItemKind.TOOL,
+                    text = "只读权限已阻止 ${approval.blockedActionLabel()}",
+                    status = "blocked",
                 )
             }
         } else {
@@ -902,8 +1164,32 @@ class ChatViewModel(
         reconnectJob = null
         autoReconnecting = false
         resetStreaming()
+        markdownParseJobs.values.forEach(Job::cancel)
+        markdownParseJobs.clear()
+        markdownParseContents.clear()
+        state.value.card?.let { card ->
+            ChatTranscriptPreviewCache.put(
+                cardId,
+                card.profileId,
+                card.modelId,
+                transcriptRepository.state.value,
+            )
+        }
+        deletePendingAttachments(state.value.attachments)
         holdOrDisconnect()
         super.onCleared()
+    }
+
+    private fun deletePendingAttachments(attachments: List<ChatAttachment>) {
+        if (attachments.isEmpty()) return
+        val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        cleanupScope.launch {
+            try {
+                attachments.forEach { ServiceLocator.chatAttachments.remove(it) }
+            } finally {
+                cleanupScope.cancel()
+            }
+        }
     }
 
     /**
@@ -984,6 +1270,8 @@ class ChatViewModel(
     companion object {
         private const val MAX_COMPOSER_LENGTH = 32_000
         private const val STREAM_FLUSH_INTERVAL_MS = 64L
+        private const val INITIAL_MARKDOWN_PREPARSE_COUNT = 6
+        private const val INITIAL_HISTORY_TURNS = 50
         private const val MAX_RECONNECT_ATTEMPTS = 8
         private val APPROVAL_DECISIONS = setOf("accept", "acceptForSession", "decline", "cancel")
 
@@ -995,6 +1283,26 @@ class ChatViewModel(
             }
     }
 }
+
+private fun ChatUiState.toTranscriptState(
+    transcript: ChatTranscriptStoreState,
+): ChatTranscriptUiState {
+    return ChatTranscriptUiState(
+        items = transcript.items,
+        streamingItemId = transcript.streamingItemId,
+        isConnecting = isConnecting,
+        isReconnecting = isReconnecting,
+        isStreaming = isStreaming,
+        error = error,
+        hasOlderHistory = transcript.hasOlderHistory,
+        isLoadingOlder = transcript.isLoadingOlder,
+    )
+}
+
+private data class MarkdownWindow(
+    val items: List<ChatItem>,
+    val streamingItemId: String?,
+)
 
 internal fun shouldKeepSessionInBackground(state: ChatUiState): Boolean =
     state.isStreaming || state.approval != null || state.userInputRequest != null || state.queued != null
@@ -1010,11 +1318,14 @@ internal fun formatTokenCount(tokens: Long): String = when {
     else -> "$tokens tokens"
 }
 
-private fun List<ChatItem>.ensureAssistantItem(itemId: String): List<ChatItem> =
+private fun List<ChatItem>.ensureAssistantItem(
+    itemId: String,
+    turnId: String?,
+): List<ChatItem> =
     if (any { it.id == itemId }) {
         this
     } else {
-        this + ChatItem(itemId, ChatItemKind.ASSISTANT, "")
+        this + ChatItem(itemId, ChatItemKind.ASSISTANT, "", turnId = turnId)
     }
 
 private fun ChatApproval.blockedActionLabel(): String = when (kind) {
@@ -1032,7 +1343,6 @@ internal fun CodexRpcException.hasActiveWriter(): Boolean =
     message.lowercase().contains("active writer")
 
 private data class ConnectPrep(
-    val card: com.agentdeck.app.domain.model.AgentCard,
     val runtime: ManagedProviderRuntime?,
     val endpoint: CodexBridgeEndpoint,
     val models: List<CodexModelOption>,
@@ -1082,6 +1392,14 @@ internal fun availableModels(
         }.thenBy { it.displayName.lowercase() },
     )
 }
+
+internal fun supportsImageInput(
+    models: List<CodexModelOption>,
+    currentModel: String?,
+): Boolean = models.firstOrNull { it.id == currentModel }
+    ?.inputModalities
+    ?.contains("image")
+    ?: true
 
 private const val MAX_MODEL_LIST_PAGES = 5
 private const val MODEL_LIST_TIMEOUT_MILLIS = 5_000L

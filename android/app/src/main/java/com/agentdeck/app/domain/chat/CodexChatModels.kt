@@ -34,6 +34,22 @@ data class ChatItem(
     val turnId: String? = null,
 )
 
+enum class ChatAttachmentKind {
+    IMAGE,
+    FILE,
+}
+
+@Immutable
+data class ChatAttachment(
+    val id: String,
+    val name: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    /** Absolute path visible inside the embedded Ubuntu runtime. */
+    val guestPath: String,
+    val kind: ChatAttachmentKind,
+)
+
 @Immutable
 data class CodexRuntime(
     val model: String,
@@ -45,11 +61,20 @@ data class CodexModelOption(
     val id: String,
     val displayName: String = id,
     val isDefault: Boolean = false,
+    /** Null means a managed/third-party catalog did not publish capability metadata. */
+    val inputModalities: Set<String>? = null,
 )
 
 @Immutable
 data class CodexModelPage(
     val models: List<CodexModelOption>,
+    val nextCursor: String?,
+)
+
+@Immutable
+data class CodexHistoryPage(
+    /** Items are always normalized to oldest-first display order. */
+    val items: List<ChatItem>,
     val nextCursor: String?,
 )
 
@@ -105,6 +130,7 @@ data class ChatUserInputRequest(
 data class QueuedChatMessage(
     val id: String,
     val text: String,
+    val attachments: List<ChatAttachment> = emptyList(),
 )
 
 /**
@@ -152,9 +178,9 @@ data class ChatUiState(
     val isReconnecting: Boolean = false,
     val runtimeModel: String? = null,
     val runtimeProvider: String? = null,
-    val items: List<ChatItem> = emptyList(),
-    val streamingItemId: String? = null,
     val composer: String = "",
+    val attachments: List<ChatAttachment> = emptyList(),
+    val isImportingAttachment: Boolean = false,
     val approval: ChatApproval? = null,
     /** Pending `item/tool/requestUserInput` server request, if any. */
     val userInputRequest: ChatUserInputRequest? = null,
@@ -175,5 +201,6 @@ data class ChatUiState(
     // turn, so the composer only blocks on approval/user-input slots and disconnect.
     val canSend: Boolean =
         isConnected && !isConnecting &&
-            composer.isNotBlank() && approval == null && userInputRequest == null
+            (composer.isNotBlank() || attachments.isNotEmpty()) &&
+            !isImportingAttachment && approval == null && userInputRequest == null && queued == null
 }

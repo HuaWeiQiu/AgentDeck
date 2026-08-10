@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,12 +42,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Psychology
@@ -57,8 +60,6 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledIconButton
@@ -71,6 +72,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -79,12 +81,14 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.withFrameNanos
@@ -105,6 +109,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.agentdeck.app.domain.chat.ApprovalKind
 import com.agentdeck.app.domain.chat.ChatApproval
+import com.agentdeck.app.domain.chat.ChatAttachment
+import com.agentdeck.app.domain.chat.ChatAttachmentKind
 import com.agentdeck.app.domain.chat.ChatError
 import com.agentdeck.app.domain.chat.ChatItem
 import com.agentdeck.app.domain.chat.ChatItemKind
@@ -115,11 +121,27 @@ import com.agentdeck.app.domain.chat.ToolUserInputQuestion
 import com.agentdeck.app.ui.permissions.codexPermissionPresentation
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.di.ServiceLocator
+import com.mikepenz.markdown.compose.LocalImageTransformer
+import com.mikepenz.markdown.compose.LocalMarkdownAnimations
+import com.mikepenz.markdown.compose.LocalMarkdownColors
+import com.mikepenz.markdown.compose.LocalMarkdownComponents
+import com.mikepenz.markdown.compose.LocalMarkdownDimens
+import com.mikepenz.markdown.compose.LocalMarkdownPadding
+import com.mikepenz.markdown.compose.LocalMarkdownTypography
+import com.mikepenz.markdown.compose.LocalReferenceLinkHandler
+import com.mikepenz.markdown.compose.MarkdownElement
 import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.elements.MarkdownCodeBlock
 import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
-import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
+import com.mikepenz.markdown.m3.markdownTypography
+import com.mikepenz.markdown.model.NoOpImageTransformerImpl
+import com.mikepenz.markdown.model.markdownAnimations
+import com.mikepenz.markdown.model.markdownDimens
+import com.mikepenz.markdown.model.markdownPadding
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,6 +160,9 @@ fun ChatScreen(
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { /* 拒绝只影响后台通知，不影响对话本身 */ }
+    val attachmentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> vm.addAttachments(uris) }
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(
@@ -148,19 +173,14 @@ fun ChatScreen(
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
-    val listState = rememberLazyListState()
-    val timeline = remember(state.items) { groupChatTimeline(state.items) }
-    var timelineWasEmpty by remember { mutableStateOf(true) }
-    var followLatest by remember { mutableStateOf(true) }
     var approvalSheetVisible by rememberSaveable { mutableStateOf(false) }
     var inputSheetVisible by rememberSaveable { mutableStateOf(false) }
+    var chatSettingsVisible by rememberSaveable { mutableStateOf(false) }
     var longPressedItem by remember { mutableStateOf<ChatItem?>(null) }
-    val clipboard = LocalClipboard.current
-    val showScrollToBottom by remember {
-        derivedStateOf {
-            listState.layoutInfo.totalItemsCount > 0 && !listState.isNearBottom()
-        }
+    val onMessageLongPress = remember<(ChatItem) -> Unit> {
+        { item -> longPressedItem = item }
     }
+    val clipboard = LocalClipboard.current
 
     LaunchedEffect(state.approval?.requestId?.toString()) {
         approvalSheetVisible = state.approval != null
@@ -170,50 +190,10 @@ fun ChatScreen(
         inputSheetVisible = state.userInputRequest != null
     }
 
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (!listState.isScrollInProgress) {
-            followLatest = listState.isNearBottom()
-        }
-    }
-
-    LaunchedEffect(
-        state.items.size,
-        state.items.lastOrNull()?.id,
-        state.items.lastOrNull()?.text?.length,
-        state.isStreaming,
-    ) {
-        val initialTimeline = timelineWasEmpty && state.items.isNotEmpty()
-        val shouldFollow = shouldFollowLatest(
-            wasNearBottom = followLatest,
-            initialTimeline = initialTimeline,
-            lastItem = state.items.lastOrNull(),
-        )
-        timelineWasEmpty = state.items.isEmpty()
-        if (shouldFollow && state.items.isNotEmpty()) {
-            withFrameNanos { }
-            val lastIndex = listState.layoutInfo.totalItemsCount - 1
-            if (lastIndex >= 0) {
-                listState.scrollToItem(lastIndex)
-                followLatest = true
-            }
-        }
-    }
-
-    // Follow streamed tokens without collecting them into composition; only the
-    // streaming message composable subscribes to streamingText for rendering.
-    LaunchedEffect(state.streamingItemId) {
-        if (state.streamingItemId == null) return@LaunchedEffect
-        vm.streamingText.collect {
-            if (followLatest) {
-                val lastIndex = listState.layoutInfo.totalItemsCount - 1
-                if (lastIndex >= 0) listState.scrollToItem(lastIndex)
-            }
-        }
-    }
-
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
+            val settingsAvailable = state.availableModels.isNotEmpty() || showTechnicalDetails
             TopAppBar(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -221,17 +201,57 @@ fun ChatScreen(
                     }
                 },
                 title = {
-                    Column {
+                    val currentModel = state.selectedModel ?: state.runtimeModel
+                    val currentModelLabel = state.availableModels
+                        .firstOrNull { it.id == currentModel }
+                        ?.displayName
+                        ?: currentModel
+                        ?: "Codex"
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
                             state.card?.name ?: "Codex",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleLarge,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        chatRuntimeLabel(state.runtimeProvider, state.runtimeModel)?.let { detail ->
+                        Spacer(Modifier.width(8.dp))
+                        if (settingsAvailable) {
+                            Surface(
+                                onClick = { chatSettingsVisible = true },
+                                modifier = Modifier.widthIn(max = 230.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        currentModelLabel,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Spacer(Modifier.width(3.dp))
+                                    Icon(
+                                        Icons.Filled.ExpandMore,
+                                        contentDescription = "选择对话模型和权限",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    )
+                                }
+                            }
+                        } else {
                             Text(
-                                detail,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                currentModelLabel,
+                                modifier = Modifier.widthIn(max = 230.dp),
+                                style = MaterialTheme.typography.bodyLarge,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -251,124 +271,30 @@ fun ChatScreen(
                 onCancelQueued = vm::cancelQueued,
                 onShowApproval = { approvalSheetVisible = true },
                 onShowUserInput = { inputSheetVisible = true },
-                onModelOverride = vm::setModelOverride,
-                onPermissionOverride = vm::setPermissionOverride,
+                onAddAttachments = { attachmentLauncher.launch(arrayOf("*/*")) },
+                onRemoveAttachment = vm::removeAttachment,
             )
         },
     ) { padding ->
-        Box(
+        ChatTranscript(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-        ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                if (state.isConnecting && state.items.isEmpty()) {
-                    item(key = "connecting") {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 32.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                "正在连接 Codex",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-                items(
-                    timeline,
-                    key = { it.key },
-                    contentType = {
-                        when (it) {
-                            is ChatTimelineEntry.Message -> "message"
-                            is ChatTimelineEntry.Activity -> "activity"
-                        }
-                    },
-                ) { entry ->
-                    when (entry) {
-                        is ChatTimelineEntry.Message -> {
-                            if (entry.item.kind == ChatItemKind.ASSISTANT &&
-                                entry.item.id == state.streamingItemId
-                            ) {
-                                StreamingAssistantMessage(
-                                    item = entry.item,
-                                    streamingText = vm.streamingText,
-                                )
-                            } else {
-                                ChatMessage(
-                                    item = entry.item,
-                                    showTechnicalDetails = showTechnicalDetails,
-                                    onLongPress = { longPressedItem = entry.item },
-                                )
-                            }
-                        }
-                        is ChatTimelineEntry.Activity -> ActivityDisclosure(
-                            entry = entry,
-                            showTechnicalDetails = showTechnicalDetails,
-                        )
-                    }
-                }
-                if (state.isReconnecting) {
-                    item(key = "reconnecting", contentType = "banner") {
-                        ReconnectingBanner(onRetry = vm::connect)
-                    }
-                }
-                state.error?.let { error ->
-                    item(key = "error", contentType = "banner") {
-                        ErrorBanner(
-                            error = customerFacingChatError(error, showTechnicalDetails),
-                            onRetry = vm::connect,
-                        )
-                    }
-                }
-                if (state.isStreaming && state.items.lastOrNull()?.kind != ChatItemKind.ASSISTANT) {
-                    item(key = "responding") {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "Codex 正在处理",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-            AnimatedVisibility(
-                visible = showScrollToBottom,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 10.dp),
-            ) {
-                FilledTonalIconButton(
-                    onClick = {
-                        scope.launch {
-                            val lastIndex = listState.layoutInfo.totalItemsCount - 1
-                            if (lastIndex >= 0) listState.animateScrollToItem(lastIndex)
-                        }
-                    },
-                ) {
-                    Icon(Icons.Filled.ExpandMore, contentDescription = "回到底部")
-                }
-            }
-        }
+            transcriptState = vm.transcriptState,
+            markdownDocuments = vm.markdownDocuments,
+            streamingText = vm.streamingText,
+            showTechnicalDetails = showTechnicalDetails,
+            onLoadOlder = vm::loadOlderHistory,
+            onMarkdownNeeded = vm::requestMarkdown,
+            onMarkdownVisible = vm::touchMarkdown,
+            onRetry = vm::connect,
+            onLongPress = onMessageLongPress,
+        )
     }
 
     state.approval?.takeIf { approvalSheetVisible }?.let { approval ->
         val approvalPatches: List<FilePatch> = approval.itemId
-            ?.let { itemId -> state.items.firstOrNull { it.id == itemId }?.patches }
+            ?.let(vm::approvalPatches)
             .orEmpty()
         ModalBottomSheet(onDismissRequest = { approvalSheetVisible = false }) {
             ApprovalSheetContent(
@@ -395,6 +321,17 @@ fun ChatScreen(
         }
     }
 
+    if (chatSettingsVisible) {
+        ModalBottomSheet(onDismissRequest = { chatSettingsVisible = false }) {
+            ChatSettingsSheetContent(
+                state = state,
+                showPermissionOverride = showTechnicalDetails,
+                onModelOverride = vm::setModelOverride,
+                onPermissionOverride = vm::setPermissionOverride,
+            )
+        }
+    }
+
     longPressedItem?.let { item ->
         MessageActionsDialog(
             item = item,
@@ -414,6 +351,241 @@ fun ChatScreen(
     }
 }
 
+@Composable
+private fun ChatTranscript(
+    transcriptState: StateFlow<ChatTranscriptUiState>,
+    markdownDocuments: StateFlow<Map<String, ChatMarkdownDocument>>,
+    streamingText: StateFlow<String?>,
+    showTechnicalDetails: Boolean,
+    onLoadOlder: () -> Unit,
+    onMarkdownNeeded: (String, String) -> Unit,
+    onMarkdownVisible: (String) -> Unit,
+    onRetry: () -> Unit,
+    onLongPress: (ChatItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val transcript by transcriptState.collectAsStateWithLifecycle()
+    val documents by markdownDocuments.collectAsStateWithLifecycle()
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val timeline = remember(transcript.items, documents, transcript.streamingItemId) {
+        groupChatTimeline(transcript.items, documents, transcript.streamingItemId)
+    }
+    var timelineWasEmpty by remember { mutableStateOf(true) }
+    var followLatest by remember { mutableStateOf(true) }
+    val showScrollToBottom by remember {
+        derivedStateOf {
+            listState.layoutInfo.totalItemsCount > 0 && !listState.isNearBottom()
+        }
+    }
+
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) {
+            followLatest = false
+        } else {
+            followLatest = listState.isNearBottom()
+        }
+    }
+
+    LaunchedEffect(listState, transcript.hasOlderHistory) {
+        if (!transcript.hasOlderHistory) return@LaunchedEffect
+        snapshotFlow {
+            listState.isScrollInProgress && listState.firstVisibleItemIndex == 0
+        }.distinctUntilChanged().filter { it }.collect {
+            onLoadOlder()
+        }
+    }
+
+    LaunchedEffect(
+        transcript.items.size,
+        transcript.items.lastOrNull()?.id,
+        transcript.items.lastOrNull()?.text?.length,
+        transcript.isStreaming,
+        timeline.size,
+        timeline.lastOrNull()?.key,
+    ) {
+        val initialTimeline = timelineWasEmpty && transcript.items.isNotEmpty()
+        val shouldFollow = shouldFollowLatest(
+            wasNearBottom = followLatest,
+            initialTimeline = initialTimeline,
+            lastItem = transcript.items.lastOrNull(),
+        )
+        timelineWasEmpty = transcript.items.isEmpty()
+        if (shouldFollow && transcript.items.isNotEmpty()) {
+            withFrameNanos { }
+            val lastIndex = listState.layoutInfo.totalItemsCount - 1
+            if (lastIndex >= 0) {
+                listState.scrollToItem(lastIndex)
+                followLatest = true
+            }
+        }
+    }
+
+    // Only this effect and the active message collect per-token updates.
+    LaunchedEffect(transcript.streamingItemId) {
+        if (transcript.streamingItemId == null) return@LaunchedEffect
+        streamingText.collect {
+            if (followLatest) {
+                withFrameNanos { }
+                val lastIndex = listState.layoutInfo.totalItemsCount - 1
+                if (lastIndex >= 0) listState.scrollToItem(lastIndex)
+            }
+        }
+    }
+
+    ChatMarkdownEnvironment {
+        Box(modifier) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.Top,
+            ) {
+            if (transcript.isLoadingOlder) {
+                item(key = "loading-older", contentType = "history-loading") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    }
+                }
+            }
+            itemsIndexed(
+                timeline,
+                key = { _, entry -> entry.key },
+                contentType = { _, entry -> entry.contentType },
+            ) { index, entry ->
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = timelineTopPadding(index, entry)),
+                ) {
+                    when (entry) {
+                        is ChatTimelineEntry.Message -> {
+                            if (entry.item.kind == ChatItemKind.ASSISTANT &&
+                                entry.item.id == transcript.streamingItemId
+                            ) {
+                                StreamingAssistantMessage(
+                                    item = entry.item,
+                                    streamingText = streamingText,
+                                )
+                            } else {
+                                ChatMessage(
+                                    item = entry.item,
+                                    showTechnicalDetails = showTechnicalDetails,
+                                    onMarkdownNeeded = onMarkdownNeeded,
+                                    onLongPress = { onLongPress(entry.item) },
+                                )
+                            }
+                        }
+                        is ChatTimelineEntry.Activity -> ActivityDisclosure(
+                            entry = entry,
+                            showTechnicalDetails = showTechnicalDetails,
+                        )
+                        is ChatTimelineEntry.AssistantBlock -> AssistantMarkdownBlock(
+                            entry = entry,
+                            onVisible = onMarkdownVisible,
+                            onLongPress = { onLongPress(entry.item) },
+                        )
+                    }
+                }
+            }
+            if (transcript.isReconnecting) {
+                item(key = "reconnecting", contentType = "banner") {
+                    Box(Modifier.padding(top = 14.dp)) {
+                        ReconnectingBanner(onRetry = onRetry)
+                    }
+                }
+            }
+            transcript.error?.let { error ->
+                item(key = "error", contentType = "banner") {
+                    Box(Modifier.padding(top = 14.dp)) {
+                        ErrorBanner(
+                            error = customerFacingChatError(error, showTechnicalDetails),
+                            onRetry = onRetry,
+                        )
+                    }
+                }
+            }
+            if (transcript.isStreaming &&
+                transcript.items.lastOrNull()?.kind != ChatItemKind.ASSISTANT
+            ) {
+                item(key = "responding") {
+                    Row(
+                        modifier = Modifier.padding(top = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Codex 正在处理",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            }
+            AnimatedVisibility(
+                visible = showScrollToBottom,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 10.dp),
+            ) {
+                FilledTonalIconButton(
+                    onClick = {
+                        scope.launch {
+                            val lastIndex = listState.layoutInfo.totalItemsCount - 1
+                            if (lastIndex >= 0) listState.animateScrollToItem(lastIndex)
+                        }
+                    },
+                ) {
+                    Icon(Icons.Filled.ExpandMore, contentDescription = "回到底部")
+                }
+            }
+            if (transcript.isConnecting) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatMarkdownEnvironment(content: @Composable () -> Unit) {
+    val components = remember {
+        markdownComponents(
+            codeFence = { model ->
+                MarkdownCodeFence(content = model.content, node = model.node) { code, _, _ ->
+                    CodeBlockWithCopy(code = code)
+                }
+            },
+            codeBlock = { model ->
+                MarkdownCodeBlock(content = model.content, node = model.node) { code, _, _ ->
+                    CodeBlockWithCopy(code = code)
+                }
+            },
+        )
+    }
+    val imageTransformer = remember { NoOpImageTransformerImpl() }
+    CompositionLocalProvider(
+        LocalMarkdownColors provides markdownColor(),
+        LocalMarkdownTypography provides markdownTypography(),
+        LocalMarkdownPadding provides markdownPadding(),
+        LocalMarkdownDimens provides markdownDimens(),
+        LocalImageTransformer provides imageTransformer,
+        LocalMarkdownComponents provides components,
+        LocalMarkdownAnimations provides markdownAnimations(animateTextSize = { this }),
+        content = content,
+    )
+}
+
 private fun androidx.compose.foundation.lazy.LazyListState.isNearBottom(): Boolean {
     val layout = layoutInfo
     if (layout.totalItemsCount == 0) return true
@@ -422,6 +594,12 @@ private fun androidx.compose.foundation.lazy.LazyListState.isNearBottom(): Boole
 }
 
 private const val AUTO_FOLLOW_THRESHOLD = 3
+
+private fun timelineTopPadding(index: Int, entry: ChatTimelineEntry): androidx.compose.ui.unit.Dp = when {
+    index == 0 -> 0.dp
+    entry is ChatTimelineEntry.AssistantBlock && !entry.isFirst -> 0.dp
+    else -> 14.dp
+}
 
 internal fun shouldFollowLatest(
     wasNearBottom: Boolean,
@@ -491,6 +669,7 @@ private fun ReconnectingBanner(onRetry: () -> Unit) {
 private fun ChatMessage(
     item: ChatItem,
     showTechnicalDetails: Boolean,
+    onMarkdownNeeded: (String, String) -> Unit,
     onLongPress: () -> Unit,
 ) {
     when (item.kind) {
@@ -514,22 +693,25 @@ private fun ChatMessage(
             }
         }
 
-        ChatItemKind.ASSISTANT -> Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .combinedClickable(onClick = {}, onLongClick = onLongPress),
-        ) {
-            Markdown(
-                content = item.text,
-                modifier = Modifier.fillMaxWidth(),
-                components = markdownComponents(
-                    codeBlock = { model ->
-                        MarkdownCodeFence(content = model.content, node = model.node) { _, code ->
-                            CodeBlockWithCopy(code = code.orEmpty())
-                        }
-                    },
-                ),
-            )
+        ChatItemKind.ASSISTANT -> {
+            LaunchedEffect(item.id, item.text) {
+                onMarkdownNeeded(item.id, item.text)
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(onClick = {}, onLongClick = onLongPress)
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "正在排版回复",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         ChatItemKind.REASONING,
@@ -560,6 +742,38 @@ private fun ChatMessage(
                     color = MaterialTheme.colorScheme.onErrorContainer,
                 )
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AssistantMarkdownBlock(
+    entry: ChatTimelineEntry.AssistantBlock,
+    onVisible: (String) -> Unit,
+    onLongPress: () -> Unit,
+) {
+    LaunchedEffect(entry.document.messageId) {
+        onVisible(entry.document.messageId)
+    }
+    CompositionLocalProvider(
+        LocalReferenceLinkHandler provides entry.document.referenceLinkHandler,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = onLongPress,
+                ),
+        ) {
+            MarkdownElement(
+                node = entry.block.node,
+                components = LocalMarkdownComponents.current,
+                content = entry.document.content,
+                includeSpacer = !entry.isFirst,
+                skipLinkDefinition = true,
+            )
         }
     }
 }
@@ -756,54 +970,99 @@ private fun ErrorBanner(error: String, onRetry: () -> Unit) {
 }
 
 @Composable
-private fun ChatOverrideChips(
+private fun ChatSettingsSheetContent(
     state: ChatUiState,
     showPermissionOverride: Boolean,
     onModelOverride: (String?) -> Unit,
     onPermissionOverride: (CodexPermissionLevel?) -> Unit,
 ) {
     val currentModel = state.selectedModel ?: state.runtimeModel
-    val currentModelLabel = state.availableModels.firstOrNull { it.id == currentModel }
-        ?.displayName
-        ?: currentModel
-        ?: "默认模型"
-    Row(
+    LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(start = 12.dp, end = 12.dp, top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .heightIn(max = 560.dp),
+        contentPadding = PaddingValues(bottom = 24.dp),
     ) {
-        if (state.availableModels.isNotEmpty()) {
-            OverrideChip(
-                label = currentModelLabel,
-                highlighted = state.selectedModel != null,
-                options = listOf<String?>(null) + state.availableModels
-                    .take(MAX_CHAT_MODEL_OPTIONS)
-                    .map { it.id },
-                optionLabel = { modelId ->
-                    if (modelId == null) {
-                        "对话模型 · ${state.runtimeModel ?: "Codex"}"
-                    } else {
-                        state.availableModels.firstOrNull { it.id == modelId }
-                            ?.displayName
-                            ?: modelId
+        item(key = "settings-title") {
+            Row(
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Tune, contentDescription = null)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("对话设置", style = MaterialTheme.typography.titleLarge)
+                    state.runtimeProvider?.let { provider ->
+                        Text(
+                            provider,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
-                },
-                onSelect = onModelOverride,
-            )
+                }
+            }
+        }
+        item(key = "model-section") {
+            SettingsSectionLabel("模型")
+        }
+        if (state.availableModels.isNotEmpty()) {
+            item(key = "model-default") {
+                SettingsChoiceRow(
+                    title = "跟随卡片默认",
+                    detail = state.runtimeModel ?: "Codex 默认模型",
+                    selected = state.selectedModel == null,
+                    onClick = { onModelOverride(null) },
+                )
+            }
+            items(
+                items = state.availableModels.take(MAX_CHAT_MODEL_OPTIONS),
+                key = { "model-${it.id}" },
+            ) { model ->
+                SettingsChoiceRow(
+                    title = model.displayName.ifBlank { model.id },
+                    detail = model.id.takeIf { it != model.displayName },
+                    selected = currentModel == model.id && state.selectedModel != null,
+                    onClick = { onModelOverride(model.id) },
+                )
+            }
+        } else {
+            item(key = "model-current") {
+                SettingsChoiceRow(
+                    title = state.runtimeModel ?: "Codex 默认模型",
+                    detail = "当前模型服务未提供可选模型列表",
+                    selected = true,
+                    onClick = {},
+                    enabled = false,
+                )
+            }
         }
         if (showPermissionOverride) {
-            OverrideChip(
-                label = state.selectedPermission?.let { codexPermissionPresentation(it).title }
-                    ?: "默认权限",
-                highlighted = state.selectedPermission != null,
-                options = listOf(null) + CodexPermissionLevel.entries,
-                optionLabel = { level ->
-                    level?.let { codexPermissionPresentation(it).title } ?: "默认权限"
-                },
-                onSelect = onPermissionOverride,
-            )
+            item(key = "permission-divider") {
+                HorizontalDivider(Modifier.padding(top = 8.dp))
+                SettingsSectionLabel("权限")
+            }
+            item(key = "permission-default") {
+                SettingsChoiceRow(
+                    title = "跟随默认权限",
+                    detail = null,
+                    selected = state.selectedPermission == null,
+                    onClick = { onPermissionOverride(null) },
+                )
+            }
+            items(
+                items = CodexPermissionLevel.entries,
+                key = { "permission-${it.name}" },
+            ) { level ->
+                val presentation = codexPermissionPresentation(level)
+                SettingsChoiceRow(
+                    title = presentation.title,
+                    detail = presentation.description,
+                    selected = state.selectedPermission == level,
+                    onClick = { onPermissionOverride(level) },
+                )
+            }
         }
     }
 }
@@ -811,53 +1070,55 @@ private fun ChatOverrideChips(
 private const val MAX_CHAT_MODEL_OPTIONS = 100
 
 @Composable
-private fun <T> OverrideChip(
-    label: String,
-    highlighted: Boolean,
-    options: List<T>,
-    optionLabel: (T) -> String,
-    onSelect: (T) -> Unit,
+private fun SettingsSectionLabel(label: String) {
+    Text(
+        label,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 6.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+@Composable
+private fun SettingsChoiceRow(
+    title: String,
+    detail: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        Surface(
-            onClick = { expanded = true },
-            shape = RoundedCornerShape(16.dp),
-            color = if (highlighted) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-            },
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(
+            selected = selected,
+            onClick = null,
+            enabled = enabled,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            detail?.let {
                 Text(
-                    label,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (highlighted) {
-                        MaterialTheme.colorScheme.onSecondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-                Spacer(Modifier.width(4.dp))
-                Icon(
-                    Icons.Filled.ExpandMore,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(optionLabel(option)) },
-                    onClick = {
-                        expanded = false
-                        onSelect(option)
-                    },
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -875,8 +1136,8 @@ private fun ChatBottomBar(
     onCancelQueued: () -> Unit,
     onShowApproval: () -> Unit,
     onShowUserInput: () -> Unit,
-    onModelOverride: (String?) -> Unit,
-    onPermissionOverride: (CodexPermissionLevel?) -> Unit,
+    onAddAttachments: () -> Unit,
+    onRemoveAttachment: (String) -> Unit,
 ) {
     Surface(
         modifier = modifier,
@@ -913,7 +1174,8 @@ private fun ChatBottomBar(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "已排队：${queued.text}",
+                            queued.text.takeIf(String::isNotBlank)?.let { "已排队：$it" }
+                                ?: "已排队 ${queued.attachments.size} 个附件",
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -938,13 +1200,18 @@ private fun ChatBottomBar(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (state.availableModels.isNotEmpty() || showTechnicalDetails) {
-                ChatOverrideChips(
-                    state = state,
-                    showPermissionOverride = showTechnicalDetails,
-                    onModelOverride = onModelOverride,
-                    onPermissionOverride = onPermissionOverride,
-                )
+            if (state.attachments.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    state.attachments.forEach { attachment ->
+                        AttachmentChip(attachment, onRemoveAttachment)
+                    }
+                }
             }
             Row(
                 modifier = Modifier
@@ -952,15 +1219,29 @@ private fun ChatBottomBar(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
+                FilledTonalIconButton(
+                    onClick = onAddAttachments,
+                    enabled = !state.isConnecting && !state.isImportingAttachment &&
+                        state.queued == null && state.attachments.size < 4,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    if (state.isImportingAttachment) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Filled.AttachFile, contentDescription = "添加图片或文件")
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
                 TextField(
                     value = state.composer,
                     onValueChange = onComposerChange,
                     modifier = Modifier.weight(1f),
-                    enabled = !state.isConnecting,
+                    enabled = !state.isConnecting && state.queued == null,
                     placeholder = {
                         Text(
                             when {
                                 state.isConnecting -> "正在连接"
+                                state.queued != null -> "请先取消排队消息"
                                 state.userInputRequest != null -> "请先回答 Codex 的问题"
                                 state.isStreaming -> "给 Codex 补充指令"
                                 else -> "发消息给 Codex"
@@ -981,7 +1262,7 @@ private fun ChatBottomBar(
                 )
                 Spacer(Modifier.width(8.dp))
                 VoiceInputButton(
-                    disabled = state.isConnecting,
+                    disabled = state.isConnecting || state.queued != null,
                     onResult = { recognized ->
                         val current = state.composer
                         onComposerChange(
@@ -992,7 +1273,7 @@ private fun ChatBottomBar(
                 Spacer(Modifier.width(8.dp))
                 FilledIconButton(
                     onClick = if (state.isStreaming) {
-                        if (state.composer.isNotBlank()) onSend else onStop
+                        if (state.composer.isNotBlank() || state.attachments.isNotEmpty()) onSend else onStop
                     } else {
                         onSend
                     },
@@ -1001,12 +1282,15 @@ private fun ChatBottomBar(
                 ) {
                     Icon(
                         when {
-                            state.isStreaming && state.composer.isNotBlank() -> Icons.AutoMirrored.Filled.Send
+                            state.isStreaming &&
+                                (state.composer.isNotBlank() || state.attachments.isNotEmpty()) ->
+                                Icons.AutoMirrored.Filled.Send
                             state.isStreaming -> Icons.Filled.StopCircle
                             else -> Icons.AutoMirrored.Filled.Send
                         },
                         contentDescription = when {
-                            state.isStreaming && state.composer.isNotBlank() -> "补充指令"
+                            state.isStreaming &&
+                                (state.composer.isNotBlank() || state.attachments.isNotEmpty()) -> "补充指令"
                             state.isStreaming -> "停止"
                             else -> "发送"
                         },
@@ -1015,6 +1299,65 @@ private fun ChatBottomBar(
             }
         }
     }
+}
+
+@Composable
+private fun AttachmentChip(
+    attachment: ChatAttachment,
+    onRemove: (String) -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 10.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (attachment.kind == ChatAttachmentKind.IMAGE) {
+                    Icons.Filled.Image
+                } else {
+                    Icons.Filled.Description
+                },
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Spacer(Modifier.width(6.dp))
+            Column(Modifier.widthIn(max = 160.dp)) {
+                Text(
+                    attachment.name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Text(
+                    formatAttachmentSize(attachment.sizeBytes),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.72f),
+                )
+            }
+            IconButton(
+                onClick = { onRemove(attachment.id) },
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Cancel,
+                    contentDescription = "移除 ${attachment.name}",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+        }
+    }
+}
+
+private fun formatAttachmentSize(bytes: Long): String = when {
+    bytes >= 1024L * 1024L -> "%.1f MiB".format(bytes / (1024.0 * 1024.0))
+    bytes >= 1024L -> "%.1f KiB".format(bytes / 1024.0)
+    else -> "$bytes B"
 }
 
 @Composable

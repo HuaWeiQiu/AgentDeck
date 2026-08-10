@@ -43,9 +43,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: agentdeck-debug-verification
+          name: agentdeck-beta-verification
           if-no-files-found: warn
           retention-days: 7
           path: |
-            android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/reports/lint-results-debug.html
+            android/app/build/outputs/apk/beta/app-beta.apk
+            android/app/build/reports/lint-results-beta.html

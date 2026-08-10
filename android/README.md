@@ -9,7 +9,7 @@ Kotlin + Jetpack Compose 客户端，负责对话/Profile 管理、统一环境�
 - Gradle 8.11.1
 - `compileSdk 36` / `targetSdk 36` / `minSdk 26`
 
-Gradle 8.11.1 是 AGP 8.10.1 的已验证组合。Core 1.18 / Lifecycle 2.10 是 SDK 36 兼容线。Markdown renderer 固定为 0.28.0，以匹配 Kotlin 2.0.21；新版本要求 Kotlin 2.2+，其中当前版本还要求 `compileSdk 37`。Lint 会提示这些可用升级，但整套工具链迁移不属于 0.1.x。
+Gradle 8.11.1 是 AGP 8.10.1 的已验证组合。Core 1.18 / Lifecycle 2.10 是 SDK 36 兼容线。Markdown renderer 固定为 0.33.0；升级工具链和依赖时必须重新执行聊天滚动基准。
 
 在未配置全局 Android SDK 时，将本机路径写入未跟踪的 `local.properties`：
 
@@ -29,15 +29,17 @@ sdk.dir=/path/to/android-sdk
 
 ```bash
 cd android
-./gradlew :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+./gradlew :app:testDebugUnitTest :app:assembleBeta :app:lintBeta
 ```
 
 | 项目 | 值 |
 |---|---|
-| Debug application ID | `com.agentdeck.app.debug` |
-| 版本 | `0.1.4-debug`（`versionCode=5`） |
-| APK | `app/build/outputs/apk/debug/app-debug.apk` |
-| Lint | `app/build/reports/lint-results-debug.html` |
+| Beta application ID | `com.agentdeck.app.debug` |
+| 版本 | `0.2.0-beta.3`（`versionCode=8`） |
+| APK | `app/build/outputs/apk/beta/app-beta.apk` |
+| Lint | `app/build/reports/lint-results-beta.html` |
+
+`beta` 使用测试签名以便覆盖现有测试安装，但继承 release 的 R8、资源压缩和依赖 Baseline Profile；`debug` 只用于开发，不再作为真机预发布产物。
 
 ## 模块
 

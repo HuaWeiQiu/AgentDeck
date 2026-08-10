@@ -8,9 +8,144 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class CodexProtocolTest {
+    @Test
+    fun `turn input sends images natively and files as readable local paths`() {
+        val image = ChatAttachment(
+            id = "image-1",
+            name = "shot.png",
+            mimeType = "image/png",
+            sizeBytes = 10,
+            guestPath = "/root/projects/.agentdeck-attachments/chat/shot.png",
+            kind = ChatAttachmentKind.IMAGE,
+        )
+        val file = ChatAttachment(
+            id = "file-1",
+            name = "notes.md",
+            mimeType = "text/markdown",
+            sizeBytes = 20,
+            guestPath = "/root/projects/.agentdeck-attachments/chat/notes.md",
+            kind = ChatAttachmentKind.FILE,
+        )
+
+        val params = CodexProtocol.turnStartParams(
+            threadId = "thread-1",
+            text = "检查这些内容",
+            attachments = listOf(image, file),
+        )
+        val input = params.getJSONArray("input")
+
+        assertEquals("text", input.getJSONObject(0).getString("type"))
+        assertTrue(input.getJSONObject(0).getString("text").contains(file.guestPath))
+        assertEquals("localImage", input.getJSONObject(1).getString("type"))
+        assertEquals(image.guestPath, input.getJSONObject(1).getString("path"))
+    }
+
+    @Test
+    fun `image only turn still carries an explicit text prompt`() {
+        val image = ChatAttachment(
+            id = "image-1",
+            name = "shot.jpg",
+            mimeType = "image/jpeg",
+            sizeBytes = 10,
+            guestPath = "/root/projects/.agentdeck-attachments/chat/shot.jpg",
+            kind = ChatAttachmentKind.IMAGE,
+        )
+
+        val params = CodexProtocol.turnSteerParams("thread-1", "turn-1", "", listOf(image))
+
+        assertEquals("请查看附加图片。", params.getJSONArray("input").getJSONObject(0).getString("text"))
+    }
+
+    @Test
+    fun `turn input rejects attachment paths outside the private runtime directory`() {
+        val attachment = ChatAttachment(
+            id = "file-1",
+            name = "passwd",
+            mimeType = "text/plain",
+            sizeBytes = 10,
+            guestPath = "/etc/passwd",
+            kind = ChatAttachmentKind.FILE,
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            CodexProtocol.turnStartParams(
+                threadId = "thread-1",
+                text = "读取",
+                attachments = listOf(attachment),
+            )
+        }
+    }
+
+    @Test
+    fun `thread resume requests the newest 50 turns without embedding full history`() {
+        val params = CodexProtocol.threadResumeParams("thread-1", "/root/project")
+
+        assertTrue(params.getBoolean("excludeTurns"))
+        val page = params.getJSONObject("initialTurnsPage")
+        assertEquals(50, page.getInt("limit"))
+        assertEquals("desc", page.getString("sortDirection"))
+        assertEquals("full", page.getString("itemsView"))
+    }
+
+    @Test
+    fun `older history request uses the cursor and 25 turn page`() {
+        val params = CodexProtocol.threadTurnsListParams("thread-1", "older-25")
+
+        assertEquals("thread-1", params.getString("threadId"))
+        assertEquals("older-25", params.getString("cursor"))
+        assertEquals(25, params.getInt("limit"))
+        assertEquals("desc", params.getString("sortDirection"))
+        assertEquals("full", params.getString("itemsView"))
+    }
+
+    @Test
+    fun `descending history page becomes chronological items and keeps cursor`() {
+        val response = JSONObject(
+            """
+            {
+              "initialTurnsPage": {
+                "data": [
+                  {"id":"turn-2","status":"failed","items":[],"error":{"message":"failed"}},
+                  {"id":"turn-1","status":"completed","items":[
+                    {"id":"u1","type":"userMessage","content":[{"type":"text","text":"hello"}]},
+                    {"id":"a1","type":"agentMessage","text":"done"}
+                  ]}
+                ],
+                "nextCursor":"older-25"
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val page = CodexProtocol.initialHistoryPage(response)
+
+        assertEquals(listOf("u1", "a1", "turn-error-turn-2"), page.items.map { it.id })
+        assertEquals(listOf("turn-1", "turn-2"), page.items.mapNotNull { it.turnId }.distinct())
+        assertEquals("older-25", page.nextCursor)
+    }
+
+    @Test
+    fun `initial page exposes newest in progress turn and persisted timestamp`() {
+        val response = JSONObject(
+            """
+            {
+              "thread":{"id":"thread-1","updatedAt":1700000000},
+              "initialTurnsPage":{"data":[
+                {"id":"turn-2","status":"inProgress","items":[]},
+                {"id":"turn-1","status":"completed","items":[]}
+              ],"nextCursor":null}
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals("turn-2", CodexProtocol.inProgressTurnId(response))
+        assertEquals(1_700_000_000_000L, CodexProtocol.threadUpdatedAtEpochMs(response))
+    }
+
     @Test
     fun `model list response becomes picker options and cursor`() {
         val response = JSONObject()
@@ -40,9 +175,26 @@ class CodexProtocolTest {
         assertEquals(listOf("gpt-5.6-sol", "gpt-5.6-terra"), page.models.map { it.id })
         assertEquals("GPT-5.6-Sol", page.models.first().displayName)
         assertTrue(page.models.first().isDefault)
+        assertEquals(setOf("text", "image"), page.models.first().inputModalities)
         assertEquals("page-2", page.nextCursor)
         assertEquals("page-2", params.getString("cursor"))
         assertFalse(params.getBoolean("includeHidden"))
+    }
+
+    @Test
+    fun `model list preserves explicit text only capability`() {
+        val page = CodexProtocol.modelPage(
+            JSONObject().put(
+                "data",
+                JSONArray().put(
+                    JSONObject()
+                        .put("model", "text-only")
+                        .put("inputModalities", JSONArray().put("text")),
+                ),
+            ),
+        )
+
+        assertEquals(setOf("text"), page.models.single().inputModalities)
     }
 
     @Test
@@ -73,6 +225,11 @@ class CodexProtocolTest {
                     {"id":"a1","type":"agentMessage","text":"**done**"},
                     {"id":"c1","type":"commandExecution","command":"pwd","cwd":"/root","commandActions":[],"status":"completed","aggregatedOutput":"/root"}
                   ]
+                }, {
+                  "id": "turn-2",
+                  "status": "failed",
+                  "items": [],
+                  "error": {"message":"failed"}
                 }]
               }
             }
@@ -88,10 +245,12 @@ class CodexProtocolTest {
                 ChatItemKind.REASONING,
                 ChatItemKind.ASSISTANT,
                 ChatItemKind.COMMAND,
+                ChatItemKind.ERROR,
             ),
             items.map { it.kind },
         )
-        assertEquals("/root", items.last().detail)
+        assertEquals(listOf("turn-1", "turn-2"), items.mapNotNull { it.turnId }.distinct())
+        assertEquals("/root", items[3].detail)
     }
 
     @Test
@@ -141,6 +300,17 @@ class CodexProtocolTest {
 
         assertFalse(replaced.any { it.id.startsWith("local-user-") })
         assertEquals("one two", secondDelta.last().text)
+    }
+
+    @Test
+    fun `image only history remains visible in the transcript`() {
+        val item = CodexProtocol.item(
+            JSONObject(
+                """{"id":"u1","type":"userMessage","content":[{"type":"localImage","path":"/tmp/a.png"}]}""",
+            ),
+        )
+
+        assertEquals("已附加 1 张图片", item?.text)
     }
 
     @Test

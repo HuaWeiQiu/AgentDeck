@@ -13,8 +13,8 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.2.0-beta.2"
+        versionCode = 8
+        versionName = "0.2.0-beta.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -30,6 +30,12 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+        }
+        create("beta") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            applicationIdSuffix = ".debug"
+            matchingFallbacks += listOf("release")
         }
     }
 
@@ -82,7 +88,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.yaml:snakeyaml:2.4")
     implementation("org.tomlj:tomlj:1.1.1")
-    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.30.0")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.33.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.apache.commons:commons-compress:1.27.1")
 

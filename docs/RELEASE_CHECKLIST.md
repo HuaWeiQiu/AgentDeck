@@ -11,6 +11,7 @@
 - [ ] Recipe and wrapper sources match packaged APK assets.
 - [ ] `versionCode`, `versionName`, and `CHANGELOG.md` agree with the release.
 - [ ] Release APK is signed with the intended key; debug signing is never presented as production signing.
+- [ ] Test-signed pre-releases use the R8-optimized `beta` build, contain `assets/dexopt/baseline.prof`, and never publish `app-debug.apk` as the user-facing artifact.
 
 ## Migration
 
@@ -59,6 +60,9 @@
 - [ ] Confirm the conversation list sorts and displays the actual last activity date and time.
 - [ ] Enter a conversation and confirm native chat creates a Codex thread, streams Markdown, offers
       a real model selector, and restores the same history after leaving and reopening.
+- [ ] Confirm the conversation title remains visible beside the single model selector, the composer has no duplicate model row, and long names truncate without overlap.
+- [ ] Scroll to the top of a thread longer than 50 turns, load at least two 25-turn pages, return to the latest turn, and confirm stable order, no duplicates, and no scroll jump.
+- [ ] Select PNG, JPEG, PDF, and text attachments; verify the 4-file/20 MiB limits, image-modality rejection, randomized `0700`/`0600` Runtime storage, failed-send restoration, and remove cleanup.
 - [ ] Kill the Android app during a long turn, reopen the conversation, and confirm the orphan app-server tree is replaced, the persisted `inProgress` turn is interrupted, and a new message can run.
 - [ ] Trigger command and file-change approvals; confirm accept, session accept, and decline reach Codex exactly once.
 - [ ] Confirm app-server listens only on `127.0.0.1`, rejects a wrong capability token, and its supervised process tree exits after disconnect.

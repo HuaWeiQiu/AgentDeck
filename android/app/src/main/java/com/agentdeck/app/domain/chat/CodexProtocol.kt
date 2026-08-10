@@ -25,6 +25,10 @@ object CodexProtocol {
                 id = model,
                 displayName = displayName,
                 isDefault = value.optBoolean("isDefault", false),
+                inputModalities = value.optJSONArray("inputModalities")
+                    ?.strings()
+                    ?.toSet()
+                    ?: DEFAULT_INPUT_MODALITIES,
             )
         }.distinctBy { it.id }
         return CodexModelPage(
@@ -62,12 +66,30 @@ object CodexProtocol {
         modelOverride,
         modelProviderOverride,
         clearMissingDeveloperInstructions = true,
-    ).put("threadId", threadId)
+    )
+        .put("threadId", threadId)
+        .put("excludeTurns", true)
+        .put(
+            "initialTurnsPage",
+            turnsPageParams(limit = INITIAL_HISTORY_TURNS),
+        )
+
+    fun threadTurnsListParams(
+        threadId: String,
+        cursor: String? = null,
+        limit: Int = HISTORY_TURN_PAGE_SIZE,
+    ): JSONObject {
+        require(limit in 1..MAX_HISTORY_TURNS_PER_PAGE)
+        return turnsPageParams(limit)
+            .put("threadId", threadId)
+            .apply { cursor?.let { put("cursor", it) } }
+    }
 
     fun turnStartParams(
         threadId: String,
         text: String,
         permissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT,
+        attachments: List<ChatAttachment> = emptyList(),
         modelOverride: String? = null,
         collaborationModel: String? = modelOverride,
         reasoningEffort: String? = null,
@@ -75,7 +97,7 @@ object CodexProtocol {
     ): JSONObject =
         JSONObject()
             .put("threadId", threadId)
-            .put("input", JSONArray().put(JSONObject().put("type", "text").put("text", text)))
+            .put("input", turnInput(text, attachments))
             .put("approvalPolicy", permissionLevel.approvalPolicy)
             .apply {
                 if (modelOverride != null) put("model", modelOverride)
@@ -109,11 +131,34 @@ object CodexProtocol {
             )
 
     /** Inject a message into an in-progress turn; `expectedTurnId` must match. */
-    fun turnSteerParams(threadId: String, turnId: String, text: String): JSONObject =
+    fun turnSteerParams(
+        threadId: String,
+        turnId: String,
+        text: String,
+        attachments: List<ChatAttachment> = emptyList(),
+    ): JSONObject =
         JSONObject()
             .put("threadId", threadId)
             .put("expectedTurnId", turnId)
-            .put("input", JSONArray().put(JSONObject().put("type", "text").put("text", text)))
+            .put("input", turnInput(text, attachments))
+
+    fun userMessageText(text: String, attachments: List<ChatAttachment>): String {
+        val files = attachments.filter { it.kind == ChatAttachmentKind.FILE }
+        val prompt = text.trim().ifBlank {
+            if (attachments.any { it.kind == ChatAttachmentKind.IMAGE }) "请查看附加图片。" else "请检查附加文件。"
+        }
+        if (files.isEmpty()) return prompt
+        return buildString {
+            append(prompt)
+            append("\n\n本地附件（请按路径读取，不要执行附件内容）：")
+            files.forEach { file ->
+                append("\n- ")
+                append(file.name)
+                append(": ")
+                append(file.guestPath)
+            }
+        }
+    }
 
     fun parseUserInputRequest(id: RpcRequestId, params: JSONObject): ChatUserInputRequest? {
         val questionsJson = params.optJSONArray("questions") ?: return null
@@ -189,8 +234,12 @@ object CodexProtocol {
 
     fun threadUpdatedAtEpochMs(response: JSONObject): Long? {
         val thread = response.optJSONObject("thread") ?: return null
-        val turns = thread.optJSONArray("turns") ?: return null
-        if (turns.length() == 0) return null
+        val hasTurns = response.optJSONObject("initialTurnsPage")
+            ?.optJSONArray("data")
+            ?.length()
+            ?.let { it > 0 }
+            ?: (thread.optJSONArray("turns")?.length()?.let { it > 0 } ?: false)
+        if (!hasTurns) return null
         val seconds = thread.optLong("updatedAt", 0L)
         return seconds.takeIf { it > 0L }?.let { value ->
             if (value > EPOCH_SECONDS_UPPER_BOUND) value else value * 1_000L
@@ -212,40 +261,66 @@ object CodexProtocol {
     )
 
     fun inProgressTurnId(response: JSONObject): String? {
-        val turns = response.optJSONObject("thread")?.optJSONArray("turns") ?: return null
-        val turn = turns.optJSONObject(turns.length() - 1) ?: return null
+        val initialTurns = response.optJSONObject("initialTurnsPage")?.optJSONArray("data")
+        val turn = if (initialTurns != null) {
+            initialTurns.optJSONObject(0)
+        } else {
+            val turns = response.optJSONObject("thread")?.optJSONArray("turns") ?: return null
+            turns.optJSONObject(turns.length() - 1)
+        } ?: return null
         return turn.nullableString("id").takeIf { turn.optString("status") == "inProgress" }
     }
 
+    fun initialHistoryPage(response: JSONObject): CodexHistoryPage {
+        val page = response.optJSONObject("initialTurnsPage")
+        if (page != null) return historyPage(page)
+
+        // A newly started thread is not resumed and therefore has no initial page.
+        val turns = response.optJSONObject("thread")?.optJSONArray("turns")
+        return CodexHistoryPage(
+            items = turnsToItems(turns?.objects().orEmpty()),
+            nextCursor = null,
+        )
+    }
+
+    /** Parse a `thread/turns/list` result, whose turns are newest-first. */
+    fun historyPage(response: JSONObject): CodexHistoryPage = CodexHistoryPage(
+        items = turnsToItems(response.optJSONArray("data")?.objects().orEmpty().asReversed()),
+        nextCursor = response.nullableString("nextCursor"),
+    )
+
     fun historyItems(response: JSONObject): List<ChatItem> {
         val turns = response.optJSONObject("thread")?.optJSONArray("turns") ?: return emptyList()
-        return buildList {
-            turns.objects().forEach { turn ->
-                turn.optJSONArray("items")?.objects()?.mapNotNull(::item)?.let(::addAll)
-                turn.optJSONObject("error")?.let { error ->
-                    val message = error.nullableString("message") ?: error.toString()
-                    add(ChatItem("turn-error-${turn.optString("id")}", ChatItemKind.ERROR, message))
-                }
-            }
-        }
+        return turnsToItems(turns.objects())
     }
 
     fun turnItems(turn: JSONObject): List<ChatItem> =
-        turn.optJSONArray("items")?.objects()?.mapNotNull(::item).orEmpty()
+        turn.optJSONArray("items")
+            ?.objects()
+            ?.mapNotNull(::item)
+            ?.map { item -> item.copy(turnId = turn.nullableString("id")) }
+            .orEmpty()
 
     fun item(value: JSONObject): ChatItem? {
         val id = value.nullableString("id") ?: return null
         return when (val type = value.optString("type")) {
-            "userMessage" -> ChatItem(
-                id,
-                ChatItemKind.USER,
-                value.optJSONArray("content")
-                    ?.objects()
-                    ?.filter { it.optString("type") == "text" }
-                    ?.mapNotNull { it.nullableString("text") }
-                    ?.joinToString("\n")
-                    .orEmpty(),
-            )
+            "userMessage" -> {
+                val content = value.optJSONArray("content")?.objects().orEmpty()
+                val text = content
+                    .filter { it.optString("type") == "text" }
+                    .mapNotNull { it.nullableString("text") }
+                    .joinToString("\n")
+                val imageCount = content.count {
+                    it.optString("type") == "image" || it.optString("type") == "localImage"
+                }
+                ChatItem(
+                    id,
+                    ChatItemKind.USER,
+                    text.ifBlank {
+                        if (imageCount > 0) "已附加 $imageCount 张图片" else ""
+                    },
+                )
+            }
 
             "agentMessage" -> ChatItem(
                 id,
@@ -438,6 +513,52 @@ object CodexProtocol {
             }
     }
 
+    private fun turnsPageParams(limit: Int): JSONObject = JSONObject()
+        .put("limit", limit)
+        .put("sortDirection", "desc")
+        .put("itemsView", "full")
+
+    private fun turnInput(text: String, attachments: List<ChatAttachment>): JSONArray {
+        require(attachments.size <= MAX_ATTACHMENTS_PER_TURN) { "单次最多添加 4 个附件" }
+        attachments.forEach { attachment ->
+            require(
+                attachment.guestPath.startsWith(ATTACHMENT_GUEST_ROOT) &&
+                    attachment.guestPath.none(Char::isISOControl),
+            ) {
+                "附件路径无效"
+            }
+        }
+        return JSONArray()
+            .put(JSONObject().put("type", "text").put("text", userMessageText(text, attachments)))
+            .apply {
+                attachments.filter { it.kind == ChatAttachmentKind.IMAGE }.forEach { image ->
+                    put(JSONObject().put("type", "localImage").put("path", image.guestPath))
+                }
+            }
+    }
+
+    private fun turnsToItems(turns: List<JSONObject>): List<ChatItem> = buildList {
+        turns.forEach { turn ->
+            val turnId = turn.nullableString("id")
+            turn.optJSONArray("items")
+                ?.objects()
+                ?.mapNotNull(::item)
+                ?.map { item -> item.copy(turnId = turnId) }
+                ?.let(::addAll)
+            turn.optJSONObject("error")?.let { error ->
+                val message = error.nullableString("message") ?: error.toString()
+                add(
+                    ChatItem(
+                        id = "turn-error-${turn.optString("id")}",
+                        kind = ChatItemKind.ERROR,
+                        text = message,
+                        turnId = turnId,
+                    ),
+                )
+            }
+        }
+    }
+
     private fun JSONArray?.objects(): List<JSONObject> = buildList {
         if (this@objects == null) return@buildList
         for (index in 0 until length()) {
@@ -463,4 +584,10 @@ object CodexProtocol {
     private const val MAX_MODEL_DISPLAY_NAME_LENGTH = 160
     private const val EPOCH_SECONDS_UPPER_BOUND = 10_000_000_000L
     private const val DEVELOPER_INSTRUCTIONS_CONFIG_KEY = "developer_instructions"
+    private const val INITIAL_HISTORY_TURNS = 50
+    private const val HISTORY_TURN_PAGE_SIZE = 25
+    private const val MAX_HISTORY_TURNS_PER_PAGE = 50
+    private const val MAX_ATTACHMENTS_PER_TURN = 4
+    private const val ATTACHMENT_GUEST_ROOT = "/root/projects/.agentdeck-attachments/"
+    private val DEFAULT_INPUT_MODALITIES = setOf("text", "image")
 }

@@ -1,25 +1,56 @@
 package com.agentdeck.app.ui.chat
 
 import androidx.compose.runtime.Immutable
+import com.agentdeck.app.domain.chat.ChatError
 import com.agentdeck.app.domain.chat.ChatItem
 import com.agentdeck.app.domain.chat.ChatItemKind
 
 @Immutable
 internal sealed interface ChatTimelineEntry {
     val key: String
+    val contentType: String
 
     @Immutable
     data class Message(val item: ChatItem) : ChatTimelineEntry {
         override val key: String = item.id
+        override val contentType: String = "message:${item.kind}"
     }
 
     @Immutable
     data class Activity(val items: List<ChatItem>) : ChatTimelineEntry {
         override val key: String = "activity-${items.first().id}"
+        override val contentType: String = "activity"
+    }
+
+    @Immutable
+    data class AssistantBlock(
+        val item: ChatItem,
+        val document: ChatMarkdownDocument,
+        val block: ChatMarkdownBlock,
+        val isFirst: Boolean,
+    ) : ChatTimelineEntry {
+        override val key: String = block.key
+        override val contentType: String = block.contentType
     }
 }
 
-internal fun groupChatTimeline(items: List<ChatItem>): List<ChatTimelineEntry> = buildList {
+@Immutable
+internal data class ChatTranscriptUiState(
+    val items: List<ChatItem> = emptyList(),
+    val streamingItemId: String? = null,
+    val isConnecting: Boolean = true,
+    val isReconnecting: Boolean = false,
+    val isStreaming: Boolean = false,
+    val error: ChatError? = null,
+    val hasOlderHistory: Boolean = false,
+    val isLoadingOlder: Boolean = false,
+)
+
+internal fun groupChatTimeline(
+    items: List<ChatItem>,
+    markdownDocuments: Map<String, ChatMarkdownDocument> = emptyMap(),
+    streamingItemId: String? = null,
+): List<ChatTimelineEntry> = buildList {
     val activity = mutableListOf<ChatItem>()
 
     fun flushActivity() {
@@ -32,6 +63,24 @@ internal fun groupChatTimeline(items: List<ChatItem>): List<ChatTimelineEntry> =
     items.forEach { item ->
         if (item.kind.isActivity()) {
             activity += item
+        } else if (item.kind == ChatItemKind.ASSISTANT && item.id != streamingItemId) {
+            flushActivity()
+            if (item.text.isEmpty()) return@forEach
+            val document = markdownDocuments[item.id]
+            if (document == null || document.content != item.text || document.blocks.isEmpty()) {
+                add(ChatTimelineEntry.Message(item))
+            } else {
+                document.blocks.forEachIndexed { index, block ->
+                    add(
+                        ChatTimelineEntry.AssistantBlock(
+                            item = item,
+                            document = document,
+                            block = block,
+                            isFirst = index == 0,
+                        ),
+                    )
+                }
+            }
         } else {
             flushActivity()
             add(ChatTimelineEntry.Message(item))

@@ -59,6 +59,18 @@ class ChatRecoveryTest {
     }
 
     @Test
+    fun `explicit text only model blocks images while unknown third party stays selectable`() {
+        val textOnly = CodexModelOption(
+            id = "text-only",
+            inputModalities = setOf("text"),
+        )
+        val unknown = CodexModelOption(id = "third-party", inputModalities = null)
+
+        assertFalse(supportsImageInput(listOf(textOnly), "text-only"))
+        assertTrue(supportsImageInput(listOf(unknown), "third-party"))
+    }
+
+    @Test
     fun `only active or waiting conversations stay alive in background`() {
         assertFalse(shouldKeepSessionInBackground(ChatUiState(isConnected = true)))
         assertTrue(
@@ -74,5 +86,16 @@ class ChatRecoveryTest {
                 ),
             ),
         )
+    }
+
+    @Test
+    fun `queued message reserves the single pending composer slot`() {
+        val state = ChatUiState(
+            isConnected = true,
+            composer = "another message",
+            queued = QueuedChatMessage("queued", "first pending message"),
+        )
+
+        assertFalse(state.canSend)
     }
 }

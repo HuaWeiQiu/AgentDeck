@@ -3,6 +3,7 @@ package com.agentdeck.app.di
 import android.content.Context
 import com.agentdeck.app.data.config.CodexProfileRepository
 import com.agentdeck.app.data.chat.CodexBridgeLauncher
+import com.agentdeck.app.data.chat.ChatAttachmentStore
 import com.agentdeck.app.data.chat.ConversationLinkRepository
 import com.agentdeck.app.data.db.AppDatabase
 import com.agentdeck.app.data.provider.OkHttpProviderModelDiscovery
@@ -72,6 +73,7 @@ object ServiceLocator {
     val conversationLinks: ConversationLinkRepository by lazy { ConversationLinkRepository(app) }
     val codexProfile: CodexProfileRepository by lazy { CodexProfileRepository(app) }
     val codexBridge: CodexBridgeLauncher by lazy { CodexBridgeLauncher(runtime, codexProfile) }
+    val chatAttachments: ChatAttachmentStore by lazy { ChatAttachmentStore(app) }
 
     fun init(context: Context) {
         if (initialized) return

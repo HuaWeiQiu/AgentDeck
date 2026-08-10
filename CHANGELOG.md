@@ -4,6 +4,47 @@ All notable changes to AgentDeck are documented in this file.
 
 ## Unreleased
 
+## 0.2.0-beta.3 - 2026-08-10
+
+### Added
+
+- Added true app-server cursor pagination: resume fetches only the newest 50 turns and scrolling to
+  the top fetches older turns in pages of 25 without first loading the complete rollout into Android.
+- Added system-picker attachments with a four-file/20 MiB-per-file limit. PNG/JPEG use native
+  `localImage` input when the model supports images; other files are copied into the private
+  embedded Runtime and referenced by a randomized read-only path.
+- Added a single transcript repository for loaded pages, cursor state, and the live tail, plus
+  stale-request leases that prevent reconnect races from overwriting a newer page.
+
+### Changed
+
+- Rebuilt the chat timeline as one block-virtualized `LazyColumn`, moved Markdown parsing off the
+  main thread, bounded the AST LRU, isolated streaming state, and stopped composer changes from
+  republishing the transcript.
+- Replaced the permanent model/permission row above the composer with one explicit model button in
+  the title bar; the conversation title remains visible and selection opens a virtualized sheet.
+- Pre-release APKs now use the `beta` build type: test-signed for in-place upgrades, but R8-minified,
+  resource-shrunk, and packaged with dependency Baseline Profiles. Debug APKs are development-only.
+- Reopening the most recent conversation now paints a bounded in-memory transcript preview and its
+  real title immediately; bridge restore uses a thin top progress indicator instead of a blocking spinner.
+
+### Fixed
+
+- Preserved queued/failed-turn attachments, blocked images for explicitly text-only models, and
+  removed unsent private copies when the user removes an attachment. A queued message now reserves
+  the single pending composer slot, preventing later drafts or files from overwriting it.
+- Historical pages merge by stable item ID without replacing newer live content, and late page
+  failures can no longer release a newer request's single-flight lock.
+- Attachment input paths are now restricted to AgentDeck's private Runtime attachment directory.
+
+### Verified
+
+- On Android 16 / Vivo V2301A ARM64, selected and removed a real file through the system picker,
+  verified `0700` directories and `0600` randomized files in the embedded Runtime, and confirmed
+  the copy was deleted without sending it to the model.
+- In two identical optimized-Beta scroll runs, Total PSS was 113.0/131.4 MB, Total RSS was
+  254.0/276.7 MB, and janky frames were 1.38%/0.31%.
+
 ## 0.2.0-beta.2 - 2026-08-10
 
 ### Added

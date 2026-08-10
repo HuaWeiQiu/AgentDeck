@@ -27,6 +27,12 @@ OpenAI 官方 `codex app-server` 已提供 Thread / Turn / Item、历史读取�
 11. app-server 使用 `check_for_update_on_startup=false`，不允许后台进程弹出升级交互；兼容性检测和升级由 AgentDeck Doctor/配方显式完成。
 12. 由 AgentDeck 打开的 Codex TUI 同样运行在 PRoot 外层边界内，因此 wrapper 固定使用 CLI 支持的 `danger-full-access` 绕开不可用的 bubblewrap，并把“推荐/完全访问”分别映射为 `untrusted/never`。TUI 无法由 Android 客户端强制回绝审批，所以“只读”禁止打开终端；手动在 Termux 中启动的 Codex 不受 AgentDeck 参数影响。
 13. 每个 AgentDeck conversation 使用稳定的非敏感 instance key、唯一进程 marker 和私有 PID lease。启动新 app-server 前只匹配同一 marker 并递归终止其子进程树，防止 Android 进程被杀后残留 app-server 与新实例并发写同一 rollout，也避免通配杀死用户手动运行的 Codex。
+14. 聊天历史固定使用 Codex 0.147.0 app-server 的 experimental pagination 契约：恢复线程时设置 `excludeTurns=true`，并通过 `initialTurnsPage` 按倒序读取最近 50 个 turn；用户向上翻页时通过 `thread/turns/list` 每次读取更早的 25 个 turn。Android 仅保留已加载页面和实时尾部，不再让 `thread/resume` 一次性返回完整历史。
+15. app-server rollout 是 transcript 的唯一持久化事实源。Android 不用 Room 镜像一份消息正文；页面仓库只维护当前游标、已加载页和实时通知合并状态，断开重连后重新从 app-server 取最近页，避免双写导致消息遗漏、重复或次序漂移。
+16. 首屏和向前分页都在后台完成 JSON 解析与相邻 Markdown 预热，再发布不可变页面状态。Compose 只消费稳定 key 的扁平时间线；实时 token 单独合并到尾部，不能触发整段 transcript 重组。
+17. 附件严格按 app-server 输入契约实现：PNG/JPEG 复制到内嵌 Runtime 可读的持久目录后使用 `localImage.path`；其他文件不伪装为协议原生文件，而是复制到同一受控目录并在文本输入中引用绝对路径。单轮最多 4 个、单个最多 20 MiB；文件名不参与宿主路径，目录和文件分别使用 `0700` / `0600`。模型目录明确不含 `image` modality 时拒绝图片；第三方目录未发布 modality 时标记为未知并由 Provider 最终校验。
+18. 对外测试 APK 使用独立 `beta` build type：application ID 与测试签名保持不变以支持原位覆盖，但继承 release 的 R8、资源压缩和依赖 Baseline Profile。未优化的 Debug APK 只用于开发，不能再作为性能验收或 GitHub 预发布产物。
+19. 为避免返回再进入会话时出现空白转圈，Android 只保留最近打开的一个临时首屏预览，上限 120 个已完成 item 或约 256 KiB 字符。预览必须同时匹配会话 ID、Provider 和模型，配置变化后不能展示旧身份的内容。这个上限只控制连接前瞬时显示的预览内存，不会删除、裁剪或限制 Codex rollout 中的完整历史。预览不携带分页游标、不写入 Room、不包含流式 item；连接时只显示顶部细进度条，app-server 首屏到达后原子覆盖预览，因此它不是第二个持久化事实源。
 
 ## 分期
 
