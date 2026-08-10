@@ -4,6 +4,8 @@ All notable changes to AgentDeck are documented in this file.
 
 ## Unreleased
 
+## 0.2.0-beta.2 - 2026-08-10
+
 ### Added
 
 - Added first-use Codex account setup through the official app-server protocol: ChatGPT device

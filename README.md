@@ -2,7 +2,7 @@
 
 AgentDeck 是 Android 上聊天优先的本地 Codex 客户端。`0.2` 测试版可以在 App 私有目录中准备经过校验的 Ubuntu/Codex Runtime，不要求新用户安装 Termux；App 内呈现真实消息、工具活动、审批和停止。AgentDeck 不重写 Codex 的 Agent 循环，也不解析终端屏幕伪造消息。
 
-最新测试版为 [`v0.2.0-beta.1`](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.1)。测试 APK 使用 debug 签名，仅用于 ARM64 真机验收，不是正式签名的稳定版。`v0.1.0` 是早期骨架。
+最新测试版为 [`v0.2.0-beta.2`](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.2)。测试 APK 使用 debug 签名，仅用于 ARM64 真机验收，不是正式签名的稳定版。`v0.1.0` 是早期骨架。
 
 ## 当前能力
 
@@ -84,8 +84,8 @@ AgentDeck/
 ## 发布状态
 
 - 早期骨架：[v0.1.0](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.0)
-- 当前测试预发布：[v0.2.0-beta.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.1)（ARM64、debug 签名）
-- 历史测试预发布：[v0.1.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.4)、[v0.1.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.3)、[v0.1.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.2)
+- 当前测试预发布：[v0.2.0-beta.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.2)（ARM64、debug 签名）
+- 历史测试预发布：[v0.2.0-beta.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.1)、[v0.1.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.4)、[v0.1.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.3)、[v0.1.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.2)
 - 已知损坏版本：[v0.1.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.1)（新安装首次启动会崩溃）
 - 转为稳定版前的阻塞项：更多 OEM/Android 版本、首次完整安装、审批、异常恢复和历史数据升级验收；正式签名配置。
 

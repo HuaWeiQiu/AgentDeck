@@ -13,8 +13,8 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.2.0-beta.1"
+        versionCode = 7
+        versionName = "0.2.0-beta.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
