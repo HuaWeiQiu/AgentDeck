@@ -35,7 +35,7 @@ cd android
 | 项目 | 值 |
 |---|---|
 | Beta application ID | `com.agentdeck.app.debug` |
-| 版本 | `0.2.0-beta.4`（`versionCode=9`，未发布候选） |
+| 版本 | `0.2.0-beta.4`（`versionCode=9`，测试预发布） |
 | ARM64 APK | `app/build/outputs/apk/beta/app-arm64-v8a-beta.apk` |
 | x86_64 APK | `app/build/outputs/apk/beta/app-x86_64-beta.apk` |
 | Lint | `app/build/reports/lint-results-beta.html` |
