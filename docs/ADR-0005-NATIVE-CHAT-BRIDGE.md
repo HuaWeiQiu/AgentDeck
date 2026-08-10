@@ -30,9 +30,11 @@ OpenAI 官方 `codex app-server` 已提供 Thread / Turn / Item、历史读取�
 14. 聊天历史固定使用 Codex 0.147.0 app-server 的 experimental pagination 契约：恢复线程时设置 `excludeTurns=true`，并通过 `initialTurnsPage` 按倒序读取最近 50 个 turn；用户向上翻页时通过 `thread/turns/list` 每次读取更早的 25 个 turn。Android 仅保留已加载页面和实时尾部，不再让 `thread/resume` 一次性返回完整历史。
 15. app-server rollout 是 transcript 的唯一持久化事实源。Android 不用 Room 镜像一份消息正文；页面仓库只维护当前游标、已加载页和实时通知合并状态，断开重连后重新从 app-server 取最近页，避免双写导致消息遗漏、重复或次序漂移。
 16. 首屏和向前分页都在后台完成 JSON 解析与相邻 Markdown 预热，再发布不可变页面状态。Compose 只消费稳定 key 的扁平时间线；实时 token 单独合并到尾部，不能触发整段 transcript 重组。
-17. 附件严格按 app-server 输入契约实现：PNG/JPEG 复制到内嵌 Runtime 可读的持久目录后使用 `localImage.path`；其他文件不伪装为协议原生文件，而是复制到同一受控目录并在文本输入中引用绝对路径。单轮最多 4 个、单个最多 20 MiB；文件名不参与宿主路径，目录和文件分别使用 `0700` / `0600`。模型目录明确不含 `image` modality 时拒绝图片；第三方目录未发布 modality 时标记为未知并由 Provider 最终校验。
+17. 附件严格按 app-server 输入契约实现：PNG/JPEG 复制到内嵌 Runtime 可读的持久目录后使用 `localImage.path`；其他文件不伪装为协议原生文件。单轮最多 4 个、单个最多 20 MiB；文件名不参与宿主路径，目录和文件分别使用 `0700` / `0600`。模型目录明确不含 `image` modality 时拒绝图片；第三方目录未发布 modality 时标记为未知并由 Provider 最终校验。非图片最初按原始只读路径引用，已由决策 20 的受限解析副本取代。
 18. 对外测试 APK 使用独立 `beta` build type：application ID 与测试签名保持不变以支持原位覆盖，但继承 release 的 R8、资源压缩和依赖 Baseline Profile。未优化的 Debug APK 只用于开发，不能再作为性能验收或 GitHub 预发布产物。
 19. 为避免返回再进入会话时出现空白转圈，Android 只保留最近打开的一个临时首屏预览，上限 120 个已完成 item 或约 256 KiB 字符。预览必须同时匹配会话 ID、Provider 和模型，配置变化后不能展示旧身份的内容。这个上限只控制连接前瞬时显示的预览内存，不会删除、裁剪或限制 Codex rollout 中的完整历史。预览不携带分页游标、不写入 Room、不包含流式 item；连接时只显示顶部细进度条，app-server 首屏到达后原子覆盖预览，因此它不是第二个持久化事实源。
+20. 通用文件不伪装成 app-server 原生 input。PNG/JPEG 继续使用 `localImage`；UTF-8 文本、Markdown、代码、JSON/YAML/CSV/XML/HTML/日志先规范化；PDF 通过 Runtime 的 `pdftotext` 提取分页文本；DOCX/XLSX 只解析 ZIP/XML 正文、表格和单元格。适配器生成私有只读 sidecar，并在 prompt 中同时声明原文件、解析文件、格式和是否截断。禁止执行宏、公式、脚本或附件内容。
+21. 文件适配器只接受明确白名单，单轮最多 4 个、单文件最多 20 MiB；ZIP 条目、解压后总量、压缩比、单条 XML、解析时间和 sidecar 输出均有硬上限。加密、损坏、路径穿越、ZIP 炸弹、超时或不支持格式必须在发送前失败，不得静默回退到未经验证的处理。原文件和 sidecar 分别使用随机名与 `0600`，目录使用 `0700`，取消、移除、发送失败和会话销毁时必须成对清理或恢复。
 
 ## 分期
 

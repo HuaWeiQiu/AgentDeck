@@ -259,13 +259,13 @@ verify:
     # 同时验证 wrapper、codex 命令和精确版本
 ```
 
-上述 YAML 是 0.1.x 的历史配方格式，当前仍用其摘要提供 Codex adapter 元数据，但不会执行其中的 Termux 脚本。内嵌安装器使用代码中固定的 ARM64 rootfs/Codex URL、大小与 SHA-256，按“下载、校验、安全解包、验证、原子启用”执行；不可用条目（如当前 Claude Code P1）不能安装或启动。
+上述 YAML 是 0.1.x 的历史配方格式，当前仍用其摘要提供 Codex adapter 元数据，但不会执行其中的 Termux 脚本。内嵌安装器按设备 ABI 选择代码中固定的 ARM64 或 x86_64 rootfs/Codex URL、大小与 SHA-256，按“下载、校验、安全解包、验证、原子启用”执行；不可用条目（如当前 Claude Code P1）不能安装或启动。
 
 ### 5.6 环境检测项（EnvironmentReport）
 
 | 检查 ID | 层级 | 命令/条件 | 失败时引导 |
 |---|---|---|---|
-| `embedded_supported` | Android | 架构、API 和 native loader 支持 | 说明当前测试版仅支持 ARM64 |
+| `embedded_supported` | Android | 架构、API 和 native loader 支持 | 说明当前测试版仅支持 ARM64 或 x86_64 |
 | `embedded_runtime` | Android | 私有 rootfs 与宿主 loader 状态 | 自动安装或修复 |
 | `ubuntu_installed` / `embedded_tools` | Runtime | Ubuntu、TLS、Git 与 Python 功能探测 | 自动修复内嵌环境 |
 | `codex_installed` | Runtime | `command -v codex` 与固定版本 | 安装或更新 Agent |
@@ -382,7 +382,7 @@ interface CliAdapter {
 2. 标准模式体验：两项主导航、轻量会话列表、客户状态和上下文准备/修复。
 3. 移动聊天：无边框 Agent 回复、活动三级详情、审批 Sheet、IME 与阅读锚点。
 4. 高级与开发者设置：Provider、模型、Runtime、脱敏日志和诊断分层。
-5. 内嵌 Runtime：`AgentRuntime`、ARM64 PRoot/rootfs、版本化安装和 Codex。
+5. 内嵌 Runtime：`AgentRuntime`、ARM64/x86_64 PRoot/rootfs、版本化安装和 Codex。
 6. 真机硬化与发布：首次安装、升级/回滚、断网、锁屏、OEM 后台、性能、安全和发布验收。
 
 Claude Code、Kimi、桌面 Widget、远程配方和完整 Linux 桌面不进入上述主链路。

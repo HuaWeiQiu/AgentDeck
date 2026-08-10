@@ -621,6 +621,7 @@ internal fun customerFacingChatError(error: ChatError, showTechnicalDetails: Boo
         is ChatError.Auth -> "Codex 尚未登录，请先完成设置。"
         is ChatError.Model -> "模型服务暂时不可用，请检查设置后重试。"
         is ChatError.Network -> "Codex 连接中断，请重试。"
+        is ChatError.Attachment -> error.raw
         is ChatError.Unknown -> "Codex 暂时无法继续，请重试。"
     }
 }
@@ -1334,7 +1335,13 @@ private fun AttachmentChip(
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                 )
                 Text(
-                    formatAttachmentSize(attachment.sizeBytes),
+                    buildString {
+                        append(formatAttachmentSize(attachment.sizeBytes))
+                        if (attachment.kind == ChatAttachmentKind.FILE) {
+                            append(" · 已解析")
+                            if (attachment.wasTruncated) append("（已截断）")
+                        }
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.72f),
                 )

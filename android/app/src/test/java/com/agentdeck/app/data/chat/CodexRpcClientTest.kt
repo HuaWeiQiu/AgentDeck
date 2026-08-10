@@ -1,6 +1,7 @@
 package com.agentdeck.app.data.chat
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -13,6 +14,7 @@ import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -141,15 +143,116 @@ class CodexRpcClientTest {
         }
     }
 
-    private class FakeTransport : CodexRpcTransport {
+    @Test
+    fun `normal transport completion fails pending request immediately`() = runBlocking {
+        val transport = FakeTransport()
+        val client = CodexRpcClient(transport)
+        try {
+            val pending = async { runCatching { client.request("thread/list", timeoutMillis = 5_000) } }
+            transport.sent.receive()
+            transport.completeNormally()
+
+            val result = withTimeout(1_000) { pending.await() }
+            assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("连接已断开"))
+            assertTrue(withTimeout(1_000) { client.events.first() } is CodexInbound.Disconnected)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun `malformed JSON disconnects and releases pending request`() = runBlocking {
+        val transport = FakeTransport()
+        val client = CodexRpcClient(transport)
+        try {
+            val pending = async { runCatching { client.request("model/list", timeoutMillis = 5_000) } }
+            transport.sent.receive()
+            transport.receiveRaw("{not-json")
+
+            val result = withTimeout(1_000) { pending.await() }
+            assertTrue(result.isFailure)
+            assertTrue(withTimeout(1_000) { client.events.first() } is CodexInbound.Disconnected)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun `late response after timeout is ignored and next request succeeds`() = runBlocking {
+        val transport = FakeTransport()
+        val client = CodexRpcClient(transport)
+        try {
+            val timedOut = async { runCatching { client.request("turn/start", timeoutMillis = 50) } }
+            val first = JSONObject(transport.sent.receive())
+            assertTrue(timedOut.await().exceptionOrNull() is CodexRpcTimeoutException)
+            transport.receive(JSONObject().put("id", first.getLong("id")).put("result", JSONObject()))
+
+            val next = async { client.request("thread/list", timeoutMillis = 1_000) }
+            val second = JSONObject(transport.sent.receive())
+            transport.receive(
+                JSONObject().put("id", second.getLong("id")).put("result", JSONObject().put("ok", true)),
+            )
+            assertTrue(next.await().getBoolean("ok"))
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun `send failure does not leave a pending request`() = runBlocking {
+        val transport = FakeTransport(sendSucceeds = false)
+        val client = CodexRpcClient(transport)
+        try {
+            assertTrue(runCatching { client.request("turn/start") }.isFailure)
+            transport.sendSucceeds = true
+            val request = async { client.request("thread/list", timeoutMillis = 1_000) }
+            val payload = JSONObject(transport.sent.receive())
+            transport.receive(
+                JSONObject().put("id", payload.getLong("id")).put("result", JSONObject().put("ok", true)),
+            )
+            assertTrue(request.await().getBoolean("ok"))
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun `close releases an active request and is idempotent`() = runBlocking {
+        val transport = FakeTransport()
+        val client = CodexRpcClient(transport)
+        val request = async { runCatching { client.request("turn/start", timeoutMillis = 5_000) } }
+        transport.sent.receive()
+
+        client.close()
+        client.close()
+
+        val result = withTimeout(1_000) { request.await() }
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("连接已关闭"))
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { client.request("thread/list") }
+        }
+        Unit
+    }
+
+    private class FakeTransport(
+        var sendSucceeds: Boolean = true,
+    ) : CodexRpcTransport {
         private val incoming = Channel<CodexSocketEvent>(Channel.BUFFERED)
         val sent = Channel<String>(Channel.BUFFERED)
         override val events: Flow<CodexSocketEvent> = incoming.receiveAsFlow()
 
-        override fun send(text: String): Boolean = sent.trySend(text).isSuccess
+        override fun send(text: String): Boolean = sendSucceeds && sent.trySend(text).isSuccess
 
         suspend fun receive(payload: JSONObject) {
             incoming.send(CodexSocketEvent.Text(payload.toString()))
+        }
+
+        suspend fun receiveRaw(payload: String) {
+            incoming.send(CodexSocketEvent.Text(payload))
+        }
+
+        fun completeNormally() {
+            incoming.close()
         }
 
         fun fail(cause: Throwable) {

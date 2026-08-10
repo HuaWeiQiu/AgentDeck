@@ -76,7 +76,7 @@ fun SettingsScreen(
             item {
                 SettingsDestination(
                     title = "内嵌运行环境",
-                    summary = if (state.canStartChat) "ARM64 · 可用" else "ARM64 · 需要完成准备",
+                    summary = if (state.canStartChat) "本机 Runtime · 可用" else "本机 Runtime · 需要完成准备",
                     icon = {
                         Icon(
                             if (state.canStartChat) Icons.Filled.CheckCircle else Icons.Filled.ErrorOutline,

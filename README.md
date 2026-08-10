@@ -2,15 +2,15 @@
 
 AgentDeck 是 Android 上聊天优先的本地 Codex 客户端。`0.2` 测试版可以在 App 私有目录中准备经过校验的 Ubuntu/Codex Runtime，不要求新用户安装 Termux；App 内呈现真实消息、工具活动、审批和停止。AgentDeck 不重写 Codex 的 Agent 循环，也不解析终端屏幕伪造消息。
 
-最新测试版为 [`v0.2.0-beta.3`](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.3)。Beta APK 使用测试签名，仅用于 ARM64 真机验收，不是正式签名的稳定版；构建本身启用 R8、资源压缩和依赖 Baseline Profile。`v0.1.0` 是早期骨架。
+最新已发布测试版为 [`v0.2.0-beta.3`](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.3)。仓库中的下一候选版为 `0.2.0-beta.4`，开始按 ARM64/x86_64 拆分 APK，但在双架构验收和发布前仍属于未发布开发产物。Beta APK 使用测试签名，不是正式签名的稳定版；构建本身启用 R8、资源压缩和依赖 Baseline Profile。`v0.1.0` 是早期骨架。
 
 ## 当前能力
 
 - 对话作为首屏，整行进入由 Codex thread 支撑的原生聊天；思考和工具活动默认折叠，输入框跟随键盘，回复自动保持在最新位置。
 - 通过官方 `codex app-server` WebSocket，支持游标历史、Markdown、流式回复、停止、命令/文件审批和结构化工具活动。
-- 对话可从系统文件选择器添加图片或文件：PNG/JPEG 使用模型原生图片输入，其他文件导入内嵌 Runtime 后按只读路径交给 Codex；单次最多 4 个，单个最多 20 MiB。
+- 对话可从系统文件选择器添加图片或文件：PNG/JPEG 使用模型原生图片输入；文本/代码、PDF、DOCX、XLSX 在内嵌 Runtime 中转换为受限纯文本副本后交给 Codex，不执行宏、公式或脚本；单次最多 4 个，单个最多 20 MiB。
 - app-server 仅监听回环地址，每次启动生成一次性 capability token，并限制消息大小与连接生命周期。
-- ARM64 新安装可一键下载并校验 Ubuntu Base 24.04.4 与 Codex CLI 0.147.0，安全解包、验证后原子启用。
+- ARM64 和 x86_64 候选构建可一键下载并校验对应架构的 Ubuntu Base 24.04.4 与 Codex CLI 0.147.0，安全解包、验证后原子启用；APK 不跨架构混装 Runtime 组件。
 - 内嵌 PRoot/loader 随 APK 打包并校验来源与许可证；运行进程由前台服务和精确 instance lease 管理。
 - 设置首页按“模型连接、内嵌运行环境、对话默认值、Codex 参数、关于”分组，进入子页后才加载和编辑具体配置。
 - 会话卡片支持新建、编辑、启停和删除；原生聊天可以继承 Codex CLI 配置，也可以绑定受管 Sub2API/OpenAI Responses 兼容服务。
@@ -46,7 +46,7 @@ AgentDeck 在 App 私有 `noBackupFilesDir` 中持久保存 Codex home 和项目
 
 ## 0.2 测试版真机使用
 
-1. 在 ARM64 Android 8.0 或更高版本安装测试 APK。
+1. 在 ARM64 或 x86_64 Android 8.0 或更高版本安装与设备 ABI 对应的测试 APK。
 2. 首次启动点击“安装或修复”；准备过程会下载约 122 MB，安装后私有 Runtime 约占 800 MB，并会预留安装所需临时空间。
 3. 在“设置 → 模型连接”选择 ChatGPT 登录、OpenAI API Key 或第三方 Responses 服务；Sub2API 是带推荐默认值的专用预设，通用 Responses 允许自定义 Endpoint 和模型。
 4. 回到“对话”，点整行进入原生聊天。标准模式不需要打开终端或理解 Linux 配置。
@@ -61,16 +61,19 @@ AgentDeck 在 App 私有 `noBackupFilesDir` 中持久保存 Codex home 和项目
 ```bash
 export JAVA_HOME="/path/to/jdk-17"
 ./scripts/verify-release.sh
+./scripts/verify-stability-matrix.sh
 ```
 
-该命令会检查配方与 APK assets、wrapper 同步，运行 JVM 单测，构建启用 R8 的测试签名 Beta APK，并执行 Android Lint。
+第一条命令会检查配方与 APK assets、wrapper 同步，运行 JVM 单测，构建启用 R8 的测试签名双 ABI Beta APK，并执行 Android Lint。第二条运行 RPC、Runtime 下载/标记和文件适配异常矩阵，并生成不含聊天正文或凭据的 JSON 报告。
 
 聊天记录采用单一父级 `LazyColumn`，已完成的 Agent 回复按 Markdown 顶层 AST 块虚拟化；解析在单并发后台调度器运行，结果由 24 条/12 MiB LRU 约束。app-server 首次只返回最近 50 轮，滚动到顶部后按 25 轮游标加载更早记录；返回再打开最近会话时先显示一个有界的临时首屏预览，随后由 app-server 权威页面覆盖。预览上限不会删除、裁剪或限制磁盘中的完整历史。固定真机基准、内存前后对比和复现方式见 [聊天性能基线](docs/CHAT_PERFORMANCE.md)。
 
 产物：
 
-- `android/app/build/outputs/apk/beta/app-beta.apk`
+- `android/app/build/outputs/apk/beta/app-arm64-v8a-beta.apk`
+- `android/app/build/outputs/apk/beta/app-x86_64-beta.apk`
 - `android/app/build/reports/lint-results-beta.html`
+- `android/app/build/reports/stability/host-matrix.json`
 
 ## 仓库结构
 
@@ -88,6 +91,7 @@ AgentDeck/
 
 - 早期骨架：[v0.1.0](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.0)
 - 当前测试预发布：[v0.2.0-beta.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.3)（ARM64、测试签名、R8 优化）
+- 下一本地候选：`v0.2.0-beta.4`（ARM64/x86_64 拆分、文件适配层、稳定性矩阵；尚未发布）
 - 历史测试预发布：[v0.2.0-beta.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.2)、[v0.2.0-beta.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.1)、[v0.1.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.4)、[v0.1.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.3)、[v0.1.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.2)
 - 已知损坏版本：[v0.1.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.1)（新安装首次启动会崩溃）
 - 转为稳定版前的阻塞项：更多 OEM/Android 版本、首次完整安装、审批、异常恢复和历史数据升级验收；正式签名配置。

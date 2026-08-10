@@ -1,5 +1,8 @@
 452fcfe761d398e6d1180e60c9b5039fcabdba06d8d73e803c5bb866905d2a8c  android/app/src/main/jniLibs/arm64-v8a/libproot.so
 cb5e5b6900e198ca8160e9d355ea5b98d646333887a769411ff74132c1cec5df  android/app/src/main/jniLibs/arm64-v8a/libproot-loader.so
 15a8101160fee241e15b241d49bc288c3bd902b0334e34020a1c54e47760a1f7  android/app/src/main/jniLibs/arm64-v8a/libtalloc.so
+1cc7587c42818f391c138cd7640e1fa2439693235a7d642c7cbba82fd4ea2181  android/app/src/main/jniLibs/x86_64/libproot.so
+3a28ac6af36b5fbd8142ba62dd9780bbf308736cef8672518ddca0e685e9999f  android/app/src/main/jniLibs/x86_64/libproot-loader.so
+e5cb0a5a17daa2852bd0e6ba9c6d228e019e4c4875f056119157e9ad09564a55  android/app/src/main/jniLibs/x86_64/libtalloc.so
 0ffa6454acbe7e410ac6f0007df83b9b3161fe55484c1f4b87487c0f2d228a6d  android/app/src/main/assets/licenses/PROOT-GPL-2.0.txt
 da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768  android/app/src/main/assets/licenses/TALLOC-LGPL-3.0.txt

@@ -1,6 +1,7 @@
 package com.agentdeck.app.domain.chat
 
 import com.agentdeck.app.data.chat.RpcRequestId
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -38,6 +39,7 @@ class CodexChatModelsTest {
         assertTrue(ChatError.from("authentication failed: unauthorized") is ChatError.Auth)
         assertTrue(ChatError.from("provider response 401") is ChatError.Model)
         assertTrue(ChatError.from("Codex 连接已断开") is ChatError.Network)
+        assertEquals("文件无法解析", ChatError.Attachment("文件无法解析").raw)
         assertTrue(ChatError.from("unexpected EOF") is ChatError.Unknown)
     }
 }

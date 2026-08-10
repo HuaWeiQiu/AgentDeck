@@ -15,10 +15,12 @@ import com.agentdeck.app.domain.runtime.RuntimeProgram
 enum class InstallPhase {
     PROBING,
     DOWNLOADING,
+    VERIFYING_ARTIFACTS,
     EXTRACTING,
     INSTALLING,
     INSTALLING_TOOLS,
     VERIFYING,
+    VERIFYING_RUNTIME,
     COMPLETE,
 }
 

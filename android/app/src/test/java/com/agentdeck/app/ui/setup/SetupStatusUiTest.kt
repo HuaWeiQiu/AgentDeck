@@ -2,6 +2,8 @@ package com.agentdeck.app.ui.setup
 
 import com.agentdeck.app.domain.model.EnvironmentCheckStatus
 import com.agentdeck.app.domain.model.EnvironmentReport
+import com.agentdeck.app.domain.install.InstallPhase
+import com.agentdeck.app.domain.install.RecipeInstallProgress
 import com.agentdeck.app.domain.setup.SetupState
 import com.agentdeck.app.domain.setup.readyReport
 import org.junit.Assert.assertEquals
@@ -95,5 +97,42 @@ class SetupStatusUiTest {
         assertEquals("正在准备 Codex", presentation.title)
         assertEquals("正在安装并验证所需组件", presentation.summary)
         assertEquals("准备中", presentation.primaryActionLabel)
+    }
+
+    @Test
+    fun `download progress exposes bytes and weighted overall progress`() {
+        val presentation = setupInstallProgressPresentation(
+            RecipeInstallProgress(
+                recipeId = "recipe_codex",
+                recipeName = "Codex Runtime",
+                recipeIndex = 0,
+                recipeCount = 1,
+                phase = InstallPhase.DOWNLOADING,
+                bytesDone = 60L * 1024 * 1024,
+                bytesTotal = 120L * 1024 * 1024,
+            ),
+        )
+
+        assertEquals("下载 Runtime 文件", presentation.title)
+        assertEquals("60 MB / 120 MB（50%）", presentation.detail)
+        assertEquals("阶段 2 / 7", presentation.stageLabel)
+        assertEquals(0.275f, presentation.overallFraction, 0.0001f)
+    }
+
+    @Test
+    fun `tool installation explains long indeterminate work`() {
+        val presentation = setupInstallProgressPresentation(
+            RecipeInstallProgress(
+                recipeId = "recipe_codex",
+                recipeName = "Codex Runtime",
+                recipeIndex = 0,
+                recipeCount = 1,
+                phase = InstallPhase.INSTALLING_TOOLS,
+            ),
+        )
+
+        assertEquals("安装基础工具", presentation.title)
+        assertEquals("阶段 5 / 7", presentation.stageLabel)
+        assertEquals(true, presentation.detail.contains("可能需要几分钟"))
     }
 }

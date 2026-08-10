@@ -4,6 +4,27 @@ All notable changes to AgentDeck are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Added ABI-split ARM64 and x86_64 Beta builds with architecture-specific PRoot, loader, talloc,
+  Ubuntu Base, Codex binaries, checksums, and Runtime markers.
+- Added a bounded private file adapter for text/code, PDF, DOCX, and XLSX. Office macros and
+  formulas are never executed; extracted sidecars are size-, time-, path-, XML-, and ZIP-limited.
+- Added repeatable host and disposable-device stability matrix scripts with machine-readable JSON
+  reports and guarded device mutation.
+
+### Fixed
+
+- A transport event stream that ends without a final disconnect frame now immediately fails and
+  releases pending RPC requests instead of leaving them until the request timeout.
+- Runtime setup now shows seven named stages, weighted overall progress, download bytes, and
+  long-running extraction/tool-install hints; download UI updates are throttled to avoid excessive
+  recomposition.
+- File import now continues when one item in a multi-select batch fails, reports the exact failed
+  count, and keeps Runtime-only attachment paths out of the visible conversation transcript.
+- Late responses, malformed JSON, send failures, explicit close, no-space decisions, cross-ABI
+  Runtime markers, and hostile Office archives now have automated regression coverage.
+
 ## 0.2.0-beta.3 - 2026-08-10
 
 ### Added

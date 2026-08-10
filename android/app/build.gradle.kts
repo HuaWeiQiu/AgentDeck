@@ -13,8 +13,8 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.2.0-beta.3"
+        versionCode = 9
+        versionName = "0.2.0-beta.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -59,6 +59,15 @@ android {
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = false
         }
     }
 }

@@ -449,30 +449,40 @@ class ChatViewModel(
         }
         mutableState.update { it.copy(isImportingAttachment = true, error = null) }
         viewModelScope.launch {
+            val failures = mutableListOf<String>()
             try {
                 uris.take(available).forEach { uri ->
-                    val attachment = ServiceLocator.chatAttachments.import(cardId, uri)
-                    if (attachment.kind == com.agentdeck.app.domain.chat.ChatAttachmentKind.IMAGE &&
-                        !supportsImageInput(
-                            state.value.availableModels,
-                            state.value.selectedModel ?: state.value.runtimeModel,
-                        )
-                    ) {
-                        ServiceLocator.chatAttachments.remove(attachment)
-                        error("当前模型明确不支持图片输入")
-                    }
-                    mutableState.update { current ->
-                        current.copy(attachments = current.attachments + attachment)
+                    try {
+                        val attachment = ServiceLocator.chatAttachments.import(cardId, uri)
+                        if (attachment.kind == com.agentdeck.app.domain.chat.ChatAttachmentKind.IMAGE &&
+                            !supportsImageInput(
+                                state.value.availableModels,
+                                state.value.selectedModel ?: state.value.runtimeModel,
+                            )
+                        ) {
+                            ServiceLocator.chatAttachments.remove(attachment)
+                            error("当前模型明确不支持图片输入")
+                        }
+                        mutableState.update { current ->
+                            current.copy(attachments = current.attachments + attachment)
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        failures += attachmentFailureMessage(error.message)
                     }
                 }
             } catch (error: CancellationException) {
                 throw error
-            } catch (error: Exception) {
-                mutableState.update {
-                    it.copy(error = ChatError.from(error.message ?: "无法添加附件"))
-                }
             } finally {
-                mutableState.update { it.copy(isImportingAttachment = false) }
+                mutableState.update {
+                    it.copy(
+                        isImportingAttachment = false,
+                        error = failures.takeIf { it.isNotEmpty() }
+                            ?.let(::attachmentFailureSummary)
+                            ?.let { ChatError.Attachment(it) },
+                    )
+                }
             }
         }
     }
@@ -600,7 +610,11 @@ class ChatViewModel(
         rpc: CodexRpcClient,
         currentThread: String,
     ) {
-        val messageText = CodexProtocol.userMessageText(text, attachments)
+        val protocolText = CodexProtocol.userMessageText(text, attachments)
+        val messageText = CodexProtocol.displayUserMessageText(
+            protocolText,
+            attachments.count { it.kind == com.agentdeck.app.domain.chat.ChatAttachmentKind.IMAGE },
+        )
         val localItem = ChatItem(
             id = "local-user-${UUID.randomUUID()}",
             kind = ChatItemKind.USER,
@@ -1282,6 +1296,23 @@ class ChatViewModel(
                     ChatViewModel(cardId) as T
             }
     }
+}
+
+internal fun attachmentFailureMessage(message: String?): String {
+    val detail = message.orEmpty()
+    return when {
+        "附件不能超过" in detail -> "附件不能超过 20 MiB"
+        "不支持此文件类型" in detail ->
+            "不支持此文件类型；可添加 PNG、JPEG、文本/代码、PDF、DOCX 或 XLSX"
+        "当前模型明确不支持图片" in detail -> "当前模型不支持图片输入"
+        else -> "文件无法解析；请确认文件未损坏、未加密且包含可读取内容"
+    }
+}
+
+internal fun attachmentFailureSummary(failures: List<String>): String {
+    val distinct = failures.distinct()
+    val visible = distinct.take(2).joinToString("；")
+    return if (failures.size == 1) visible else "${failures.size} 个文件未添加：$visible"
 }
 
 private fun ChatUiState.toTranscriptState(

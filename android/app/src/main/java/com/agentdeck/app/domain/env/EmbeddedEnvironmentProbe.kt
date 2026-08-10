@@ -87,7 +87,7 @@ class EmbeddedEnvironmentProbe(
     }
 
     private fun baseChecks(status: EnvironmentCheckStatus) = listOf(
-        EnvironmentCheck("embedded_supported", "设备兼容性", EnvironmentCheckStatus.READY, "ARM64 可用"),
+        EnvironmentCheck("embedded_supported", "设备兼容性", EnvironmentCheckStatus.READY, "当前设备架构可用"),
         EnvironmentCheck("embedded_runtime", "内嵌运行环境", status, "App 私有运行环境"),
     )
 

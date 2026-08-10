@@ -21,6 +21,7 @@ class CodexProtocolTest {
             sizeBytes = 10,
             guestPath = "/root/projects/.agentdeck-attachments/chat/shot.png",
             kind = ChatAttachmentKind.IMAGE,
+            format = ChatAttachmentFormat.IMAGE,
         )
         val file = ChatAttachment(
             id = "file-1",
@@ -29,6 +30,8 @@ class CodexProtocolTest {
             sizeBytes = 20,
             guestPath = "/root/projects/.agentdeck-attachments/chat/notes.md",
             kind = ChatAttachmentKind.FILE,
+            format = ChatAttachmentFormat.TEXT,
+            preparedGuestPath = "/root/projects/.agentdeck-attachments/chat/notes.md.agentdeck.txt",
         )
 
         val params = CodexProtocol.turnStartParams(
@@ -39,9 +42,38 @@ class CodexProtocolTest {
         val input = params.getJSONArray("input")
 
         assertEquals("text", input.getJSONObject(0).getString("type"))
-        assertTrue(input.getJSONObject(0).getString("text").contains(file.guestPath))
+        assertTrue(input.getJSONObject(0).getString("text").contains(file.preparedGuestPath!!))
+        assertEquals(
+            "检查这些内容\n\n附件：notes.md、1 张图片",
+            CodexProtocol.displayUserMessageText(input.getJSONObject(0).getString("text"), 1),
+        )
         assertEquals("localImage", input.getJSONObject(1).getString("type"))
         assertEquals(image.guestPath, input.getJSONObject(1).getString("path"))
+    }
+
+    @Test
+    fun `parsed user item hides private attachment paths`() {
+        val privatePath = "/root/projects/.agentdeck-attachments/chat/notes.md.agentdeck.txt"
+        val raw = JSONObject()
+            .put("id", "user-1")
+            .put("type", "userMessage")
+            .put(
+                "content",
+                org.json.JSONArray().put(
+                    JSONObject()
+                        .put("type", "text")
+                        .put(
+                            "text",
+                            "检查内容\n\n[AgentDeck attachment context - internal]\n" +
+                                "本地附件：\n- notes.md [TEXT]: $privatePath",
+                        ),
+                ),
+            )
+
+        val item = requireNotNull(CodexProtocol.item(raw))
+
+        assertEquals("检查内容\n\n附件：notes.md", item.text)
+        assertFalse(item.text.contains("/root/projects"))
     }
 
     @Test
@@ -53,6 +85,7 @@ class CodexProtocolTest {
             sizeBytes = 10,
             guestPath = "/root/projects/.agentdeck-attachments/chat/shot.jpg",
             kind = ChatAttachmentKind.IMAGE,
+            format = ChatAttachmentFormat.IMAGE,
         )
 
         val params = CodexProtocol.turnSteerParams("thread-1", "turn-1", "", listOf(image))
@@ -69,6 +102,8 @@ class CodexProtocolTest {
             sizeBytes = 10,
             guestPath = "/etc/passwd",
             kind = ChatAttachmentKind.FILE,
+            format = ChatAttachmentFormat.TEXT,
+            preparedGuestPath = "/etc/passwd.agentdeck.txt",
         )
 
         assertThrows(IllegalArgumentException::class.java) {
@@ -77,6 +112,23 @@ class CodexProtocolTest {
                 text = "读取",
                 attachments = listOf(attachment),
             )
+        }
+    }
+
+    @Test
+    fun `turn input rejects unprepared file attachment`() {
+        val attachment = ChatAttachment(
+            id = "file-1",
+            name = "report.pdf",
+            mimeType = "application/pdf",
+            sizeBytes = 10,
+            guestPath = "/root/projects/.agentdeck-attachments/chat/report.pdf",
+            kind = ChatAttachmentKind.FILE,
+            format = ChatAttachmentFormat.PDF,
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            CodexProtocol.turnStartParams("thread-1", "读取", attachments = listOf(attachment))
         }
     }
 

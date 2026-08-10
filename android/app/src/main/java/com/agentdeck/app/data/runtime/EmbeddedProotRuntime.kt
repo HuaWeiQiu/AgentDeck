@@ -41,7 +41,7 @@ internal class EmbeddedProotRuntime(
             installed = installed,
             ready = installed,
             detail = when {
-                !supported -> "当前测试版仅支持 ARM64 Android 设备"
+                !supported -> "当前测试版仅支持 ARM64 或 x86_64 Android 设备"
                 !packaged -> "APK 缺少内嵌运行组件"
                 !installed -> "内嵌 Codex 运行环境尚未准备"
                 else -> "内嵌 Codex 运行环境可用"

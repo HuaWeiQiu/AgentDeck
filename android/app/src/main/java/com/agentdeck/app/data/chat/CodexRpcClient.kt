@@ -278,6 +278,7 @@ class CodexRpcClient internal constructor(
                     )
                 }
             }
+            if (!closed.get()) error("Codex WebSocket 消息流已结束")
         } catch (error: Exception) {
             if (!closed.get()) {
                 failPending(IllegalStateException("Codex 连接已断开", error))

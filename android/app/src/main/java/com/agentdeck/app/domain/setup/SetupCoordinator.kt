@@ -163,10 +163,12 @@ private fun com.agentdeck.app.domain.install.RecipeInstallProgress.userMessage()
     val action = when (phase) {
         com.agentdeck.app.domain.install.InstallPhase.PROBING -> "检测"
         com.agentdeck.app.domain.install.InstallPhase.DOWNLOADING -> "下载"
+        com.agentdeck.app.domain.install.InstallPhase.VERIFYING_ARTIFACTS -> "校验下载"
         com.agentdeck.app.domain.install.InstallPhase.EXTRACTING -> "解压"
         com.agentdeck.app.domain.install.InstallPhase.INSTALLING -> "安装"
         com.agentdeck.app.domain.install.InstallPhase.INSTALLING_TOOLS -> "配置"
         com.agentdeck.app.domain.install.InstallPhase.VERIFYING -> "验证"
+        com.agentdeck.app.domain.install.InstallPhase.VERIFYING_RUNTIME -> "运行自检"
         com.agentdeck.app.domain.install.InstallPhase.COMPLETE -> "完成"
     }
     return "$position · 正在$action $recipeName"

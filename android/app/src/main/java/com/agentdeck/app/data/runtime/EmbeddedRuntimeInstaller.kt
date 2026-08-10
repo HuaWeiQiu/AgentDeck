@@ -41,7 +41,9 @@ internal class EmbeddedRuntimeInstaller(
             require(recipeId == CODEX_RECIPE_ID) { "内嵌运行环境只支持 Codex 配方" }
             if (paths.isReady()) return@withLock "Codex 本机运行环境已可用"
             progress(InstallPhase.PROBING, onProgress)
-            require(EmbeddedRuntimeManifest.deviceSupported()) { "当前版本仅支持 ARM64 Android 设备" }
+            val runtime = requireNotNull(paths.runtimeTarget) {
+                "当前版本仅支持 ARM64 或 x86_64 Android 设备"
+            }
             paths.ensureHostLayout()
             verifyPackagedRuntime()
             checkFreeSpace()
@@ -50,38 +52,38 @@ internal class EmbeddedRuntimeInstaller(
             check(paths.stagingRootfs.mkdirs()) { "无法创建运行环境临时目录" }
             try {
                 progress(InstallPhase.DOWNLOADING, onProgress)
-                val totalBytes =
-                    EmbeddedRuntimeManifest.rootfs.sizeBytes + EmbeddedRuntimeManifest.codex.sizeBytes
+                val totalBytes = runtime.rootfs.sizeBytes + runtime.codex.sizeBytes
                 val rootfsArchive = download(
-                    EmbeddedRuntimeManifest.rootfs,
+                    runtime.rootfs,
                     completedBytes = 0L,
                     totalBytes = totalBytes,
                     onProgress = onProgress,
                 )
                 val codexArchive = download(
-                    EmbeddedRuntimeManifest.codex,
-                    completedBytes = EmbeddedRuntimeManifest.rootfs.sizeBytes,
+                    runtime.codex,
+                    completedBytes = runtime.rootfs.sizeBytes,
                     totalBytes = totalBytes,
                     onProgress = onProgress,
                 )
 
-                progress(InstallPhase.VERIFYING, onProgress)
-                verify(rootfsArchive, EmbeddedRuntimeManifest.rootfs)
-                verify(codexArchive, EmbeddedRuntimeManifest.codex)
+                progress(InstallPhase.VERIFYING_ARTIFACTS, onProgress)
+                verify(rootfsArchive, runtime.rootfs)
+                verify(codexArchive, runtime.codex)
 
                 progress(InstallPhase.EXTRACTING, onProgress)
                 SecureTarExtractor.extractGzipTar(rootfsArchive, paths.stagingRootfs)
                 configureRootfs()
-                installCodex(codexArchive)
-                installCredentialHelper()
+                installCodex(codexArchive, runtime)
+                installRuntimeHelpers()
 
                 progress(InstallPhase.INSTALLING_TOOLS, onProgress)
                 installBaseTools()
 
-                progress(InstallPhase.VERIFYING, onProgress)
+                progress(InstallPhase.VERIFYING_RUNTIME, onProgress)
                 verifyStagingRuntime()
                 paths.writeStagingMarker()
                 promoteStagingRuntime()
+                runCatching { paths.removeObsoleteRuntimeRoots() }
             } catch (error: CancellationException) {
                 paths.stagingRootfs.deleteRecursively()
                 throw error
@@ -101,7 +103,7 @@ internal class EmbeddedRuntimeInstaller(
 
     private fun verifyPackagedRuntime() {
         val required = listOf(paths.proot, paths.prootLoader, paths.packagedTalloc)
-        require(required.all(File::isFile)) { "APK 缺少 ARM64 PRoot 运行组件" }
+        require(required.all(File::isFile)) { "APK 缺少当前架构的 PRoot 运行组件" }
         require(paths.proot.canExecute() && paths.prootLoader.canExecute()) {
             "Android 未解出可执行的 PRoot 运行组件"
         }
@@ -109,7 +111,7 @@ internal class EmbeddedRuntimeInstaller(
 
     private fun checkFreeSpace() {
         val available = StatFs(paths.root.absolutePath).availableBytes
-        require(available >= MIN_FREE_SPACE_BYTES) {
+        require(hasRequiredRuntimeSpace(available)) {
             "存储空间不足；准备 Codex 至少需要 1.1 GB 可用空间"
         }
     }
@@ -120,13 +122,23 @@ internal class EmbeddedRuntimeInstaller(
         totalBytes: Long,
         onProgress: (RecipeInstallProgress) -> Unit,
     ): File = withContext(Dispatchers.IO) {
+        var lastReportedBytes = -PROGRESS_MIN_BYTES
+        var lastReportedAtNanos = 0L
         downloadArtifact(paths.cacheDir, artifact, client) { artifactBytesDone ->
-            progress(
-                InstallPhase.DOWNLOADING,
-                onProgress,
-                bytesDone = completedBytes + artifactBytesDone,
-                bytesTotal = totalBytes,
-            )
+            val now = System.nanoTime()
+            val shouldReport = artifactBytesDone == artifact.sizeBytes ||
+                artifactBytesDone - lastReportedBytes >= PROGRESS_MIN_BYTES ||
+                now - lastReportedAtNanos >= PROGRESS_MIN_INTERVAL_NANOS
+            if (shouldReport) {
+                progress(
+                    InstallPhase.DOWNLOADING,
+                    onProgress,
+                    bytesDone = completedBytes + artifactBytesDone,
+                    bytesTotal = totalBytes,
+                )
+                lastReportedBytes = artifactBytesDone
+                lastReportedAtNanos = now
+            }
         }
     }
 
@@ -164,15 +176,15 @@ internal class EmbeddedRuntimeInstaller(
         file.writeText(content)
     }
 
-    private fun installCodex(archive: File) {
+    private fun installCodex(archive: File, runtime: EmbeddedRuntimeTarget) {
         val extractDir = File(paths.root, ".codex-extract")
         extractDir.deleteRecursively()
         check(extractDir.mkdirs()) { "无法创建 Codex 解压目录" }
         try {
             SecureTarExtractor.extractGzipTar(archive, extractDir)
             val source = extractDir.walkTopDown().firstOrNull {
-                it.isFile && it.name == "codex-aarch64-unknown-linux-musl"
-            } ?: error("Codex 归档缺少 ARM64 可执行文件")
+                it.isFile && it.name == runtime.codexBinaryName
+            } ?: error("Codex 归档缺少 ${runtime.androidAbi} 可执行文件")
             val destination = File(paths.stagingRootfs, "usr/local/bin/codex")
             source.copyTo(destination, overwrite = true)
             Os.chmod(destination.absolutePath, 0b111101101)
@@ -181,20 +193,23 @@ internal class EmbeddedRuntimeInstaller(
         }
     }
 
-    private fun installCredentialHelper() {
-        val destination = File(
-            paths.stagingRootfs,
-            "usr/local/lib/agentdeck/codex-provider-token.py",
-        )
-        app.assets.open("wrappers/codex-provider-token.py").use { input ->
-            FileOutputStream(destination).use(input::copyTo)
+    private fun installRuntimeHelpers() {
+        listOf(
+            "codex-provider-token.py",
+            "agentdeck-file-adapter.py",
+        ).forEach { name ->
+            val destination = File(paths.stagingRootfs, "usr/local/lib/agentdeck/$name")
+            app.assets.open("wrappers/$name").use { input ->
+                FileOutputStream(destination).use(input::copyTo)
+            }
+            Os.chmod(destination.absolutePath, 0b111000000)
         }
-        Os.chmod(destination.absolutePath, 0b111000000)
     }
 
     private suspend fun installBaseTools() {
         val result = EmbeddedProotProcess(paths, paths.stagingRootfs).execute(
-            script = "set -e; apt-get update; apt-get install -y ca-certificates git python3; " +
+            script = "set -e; apt-get update; " +
+                "apt-get install -y --no-install-recommends ca-certificates git python3 poppler-utils; " +
                 "apt-get clean; mkdir -p /root/projects/default",
             timeoutMillis = TOOLS_TIMEOUT_MILLIS,
         ).getOrThrow()
@@ -207,6 +222,7 @@ internal class EmbeddedRuntimeInstaller(
         val result = EmbeddedProotProcess(paths, paths.stagingRootfs).execute(
             script = "set -e; test \"$(. /etc/os-release && printf %s \"${'$'}VERSION_ID\")\" = 24.04; " +
                 "test -s /etc/ssl/certs/ca-certificates.crt; command -v git; command -v python3; " +
+                "command -v pdftotext; test -x /usr/local/lib/agentdeck/agentdeck-file-adapter.py; " +
                 "codex --version | grep -Eq '0[.]147[.]0'",
             timeoutMillis = VERIFY_TIMEOUT_MILLIS,
         ).getOrThrow()
@@ -247,11 +263,17 @@ internal class EmbeddedRuntimeInstaller(
         private const val CODEX_RECIPE_ID = "recipe_codex"
         // A fresh install peaks near 900 MiB on the ARM64 device once the rootfs,
         // package metadata, Codex binary, and verified download cache coexist.
-        private const val MIN_FREE_SPACE_BYTES = 1_100L * 1024 * 1024
         private const val TOOLS_TIMEOUT_MILLIS = 20L * 60 * 1_000
         private const val VERIFY_TIMEOUT_MILLIS = 60_000L
+        private const val PROGRESS_MIN_BYTES = 512L * 1024
+        private const val PROGRESS_MIN_INTERVAL_NANOS = 250L * 1_000 * 1_000
     }
 }
+
+internal fun hasRequiredRuntimeSpace(availableBytes: Long): Boolean =
+    availableBytes >= MIN_FREE_SPACE_BYTES
+
+private const val MIN_FREE_SPACE_BYTES = 1_100L * 1024 * 1024
 
 /**
  * 下载 [artifact] 到 [cacheDir]，支持 `.part` 断点续传与有限次网络重试。

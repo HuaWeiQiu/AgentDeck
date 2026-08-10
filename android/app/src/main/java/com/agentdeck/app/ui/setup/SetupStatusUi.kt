@@ -26,6 +26,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.agentdeck.app.domain.model.EnvironmentCheckStatus
 import com.agentdeck.app.domain.model.EnvironmentReport
+import com.agentdeck.app.domain.install.InstallPhase
+import com.agentdeck.app.domain.install.RecipeInstallProgress
 import com.agentdeck.app.domain.setup.SetupAction
 import com.agentdeck.app.domain.setup.SetupState
 
@@ -42,6 +44,85 @@ data class CustomerSetupPresentation(
     val primaryActionLabel: String,
     val errorMessage: String?,
 )
+
+data class SetupInstallProgressPresentation(
+    val title: String,
+    val detail: String,
+    val stageLabel: String,
+    val overallFraction: Float,
+)
+
+fun setupInstallProgressPresentation(
+    progress: RecipeInstallProgress?,
+): SetupInstallProgressPresentation {
+    if (progress == null) {
+        return SetupInstallProgressPresentation(
+            title = "检查现有环境",
+            detail = "正在确认设备架构、存储空间和已安装组件",
+            stageLabel = "准备开始",
+            overallFraction = 0.02f,
+        )
+    }
+    val downloadFraction = if (progress.bytesDone != null && progress.bytesTotal != null &&
+        progress.bytesTotal > 0
+    ) {
+        (progress.bytesDone.toFloat() / progress.bytesTotal).coerceIn(0f, 1f)
+    } else 0f
+    val presentation = when (progress.phase) {
+        InstallPhase.PROBING -> ProgressStage(1, "检查安装条件", "确认架构、空间和 APK 运行组件", 0.03f)
+        InstallPhase.DOWNLOADING -> ProgressStage(
+            2,
+            "下载 Runtime 文件",
+            if (progress.bytesDone != null && progress.bytesTotal != null) {
+                "${formatInstallBytes(progress.bytesDone)} / ${formatInstallBytes(progress.bytesTotal)}" +
+                    "（${(downloadFraction * 100).toInt()}%）"
+            } else {
+                "正在连接下载源"
+            },
+            0.05f + 0.45f * downloadFraction,
+        )
+        InstallPhase.VERIFYING_ARTIFACTS -> ProgressStage(
+            3,
+            "校验下载文件",
+            "核对文件大小与 SHA-256，损坏内容不会安装",
+            0.54f,
+        )
+        InstallPhase.EXTRACTING -> ProgressStage(
+            4,
+            "解压 Runtime",
+            "正在安全解压 Ubuntu 和 Codex，可能需要几分钟",
+            0.62f,
+        )
+        InstallPhase.INSTALLING,
+        InstallPhase.INSTALLING_TOOLS,
+        -> ProgressStage(
+            5,
+            "安装基础工具",
+            "配置证书、Git、Python 和 PDF 解析工具，可能需要几分钟",
+            0.76f,
+        )
+        InstallPhase.VERIFYING,
+        InstallPhase.VERIFYING_RUNTIME,
+        -> ProgressStage(
+            6,
+            "验证 Runtime",
+            "正在运行 Ubuntu、Codex 和文件解析器自检",
+            0.93f,
+        )
+        InstallPhase.COMPLETE -> ProgressStage(
+            7,
+            "Runtime 已安装",
+            "正在刷新设备和模型连接状态",
+            1f,
+        )
+    }
+    return SetupInstallProgressPresentation(
+        title = presentation.title,
+        detail = presentation.detail,
+        stageLabel = "阶段 ${presentation.index} / $INSTALL_STAGE_COUNT",
+        overallFraction = presentation.fraction,
+    )
+}
 
 fun customerSetupPresentation(state: SetupState): CustomerSetupPresentation {
     val title = when {
@@ -61,7 +142,7 @@ fun customerSetupPresentation(state: SetupState): CustomerSetupPresentation {
             SetupAction.INSTALL_CODEX -> "将安装或修复所需组件，不会删除对话和项目"
             SetupAction.CONFIGURE_CODEX_AUTH ->
                 "选择 ChatGPT、OpenAI API Key 或第三方 Responses 服务"
-            SetupAction.UNSUPPORTED_DEVICE -> "当前测试版仅支持 ARM64 Android 设备"
+            SetupAction.UNSUPPORTED_DEVICE -> "当前测试版仅支持 ARM64 或 x86_64 Android 设备"
             SetupAction.READY -> "可以开始新的对话"
         }
     }
@@ -245,3 +326,19 @@ private data class StatusAppearance(
     val label: String,
     val color: Color,
 )
+
+private data class ProgressStage(
+    val index: Int,
+    val title: String,
+    val detail: String,
+    val fraction: Float,
+)
+
+private fun formatInstallBytes(bytes: Long): String = when {
+    bytes >= 1_073_741_824 -> "%.1f GB".format(bytes / 1_073_741_824.0)
+    bytes >= 1_048_576 -> "%.0f MB".format(bytes / 1_048_576.0)
+    bytes >= 1_024 -> "%.0f KB".format(bytes / 1_024.0)
+    else -> "$bytes B"
+}
+
+private const val INSTALL_STAGE_COUNT = 7

@@ -73,7 +73,7 @@ object ServiceLocator {
     val conversationLinks: ConversationLinkRepository by lazy { ConversationLinkRepository(app) }
     val codexProfile: CodexProfileRepository by lazy { CodexProfileRepository(app) }
     val codexBridge: CodexBridgeLauncher by lazy { CodexBridgeLauncher(runtime, codexProfile) }
-    val chatAttachments: ChatAttachmentStore by lazy { ChatAttachmentStore(app) }
+    val chatAttachments: ChatAttachmentStore by lazy { ChatAttachmentStore(app, runtime) }
 
     fun init(context: Context) {
         if (initialized) return

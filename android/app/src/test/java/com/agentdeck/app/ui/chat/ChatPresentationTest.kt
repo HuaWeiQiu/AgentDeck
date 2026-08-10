@@ -29,6 +29,20 @@ class ChatPresentationTest {
     }
 
     @Test
+    fun `attachment failures stay actionable and bounded`() {
+        val parsing = attachmentFailureMessage("文件解析失败：agentdeck: PDF extraction failed")
+        val unsupported = attachmentFailureMessage("不支持此文件类型")
+        val summary = attachmentFailureSummary(listOf(parsing, unsupported, parsing))
+
+        assertEquals("文件无法解析；请确认文件未损坏、未加密且包含可读取内容", parsing)
+        assertTrue(summary.startsWith("3 个文件未添加："))
+        assertEquals(
+            summary,
+            customerFacingChatError(ChatError.Attachment(summary), false),
+        )
+    }
+
+    @Test
     fun `outgoing messages always restore latest follow`() {
         val outgoing = ChatItem("local-user-1", ChatItemKind.USER, "hello")
         val history = ChatItem("agent-1", ChatItemKind.ASSISTANT, "old answer")

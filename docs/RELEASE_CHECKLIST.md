@@ -43,6 +43,7 @@
 - [ ] Fresh-install only AgentDeck on a supported ARM64 device; do not install or configure Termux.
 - [ ] Complete the one-button download, checksum verification, extraction, Codex installation, and
       functional self-test; leaving and reopening the app must resume an interrupted download.
+- [ ] During Runtime preparation, confirm the current named stage, overall progress bar, download bytes/percentage, and long-running extraction/tool-install hint remain visible without layout shifts.
 - [ ] Confirm the installed Runtime and persistent Codex home remain app-private and survive an
       AgentDeck upgrade and Runtime repair.
 - [ ] Confirm a checksum or download failure is shown as failure, never success.
@@ -69,6 +70,25 @@
 - [ ] Test workspace paths and CLI args containing spaces and quotes.
 - [ ] Run two managed Providers sequentially and confirm credentials, model caches, thread mappings, and app-server processes do not cross over.
 - [ ] Verify wrong keys, forbidden groups, rate limits, malformed model responses, TLS failures, and model-list timeouts terminate with actionable UI states.
+
+## x86_64 Android emulator
+
+- [ ] Install the ABI-split x86_64 APK on disposable API 26 and target-API emulators; confirm the package contains x86_64 PRoot/loader/talloc and no ARM64 Runtime binaries.
+- [ ] Complete verified Ubuntu amd64 and Codex x86_64 installation, run the Runtime probe, start app-server, send a turn, leave the screen, and resume the same thread.
+- [ ] Confirm an unsupported or mismatched ABI fails before downloading and cannot reuse another ABI's Runtime marker or cache artifact.
+
+## File adapter
+
+- [ ] Verify PNG/JPEG native input; normalized text/code/JSON/YAML/CSV/XML/HTML/log input; PDF page text; DOCX paragraphs/tables; and XLSX sheet/cell extraction.
+- [ ] Verify encrypted/corrupt documents, unsupported binaries, path traversal, excessive ZIP entries, excessive expanded size/compression ratio, parser timeout, and oversized sidecar fail before a turn starts.
+- [ ] Confirm macros, formulas, embedded objects, links, and attachment content are never executed; original and sidecar paths remain private and are removed/restored together across remove, failure, queue, and lifecycle flows.
+
+## Stability matrix
+
+- [ ] Run `./scripts/verify-stability-matrix.sh` and retain its machine-readable report with release artifacts.
+- [ ] Fake app-server scenarios cover connect/request timeout, mid-stream disconnect, malformed/oversized/burst messages, duplicate/out-of-order notifications, approval disconnect, and late responses.
+- [ ] Runtime scenarios cover no-space, interrupted/resumed download, checksum failure, install cancellation, staging cleanup, process death, exact orphan replacement, and repeated start/stop.
+- [ ] Disposable-device scenarios cover background/foreground, screen off/on, process recreation, low-memory trim, long streaming, and repeated history resume without using a device containing the only copy of customer data.
 
 ## Final review
 

@@ -39,6 +39,9 @@ jobs:
       - name: Verify release baseline
         run: ./scripts/verify-release.sh
 
+      - name: Verify host stability matrix
+        run: ./scripts/verify-stability-matrix.sh
+
       - name: Upload verification artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -47,5 +50,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
           path: |
-            android/app/build/outputs/apk/beta/app-beta.apk
+            android/app/build/outputs/apk/beta/app-arm64-v8a-beta.apk
+            android/app/build/outputs/apk/beta/app-x86_64-beta.apk
             android/app/build/reports/lint-results-beta.html
+            android/app/build/reports/stability/host-matrix.json

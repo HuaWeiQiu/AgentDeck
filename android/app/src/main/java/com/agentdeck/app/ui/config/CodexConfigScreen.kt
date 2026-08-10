@@ -146,7 +146,7 @@ fun CodexConfigScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
                 Text(
-                    "agentdeck.config.toml · 内嵌 ARM64 · 启动前同步",
+                    "agentdeck.config.toml · 内嵌 Runtime · 启动前同步",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp),

@@ -6,13 +6,21 @@ import android.provider.OpenableColumns
 import android.system.Os
 import com.agentdeck.app.data.runtime.EmbeddedRuntimePaths
 import com.agentdeck.app.domain.chat.ChatAttachment
+import com.agentdeck.app.domain.chat.ChatAttachmentFormat
 import com.agentdeck.app.domain.chat.ChatAttachmentKind
+import com.agentdeck.app.domain.runtime.AgentRuntime
+import com.agentdeck.app.domain.runtime.RuntimeCommand
+import com.agentdeck.app.domain.runtime.RuntimeProgram
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-class ChatAttachmentStore(context: Context) {
+class ChatAttachmentStore(
+    context: Context,
+    private val runtime: AgentRuntime,
+) {
     private val app = context.applicationContext
     private val paths = EmbeddedRuntimePaths(app)
 
@@ -22,7 +30,14 @@ class ChatAttachmentStore(context: Context) {
         require(metadata.sizeBytes == null || metadata.sizeBytes <= MAX_ATTACHMENT_BYTES) {
             "附件不能超过 20 MiB"
         }
-        val kind = attachmentKind(metadata.mimeType, metadata.displayName)
+        val format = requireNotNull(attachmentFormat(metadata.mimeType, metadata.displayName)) {
+            "不支持此文件类型；可添加 PNG、JPEG、文本/代码、PDF、DOCX 或 XLSX"
+        }
+        val kind = if (format == ChatAttachmentFormat.IMAGE) {
+            ChatAttachmentKind.IMAGE
+        } else {
+            ChatAttachmentKind.FILE
+        }
         val extension = storageExtension(metadata.displayName, metadata.mimeType)
         val instanceKey = CodexBridgeLauncher.instanceKey(cardId)
         val directory = File(paths.projectsHome, ".agentdeck-attachments/$instanceKey")
@@ -40,14 +55,16 @@ class ChatAttachmentStore(context: Context) {
             }
             check(temporary.renameTo(destination)) { "无法保存附件" }
             Os.chmod(destination.absolutePath, FILE_MODE)
-            ChatAttachment(
+            val imported = ChatAttachment(
                 id = UUID.randomUUID().toString(),
                 name = safeDisplayName(metadata.displayName),
                 mimeType = metadata.mimeType,
                 sizeBytes = copied,
                 guestPath = "/root/projects/.agentdeck-attachments/$instanceKey/$storageName",
                 kind = kind,
+                format = format,
             )
+            if (kind == ChatAttachmentKind.FILE) prepare(imported) else imported
         } catch (error: Exception) {
             temporary.delete()
             destination.delete()
@@ -56,9 +73,45 @@ class ChatAttachmentStore(context: Context) {
     }
 
     suspend fun remove(attachment: ChatAttachment) = withContext(Dispatchers.IO) {
-        val prefix = "/root/projects/.agentdeck-attachments/"
-        if (!attachment.guestPath.startsWith(prefix)) return@withContext
-        val relative = attachment.guestPath.removePrefix("/root/projects/")
+        deletePrivateGuestFile(attachment.guestPath)
+        attachment.preparedGuestPath?.let(::deletePrivateGuestFile)
+    }
+
+    private suspend fun prepare(attachment: ChatAttachment): ChatAttachment {
+        val adapterId = requireNotNull(attachment.format.adapterId)
+        require(isPrivateGuestPath(attachment.guestPath)) { "附件路径无效" }
+        val preparedPath = attachment.guestPath + ".agentdeck.txt"
+        require(isPrivateGuestPath(preparedPath)) { "附件解析路径无效" }
+        val command = RuntimeCommand(
+            instanceId = "file-adapter-${attachment.id.take(12)}",
+            program = RuntimeProgram.HOST_SHELL,
+            script = "python3 /usr/local/lib/agentdeck/agentdeck-file-adapter.py " +
+                "--kind $adapterId --source ${shellQuote(attachment.guestPath)} " +
+                "--output ${shellQuote(preparedPath)}",
+            workDir = attachment.guestPath.substringBeforeLast('/'),
+        )
+        return try {
+            val result = runtime.runCommandForResult(command, ADAPTER_TIMEOUT_MILLIS).getOrThrow()
+            check(result.commandSucceeded) {
+                "文件解析失败：" + result.stderr.ifBlank { result.stdout }.trim().takeLast(240)
+            }
+            val metadata = JSONObject(result.stdout.trim())
+            check(metadata.optString("kind") == adapterId && metadata.optString("output") == preparedPath) {
+                "文件解析器返回了无效结果"
+            }
+            attachment.copy(
+                preparedGuestPath = preparedPath,
+                wasTruncated = metadata.optBoolean("truncated", false),
+            )
+        } catch (error: Exception) {
+            deletePrivateGuestFile(preparedPath)
+            throw error
+        }
+    }
+
+    private fun deletePrivateGuestFile(guestPath: String) {
+        if (!isPrivateGuestPath(guestPath)) return
+        val relative = guestPath.removePrefix("/root/projects/")
         val file = File(paths.projectsHome, relative).canonicalFile
         val root = File(paths.projectsHome, ".agentdeck-attachments").canonicalFile
         if (file.toPath().startsWith(root.toPath())) file.delete()
@@ -95,6 +148,7 @@ class ChatAttachmentStore(context: Context) {
         const val MAX_ATTACHMENT_BYTES = 20L * 1024L * 1024L
         private const val DIRECTORY_MODE = 448 // 0700
         private const val FILE_MODE = 384 // 0600
+        private const val ADAPTER_TIMEOUT_MILLIS = 30_000L
     }
 }
 
@@ -105,14 +159,24 @@ private data class AttachmentMetadata(
 )
 
 internal fun attachmentKind(mimeType: String, displayName: String): ChatAttachmentKind {
-    val normalizedMime = mimeType.lowercase()
-    val extension = displayName.substringAfterLast('.', "").lowercase()
-    return if (normalizedMime == "image/png" || normalizedMime == "image/jpeg" ||
-        extension == "png" || extension == "jpg" || extension == "jpeg"
-    ) {
+    return if (attachmentFormat(mimeType, displayName) == ChatAttachmentFormat.IMAGE) {
         ChatAttachmentKind.IMAGE
-    } else {
-        ChatAttachmentKind.FILE
+    } else ChatAttachmentKind.FILE
+}
+
+internal fun attachmentFormat(mimeType: String, displayName: String): ChatAttachmentFormat? {
+    val normalizedMime = mimeType.lowercase().substringBefore(';').trim()
+    val extension = displayName.substringAfterLast('.', "").lowercase()
+    return when {
+        normalizedMime in IMAGE_MIME_TYPES || extension in IMAGE_EXTENSIONS -> ChatAttachmentFormat.IMAGE
+        normalizedMime == "application/pdf" || extension == "pdf" -> ChatAttachmentFormat.PDF
+        normalizedMime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+            extension == "docx" -> ChatAttachmentFormat.DOCX
+        normalizedMime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+            extension == "xlsx" -> ChatAttachmentFormat.XLSX
+        normalizedMime.startsWith("text/") || normalizedMime in TEXT_MIME_TYPES ||
+            extension in TEXT_EXTENSIONS -> ChatAttachmentFormat.TEXT
+        else -> null
     }
 }
 
@@ -152,3 +216,28 @@ private fun copyBounded(
         target.write(buffer, 0, read)
     }
 }
+
+private fun isPrivateGuestPath(value: String): Boolean =
+    value.matches(Regex("/root/projects/[.]agentdeck-attachments/[a-f0-9]{1,16}/[a-f0-9-]{36}[.A-Za-z0-9-]{0,32}"))
+
+private fun shellQuote(value: String): String {
+    require(isPrivateGuestPath(value)) { "附件路径无效" }
+    return "'" + value.replace("'", "'\\''") + "'"
+}
+
+private val IMAGE_MIME_TYPES = setOf("image/png", "image/jpeg")
+private val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg")
+private val TEXT_MIME_TYPES = setOf(
+    "application/json",
+    "application/ld+json",
+    "application/toml",
+    "application/xml",
+    "application/x-yaml",
+    "application/yaml",
+)
+private val TEXT_EXTENSIONS = setOf(
+    "txt", "md", "markdown", "log", "json", "jsonl", "yaml", "yml", "csv", "tsv",
+    "xml", "html", "htm", "kt", "kts", "java", "js", "jsx", "ts", "tsx", "py",
+    "rb", "go", "rs", "c", "cc", "cpp", "h", "hpp", "cs", "swift", "sh", "bash",
+    "zsh", "fish", "sql", "toml", "ini", "properties", "gradle",
+)
