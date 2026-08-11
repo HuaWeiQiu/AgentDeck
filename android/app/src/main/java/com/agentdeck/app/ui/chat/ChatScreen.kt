@@ -1424,6 +1424,8 @@ private fun VoiceInputButton(
     var preparing by remember { mutableStateOf(false) }
     val baseBeforeListen = remember { mutableStateOf("") }
     val committedSpoken = remember { mutableStateOf("") }
+    val lastPartial = remember { mutableStateOf("") }
+    val sessionId = remember { mutableStateOf(0) }
     val engine = remember(context) { VoskDictationEngine(context.applicationContext) }
 
     DisposableEffect(engine) {
@@ -1434,19 +1436,42 @@ private fun VoiceInputButton(
         listOf(base, committed, partial).filter { it.isNotBlank() }.joinToString(" ")
 
     fun publish(committed: String, partial: String = "") {
+        // Always push into the chat composer; this is the wire to the input box.
         onComposerChangeState.value(joinVoice(baseBeforeListen.value, committed, partial))
+    }
+
+    fun finishSession(extra: String, sid: Int) {
+        if (sessionId.value != sid || !listening) return
+        val piece = extra.ifBlank { lastPartial.value }
+        if (piece.isNotBlank()) {
+            committedSpoken.value = listOf(committedSpoken.value, piece)
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+        }
+        lastPartial.value = ""
+        publish(committedSpoken.value)
+        listening = false
     }
 
     fun stopVoice() {
         if (!listening) return
-        listening = false
+        val sid = sessionId.value
+        // Do NOT clear listening before final callback — otherwise last partial is dropped.
         engine.stop()
+        // Safety: if Vosk never delivers onFinal, still commit last partial shortly after.
+        scope.launch {
+            kotlinx.coroutines.delay(600)
+            finishSession(extra = "", sid = sid)
+        }
     }
 
     fun startVosk() {
         if (preparing || listening) return
         baseBeforeListen.value = composerState.value
         committedSpoken.value = ""
+        lastPartial.value = ""
+        val sid = sessionId.value + 1
+        sessionId.value = sid
         scope.launch {
             preparing = true
             if (!engine.isModelReady()) {
@@ -1466,22 +1491,31 @@ private fun VoiceInputButton(
                 ).show()
                 return@launch
             }
+            if (sessionId.value != sid) return@launch
             listening = true
             engine.start(
                 onPartial = { partial ->
-                    if (listening) publish(committedSpoken.value, partial)
+                    if (sessionId.value == sid) {
+                        lastPartial.value = partial
+                        // Always write through to the input field while the session is alive.
+                        publish(committedSpoken.value, partial)
+                    }
                 },
-                onFinal = { text ->
-                    if (text.isNotBlank()) {
-                        committedSpoken.value = listOf(committedSpoken.value, text)
+                onUtterance = { utterance ->
+                    if (sessionId.value == sid && listening) {
+                        // A finished phrase mid-session (silence endpoint).
+                        committedSpoken.value = listOf(committedSpoken.value, utterance)
                             .filter { it.isNotBlank() }
                             .joinToString(" ")
+                        lastPartial.value = ""
                         publish(committedSpoken.value)
                     }
-                    listening = false
+                },
+                onFinal = { text ->
+                    finishSession(extra = text, sid = sid)
                 },
                 onError = { message ->
-                    listening = false
+                    finishSession(extra = "", sid = sid)
                     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                 },
             )

@@ -69,6 +69,7 @@ class VoskDictationEngine(
 
     fun start(
         onPartial: (String) -> Unit,
+        onUtterance: (String) -> Unit,
         onFinal: (String) -> Unit,
         onError: (String) -> Unit,
     ) {
@@ -87,21 +88,25 @@ class VoskDictationEngine(
                 object : RecognitionListener {
                     override fun onPartialResult(hypothesis: String?) {
                         val text = parseHypothesis(hypothesis, partial = true)
-                        if (text.isNotBlank()) mainHandler.post { onPartial(text) }
+                        // Always deliver, including blank, so UI can clear stale partials.
+                        mainHandler.post { onPartial(text) }
                     }
 
                     override fun onResult(hypothesis: String?) {
-                        // Intermediate final segments during continuous listen; keep as partial merge.
+                        // Endpoint / silence: one finished phrase while still listening.
                         val text = parseHypothesis(hypothesis, partial = false)
-                        if (text.isNotBlank()) mainHandler.post { onPartial(text) }
+                        if (text.isNotBlank()) mainHandler.post { onUtterance(text) }
                     }
 
                     override fun onFinalResult(hypothesis: String?) {
                         val text = parseHypothesis(hypothesis, partial = false)
                         mainHandler.post {
-                            stopInternal()
-                            if (text.isNotBlank()) onFinal(text)
-                            else onFinal("")
+                            // Do not shutdown before delivering final text to UI.
+                            val svc = speechService
+                            speechService = null
+                            active.set(false)
+                            runCatching { svc?.shutdown() }
+                            onFinal(text)
                         }
                     }
 
@@ -113,9 +118,13 @@ class VoskDictationEngine(
                     }
 
                     override fun onTimeout() {
+                        // Treat timeout as end-of-session with empty final so UI can keep last partial.
                         mainHandler.post {
-                            stopInternal()
-                            onError("没有检测到语音")
+                            val svc = speechService
+                            speechService = null
+                            active.set(false)
+                            runCatching { svc?.shutdown() }
+                            onFinal("")
                         }
                     }
                 },
@@ -128,8 +137,9 @@ class VoskDictationEngine(
     }
 
     fun stop() {
-        // stop() asks Vosk for a final result; cleanup happens in onFinalResult/onError.
-        runCatching { speechService?.stop() }
+        // Asks Vosk for onFinalResult; cleanup is done there.
+        val svc = speechService ?: return
+        runCatching { svc.stop() }
     }
 
     fun release() {
