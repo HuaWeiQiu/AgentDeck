@@ -121,6 +121,8 @@ dependencies {
     implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.33.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.apache.commons:commons-compress:1.27.1")
+    // Offline on-device STT for devices without usable system Google/Vivo speech services.
+    implementation("com.alphacephei:vosk-android:0.3.47")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260719")
