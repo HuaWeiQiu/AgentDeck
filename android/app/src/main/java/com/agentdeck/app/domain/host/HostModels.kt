@@ -24,6 +24,10 @@ enum class HostToolName(val wireName: String, val capability: HostCapability, va
     WORKSPACE_MKDIR("workspace.mkdir", HostCapability.WORKSPACE_FS, isWrite = true),
     WORKSPACE_REMOVE("workspace.remove", HostCapability.WORKSPACE_FS, isWrite = true),
     WORKSPACE_STAT("workspace.stat", HostCapability.WORKSPACE_FS, isWrite = false),
+    /** 从真实 SAF 目录拉取到 Runtime 镜像目录，供 Codex 直接读写 */
+    WORKSPACE_PULL("workspace.pull", HostCapability.WORKSPACE_FS, isWrite = false),
+    /** 把 Runtime 镜像文件推回真实 SAF 目录 */
+    WORKSPACE_PUSH("workspace.push", HostCapability.WORKSPACE_FS, isWrite = true),
 
     /** L2：打开 http(s) URL（系统浏览器，用户可见） */
     INTENT_OPEN_URL("intent.open_url", HostCapability.SHARE_INTENT, isWrite = false),

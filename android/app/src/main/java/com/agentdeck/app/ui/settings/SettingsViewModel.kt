@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import com.agentdeck.app.BuildConfig
 import com.agentdeck.app.di.ServiceLocator
+import com.agentdeck.app.domain.host.HostWriteApprovalMode
 import com.agentdeck.app.domain.host.WorkspaceGrant
 import com.agentdeck.app.domain.settings.ExperienceLevel
 import com.agentdeck.app.domain.model.CodexPermissionLevel
@@ -19,6 +20,8 @@ class SettingsViewModel : ViewModel() {
         ServiceLocator.experienceSettings.codexPermissionLevel
     val hostWorkspaceEnabled: StateFlow<Boolean> =
         ServiceLocator.experienceSettings.hostWorkspaceEnabled
+    val hostWriteApprovalMode: StateFlow<HostWriteApprovalMode> =
+        ServiceLocator.experienceSettings.hostWriteApprovalMode
     val workspaceGrants: StateFlow<List<WorkspaceGrant>> = ServiceLocator.workspaceGrants.grants
     val isLabBuild: Boolean = BuildConfig.HOST_LAB
     val labRiskAccepted: StateFlow<Boolean> = ServiceLocator.experienceSettings.labRiskAccepted
@@ -50,6 +53,10 @@ class SettingsViewModel : ViewModel() {
 
     fun setHostWorkspaceEnabled(enabled: Boolean) {
         ServiceLocator.experienceSettings.setHostWorkspaceEnabled(enabled)
+    }
+
+    fun setHostWriteApprovalMode(mode: HostWriteApprovalMode) {
+        ServiceLocator.experienceSettings.setHostWriteApprovalMode(mode)
     }
 
     fun setLabRiskAccepted(accepted: Boolean) {

@@ -82,6 +82,13 @@ object ServiceLocator {
                 val uri = runCatching { Uri.parse(grant.treeUri) }.getOrNull() ?: return@DefaultHostToolBroker null
                 SafWorkspaceDocumentStore(app, uri)
             },
+            mirrorRoot = {
+                val paths = com.agentdeck.app.data.runtime.EmbeddedRuntimePaths(app)
+                paths.ensureHostLayout()
+                val mirror = java.io.File(paths.projectsHome, "host-mirror")
+                mirror.mkdirs()
+                mirror
+            },
             approval = hostApprovalGateway,
             intentExecutor = com.agentdeck.app.data.host.LabHostLoader.intentExecutor(app),
             uiExecutor = com.agentdeck.app.data.host.LabHostLoader.uiExecutor(),

@@ -55,8 +55,32 @@ class HostToolRelay(
         val bound = BoundSession(conversationId, instanceId, token)
         session = bound
         writeSession(bound)
+        writeMirrorReadme()
         startWatching()
         return bound
+    }
+
+    private fun writeMirrorReadme() {
+        runCatching {
+            paths.ensureHostLayout()
+            val mirror = File(paths.projectsHome, "host-mirror")
+            mirror.mkdirs()
+            val readme = File(mirror, "README.txt")
+            readme.writeText(
+                """
+                这是 Runtime 内的「真实目录镜像」，不是 Android 文件夹的实时挂载。
+
+                真实文件夹：设置 → 本机工作区（SAF 授权）
+                访问方式：
+                  agentdeck-host workspace.list --path .
+                  agentdeck-host workspace.pull --path 相对路径
+                  # 文件会出现在本目录下同名路径
+                  agentdeck-host workspace.push --path 相对路径
+
+                Codex 的默认 cwd（/root/projects/...）与真实文件夹是分开的。
+                """.trimIndent() + "\n",
+            )
+        }
     }
 
     /** 覆盖安装/旧 Runtime 补齐 guest CLI，不改动已验证 marker。 */

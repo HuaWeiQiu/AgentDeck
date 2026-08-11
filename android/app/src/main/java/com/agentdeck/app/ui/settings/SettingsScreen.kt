@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.agentdeck.app.BuildConfig
+import com.agentdeck.app.domain.host.HostWriteApprovalMode
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.settings.ExperienceLevel
 import com.agentdeck.app.ui.permissions.codexPermissionPresentation
@@ -152,6 +153,7 @@ fun ConversationDefaultsScreen(
     val experienceLevel by vm.experienceLevel.collectAsStateWithLifecycle()
     val selectedPermission by vm.codexPermissionLevel.collectAsStateWithLifecycle()
     val hostWorkspaceEnabled by vm.hostWorkspaceEnabled.collectAsStateWithLifecycle()
+    val hostWriteApprovalMode by vm.hostWriteApprovalMode.collectAsStateWithLifecycle()
     val workspaceGrants by vm.workspaceGrants.collectAsStateWithLifecycle()
     val labRisk by vm.labRiskAccepted.collectAsStateWithLifecycle()
     val labIntent by vm.labIntentEnabled.collectAsStateWithLifecycle()
@@ -241,7 +243,8 @@ fun ConversationDefaultsScreen(
                         headlineContent = { Text("允许访问所选文件夹") },
                         supportingContent = {
                             Text(
-                                "仅你选中的目录；与 Codex「完全访问」无关。默认关闭，可随时撤销。",
+                                "不会挂载进 Codex 的 Linux 目录。真实文件夹通过 agentdeck-host 访问；" +
+                                    "也可用 pull/push 同步到 /root/projects/host-mirror。默认关闭，可随时撤销。",
                             )
                         },
                         leadingContent = { Icon(Icons.Filled.Folder, contentDescription = null) },
@@ -261,6 +264,69 @@ fun ConversationDefaultsScreen(
                         modifier = Modifier.padding(horizontal = 12.dp),
                     ) {
                         Text(if (workspaceGrants.isEmpty()) "选择工作区文件夹" else "更换工作区文件夹")
+                    }
+                }
+                if (hostWorkspaceEnabled) {
+                    item {
+                        Text(
+                            "写入真实目录时",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                        )
+                    }
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    vm.setHostWriteApprovalMode(HostWriteApprovalMode.ALWAYS_ASK)
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = hostWriteApprovalMode == HostWriteApprovalMode.ALWAYS_ASK,
+                                onClick = {
+                                    vm.setHostWriteApprovalMode(HostWriteApprovalMode.ALWAYS_ASK)
+                                },
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text("每次询问", style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    "写/删/push 都弹窗确认（默认）",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    vm.setHostWriteApprovalMode(HostWriteApprovalMode.NEVER_ASK)
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = hostWriteApprovalMode == HostWriteApprovalMode.NEVER_ASK,
+                                onClick = {
+                                    vm.setHostWriteApprovalMode(HostWriteApprovalMode.NEVER_ASK)
+                                },
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text("不再询问", style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    "已授权文件夹内直接写入；可随时改回。撤销文件夹后仍无法访问。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                 }
                 workspaceGrants.forEach { grant ->

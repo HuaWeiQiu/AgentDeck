@@ -81,6 +81,8 @@ def main(argv: list[str]) -> int:
             "workspace.mkdir",
             "workspace.remove",
             "workspace.stat",
+            "workspace.pull",
+            "workspace.push",
         ],
     )
     parser.add_argument("--path", default="")

@@ -323,9 +323,9 @@ fun ChatScreen(
         ) {
             HostWriteApprovalSheetContent(
                 summary = hostWrite.summary,
-                onDecision = { allow ->
+                onDecision = { allow, forSession ->
                     hostWriteSheetVisible = false
-                    vm.decideHostWrite(allow)
+                    vm.decideHostWrite(allow, forSession = forSession)
                 },
             )
         }
@@ -1730,7 +1730,7 @@ private fun DiffView(patches: List<FilePatch>, maxHeight: androidx.compose.ui.un
 @Composable
 private fun HostWriteApprovalSheetContent(
     summary: String,
-    onDecision: (Boolean) -> Unit,
+    onDecision: (allow: Boolean, forSession: Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1760,14 +1760,21 @@ private fun HostWriteApprovalSheetContent(
         }
         Spacer(Modifier.height(18.dp))
         Button(
-            onClick = { onDecision(true) },
+            onClick = { onDecision(true, false) },
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("允许一次")
         }
         Spacer(Modifier.height(8.dp))
         OutlinedButton(
-            onClick = { onDecision(false) },
+            onClick = { onDecision(true, true) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("本会话允许")
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { onDecision(false, false) },
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("拒绝")

@@ -106,6 +106,9 @@ class ChatViewModel(
     private var developerInstructions: String? = null
     private var steerFailedForTurn: String? = null
     private val hostWriteWaiters = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+    /** 仅当前对话有效的「本会话允许写真实目录」。 */
+    @Volatile
+    private var hostWriteAllowedForSession = false
     private val hostApprovalGateway = HostApprovalGateway { _, _, summary ->
         awaitHostWriteApproval(summary)
     }
@@ -755,14 +758,30 @@ class ChatViewModel(
         }
     }
 
-    /** 宿主工作区写操作审批结果（ADR-0011）。 */
-    fun decideHostWrite(allow: Boolean) {
+    /**
+     * 宿主工作区写操作审批结果（ADR-0011）。
+     * @param allow 是否允许
+     * @param forSession 为 true 时仅本对话后续写操作免询问（不写入高级设置）
+     */
+    fun decideHostWrite(allow: Boolean, forSession: Boolean = false) {
         val pending = state.value.hostWriteApproval ?: return
+        if (allow && forSession) {
+            hostWriteAllowedForSession = true
+        }
         mutableState.update { it.copy(hostWriteApproval = null) }
         hostWriteWaiters.remove(pending.id)?.complete(allow)
     }
 
     private suspend fun awaitHostWriteApproval(summary: String): Boolean {
+        // 持久偏好：不再询问
+        val mode = ServiceLocator.experienceSettings.hostWriteApprovalMode.value
+        if (mode == com.agentdeck.app.domain.host.HostWriteApprovalMode.NEVER_ASK) {
+            return true
+        }
+        // 本会话临时授权
+        if (hostWriteAllowedForSession) {
+            return true
+        }
         val id = UUID.randomUUID().toString()
         val deferred = CompletableDeferred<Boolean>()
         hostWriteWaiters[id] = deferred
@@ -808,6 +827,7 @@ class ChatViewModel(
     private fun unbindHostWorkspaceSession() {
         hostWriteWaiters.values.forEach { it.complete(false) }
         hostWriteWaiters.clear()
+        hostWriteAllowedForSession = false
         ServiceLocator.hostApprovalGateway.delegate =
             com.agentdeck.app.domain.host.DenyAllHostApprovalGateway
         ServiceLocator.hostToolRelay.unbind()
@@ -1360,15 +1380,25 @@ class ChatViewModel(
         private const val MAX_RECONNECT_ATTEMPTS = 8
         private val HOST_WORKSPACE_INSTRUCTIONS = """
             AgentDeck Host Workspace (L1) is available for this conversation.
-            Access the user's authorized Android folder ONLY via:
+
+            IMPORTANT: The user's real Android folder is NOT mounted into this Linux cwd.
+            `/root/projects/...` is a private Runtime tree. The real folder is reached only via agentdeck-host.
+
+            List/read/write the REAL folder:
               agentdeck-host workspace.list --path .
               agentdeck-host workspace.read --path RELATIVE
               agentdeck-host workspace.write --path RELATIVE --content TEXT
               agentdeck-host workspace.mkdir --path RELATIVE
               agentdeck-host workspace.remove --path RELATIVE
               agentdeck-host workspace.stat --path RELATIVE
-            Paths are relative to the authorized folder. Do not use /sdcard or absolute host paths.
-            Writes and deletes require interactive user approval. Prefer workspace tools over guessing paths.
+
+            To edit with normal shell tools inside Runtime, pull then push:
+              agentdeck-host workspace.pull --path RELATIVE
+              # file appears at /root/projects/host-mirror/RELATIVE
+              # edit it, then:
+              agentdeck-host workspace.push --path RELATIVE
+
+            Writes/deletes/push require user approval. Never invent /sdcard paths.
         """.trimIndent()
         private val APPROVAL_DECISIONS = setOf("accept", "acceptForSession", "decline", "cancel")
 

@@ -27,6 +27,8 @@ import java.util.Base64
 class DefaultHostToolBroker(
     private val policyProvider: () -> HostToolPolicy,
     private val workspace: () -> WorkspaceDocumentStore?,
+    /** Runtime 侧镜像根：对应 guest `/root/projects/host-mirror`（真实 SAF 不会 FUSE 挂载）。 */
+    private val mirrorRoot: () -> java.io.File? = { null },
     private val approval: HostApprovalGateway = DenyAllHostApprovalGateway,
     private val intentExecutor: LabIntentExecutor = NoOpLabIntentExecutor,
     private val uiExecutor: LabUiAutomationExecutor = NoOpLabUiExecutor,
@@ -174,8 +176,72 @@ class DefaultHostToolBroker(
                 },
                 onFailure = { HostToolResult.Error("host_stat_failed", it.message ?: "stat 失败") },
             )
+            HostToolName.WORKSPACE_PULL -> pullToMirror(store, path)
+            HostToolName.WORKSPACE_PUSH -> pushFromMirror(store, path)
             else -> HostToolResult.Error("host_exec_failed", "非工作区工具")
         }
+    }
+
+    private fun pullToMirror(store: WorkspaceDocumentStore, path: String): HostToolResult {
+        if (path.isEmpty()) {
+            return HostToolResult.Denied("host_path_invalid", "pull 需要具体文件路径")
+        }
+        val root = mirrorRoot()
+            ?: return HostToolResult.Denied("host_mirror_unavailable", "镜像目录不可用")
+        return store.read(path, HostLimits.MAX_FILE_BYTES).fold(
+            onSuccess = { read ->
+                val dest = java.io.File(root, path)
+                if (!dest.canonicalPath.startsWith(root.canonicalPath + java.io.File.separator) &&
+                    dest.canonicalPath != root.canonicalPath
+                ) {
+                    return@fold HostToolResult.Denied("host_path_invalid", "镜像路径逃逸")
+                }
+                dest.parentFile?.mkdirs()
+                dest.writeBytes(read.bytes)
+                HostToolResult.Ok(
+                    mapOf(
+                        "host_path" to path,
+                        "runtime_path" to "/root/projects/host-mirror/$path",
+                        "size" to read.bytes.size.toString(),
+                        "truncated" to read.truncated.toString(),
+                        "note" to "已从真实目录拉取到 Runtime 镜像；Codex 请读写 runtime_path",
+                    ),
+                )
+            },
+            onFailure = { HostToolResult.Error("host_pull_failed", it.message ?: "拉取失败") },
+        )
+    }
+
+    private fun pushFromMirror(store: WorkspaceDocumentStore, path: String): HostToolResult {
+        if (path.isEmpty()) {
+            return HostToolResult.Denied("host_path_invalid", "push 需要具体文件路径")
+        }
+        val root = mirrorRoot()
+            ?: return HostToolResult.Denied("host_mirror_unavailable", "镜像目录不可用")
+        val src = java.io.File(root, path)
+        if (!src.isFile) {
+            return HostToolResult.Error("host_push_missing", "镜像中不存在该文件，请先 pull 或在 Runtime 中创建")
+        }
+        if (!src.canonicalPath.startsWith(root.canonicalPath + java.io.File.separator)) {
+            return HostToolResult.Denied("host_path_invalid", "镜像路径逃逸")
+        }
+        if (src.length() > HostLimits.MAX_FILE_BYTES) {
+            return HostToolResult.Denied("host_file_too_large", "文件超过 2 MiB 限制")
+        }
+        val bytes = src.readBytes()
+        return store.write(path, bytes, HostLimits.MAX_FILE_BYTES).fold(
+            onSuccess = {
+                HostToolResult.Ok(
+                    mapOf(
+                        "host_path" to path,
+                        "runtime_path" to "/root/projects/host-mirror/$path",
+                        "size" to bytes.size.toString(),
+                        "note" to "已从 Runtime 镜像推回真实目录",
+                    ),
+                )
+            },
+            onFailure = { HostToolResult.Error("host_push_failed", it.message ?: "推送失败") },
+        )
     }
 
     private fun executeIntent(tool: HostToolName, args: Map<String, String>): HostToolResult =
@@ -220,9 +286,10 @@ class DefaultHostToolBroker(
     private fun writeSummary(tool: HostToolName, args: Map<String, String>): String {
         val path = HostPathGuard.normalizeRelative(args["path"]) ?: args["path"] ?: ""
         return when (tool) {
-            HostToolName.WORKSPACE_WRITE -> "写入工作区文件 $path"
-            HostToolName.WORKSPACE_MKDIR -> "在工作区创建目录 $path"
-            HostToolName.WORKSPACE_REMOVE -> "删除工作区文件 $path"
+            HostToolName.WORKSPACE_WRITE -> "写入真实工作区文件 $path"
+            HostToolName.WORKSPACE_MKDIR -> "在真实工作区创建目录 $path"
+            HostToolName.WORKSPACE_REMOVE -> "删除真实工作区文件 $path"
+            HostToolName.WORKSPACE_PUSH -> "推送镜像文件到真实目录 $path"
             HostToolName.UI_CLICK_TEXT -> "点击界面文本「${args["text"]?.take(40)}」"
             HostToolName.PRIV_SHELL -> "执行特权命令：${args["command"]?.take(80)}"
             else -> tool.wireName
