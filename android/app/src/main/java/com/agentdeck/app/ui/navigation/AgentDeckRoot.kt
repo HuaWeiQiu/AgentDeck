@@ -100,6 +100,7 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
             composable("sessions") {
                 SessionsScreen(
                     onOpenSetup = { navController.navigate("setup") { launchSingleTop = true } },
+                    onOpenModels = { navController.navigate("models") { launchSingleTop = true } },
                     onOpenChat = { cardId -> navController.navigate("chat/$cardId") },
                 )
             }

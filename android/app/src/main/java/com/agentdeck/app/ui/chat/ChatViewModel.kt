@@ -815,6 +815,13 @@ class ChatViewModel(
             instanceId = instanceKey,
         )
         developerInstructions = mergeHostWorkspaceInstructions(developerInstructions)
+        val grantName = ServiceLocator.workspaceGrants.primaryGrant()?.displayName ?: "已授权文件夹"
+        mutableState.update {
+            it.copy(
+                hostWorkspaceBanner =
+                    "真实目录「$grantName」· 未挂载 · 用 agentdeck-host 或 pull/push 到 host-mirror",
+            )
+        }
     }
 
     private fun mergeHostWorkspaceInstructions(base: String?): String {
@@ -831,7 +838,7 @@ class ChatViewModel(
         ServiceLocator.hostApprovalGateway.delegate =
             com.agentdeck.app.domain.host.DenyAllHostApprovalGateway
         ServiceLocator.hostToolRelay.unbind()
-        mutableState.update { it.copy(hostWriteApproval = null) }
+        mutableState.update { it.copy(hostWriteApproval = null, hostWorkspaceBanner = null) }
     }
 
     /**

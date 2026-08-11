@@ -212,6 +212,11 @@ data class ChatUiState(
     /** Per-chat permission override; null inherits the effective default. */
     val selectedPermission: CodexPermissionLevel? = null,
     val error: ChatError? = null,
+    /**
+     * L1 真实目录状态条；null 表示未开启或不展示。
+     * 说明：真实文件夹不会挂载进 Linux cwd。
+     */
+    val hostWorkspaceBanner: String? = null,
 ) {
     // Computed once at construction; copy() re-runs the constructor so this always
     // reflects the current field values. Sending while streaming steers the active

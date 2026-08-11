@@ -281,20 +281,42 @@ fun ChatScreen(
             )
         },
     ) { padding ->
-        ChatTranscript(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            transcriptState = vm.transcriptState,
-            markdownDocuments = vm.markdownDocuments,
-            streamingText = vm.streamingText,
-            showTechnicalDetails = showTechnicalDetails,
-            onLoadOlder = vm::loadOlderHistory,
-            onMarkdownNeeded = vm::requestMarkdown,
-            onMarkdownVisible = vm::touchMarkdown,
-            onRetry = vm::connect,
-            onLongPress = onMessageLongPress,
-        )
+        ) {
+            state.hostWorkspaceBanner?.let { banner ->
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+                ) {
+                    Text(
+                        banner,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+            }
+            ChatTranscript(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                transcriptState = vm.transcriptState,
+                markdownDocuments = vm.markdownDocuments,
+                streamingText = vm.streamingText,
+                showTechnicalDetails = showTechnicalDetails,
+                onLoadOlder = vm::loadOlderHistory,
+                onMarkdownNeeded = vm::requestMarkdown,
+                onMarkdownVisible = vm::touchMarkdown,
+                onRetry = vm::connect,
+                onLongPress = onMessageLongPress,
+            )
+        }
     }
 
     state.approval?.takeIf { approvalSheetVisible }?.let { approval ->
@@ -640,11 +662,11 @@ internal fun chatRuntimeLabel(provider: String?, model: String?): String? = list
 internal fun customerFacingChatError(error: ChatError, showTechnicalDetails: Boolean): String {
     if (showTechnicalDetails) return error.raw
     return when (error) {
-        is ChatError.Auth -> "Codex 尚未登录，请先完成设置。"
-        is ChatError.Model -> "模型服务暂时不可用，请检查设置后重试。"
-        is ChatError.Network -> "Codex 连接中断，请重试。"
+        is ChatError.Auth -> "还没登录模型服务。请到「设置 → 模型服务」完成登录或填写密钥。"
+        is ChatError.Model -> "模型暂时连不上。请检查网络和「设置 → 模型服务」，然后点重试。"
+        is ChatError.Network -> "和本机 Codex 的连接断了。可点重试；若多次失败，到「设置 → 运行环境」检查是否可用。"
         is ChatError.Attachment -> error.raw
-        is ChatError.Unknown -> "Codex 暂时无法继续，请重试。"
+        is ChatError.Unknown -> "这次回复没能完成。请点重试；仍不行可返回会话列表再进入。"
     }
 }
 
@@ -677,12 +699,12 @@ private fun ReconnectingBanner(onRetry: () -> Unit) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(10.dp))
             Text(
-                "Codex 连接已断开，正在自动重连",
+                "连接已断开，正在自动重连…",
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            TextButton(onClick = onRetry) { Text("立即重试") }
+            TextButton(onClick = onRetry) { Text("立即重连") }
         }
     }
 }
