@@ -16,6 +16,8 @@ import com.agentdeck.app.data.repo.ProfileRepository
 import com.agentdeck.app.data.repo.RecipeRepository
 import android.net.Uri
 import com.agentdeck.app.data.host.DefaultHostToolBroker
+import com.agentdeck.app.data.host.HostToolRelay
+import com.agentdeck.app.data.host.MutableHostApprovalGateway
 import com.agentdeck.app.data.host.SafWorkspaceDocumentStore
 import com.agentdeck.app.data.host.WorkspaceGrantRepository
 import com.agentdeck.app.data.runtime.EmbeddedProotRuntime
@@ -24,7 +26,6 @@ import com.agentdeck.app.data.secure.AndroidProviderCredentialVault
 import com.agentdeck.app.data.secure.ProviderCredentialVault
 import com.agentdeck.app.domain.env.EmbeddedEnvironmentProbe
 import com.agentdeck.app.domain.env.EnvironmentScanner
-import com.agentdeck.app.domain.host.DenyAllHostApprovalGateway
 import com.agentdeck.app.domain.host.HostToolBroker
 import com.agentdeck.app.domain.install.RecipeInstallation
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
@@ -60,6 +61,7 @@ object ServiceLocator {
     val onboarding: OnboardingRepository by lazy { OnboardingRepository(app) }
     val experienceSettings: ExperienceSettingsRepository by lazy { ExperienceSettingsRepository(app) }
     val workspaceGrants: WorkspaceGrantRepository by lazy { WorkspaceGrantRepository(app) }
+    val hostApprovalGateway: MutableHostApprovalGateway by lazy { MutableHostApprovalGateway() }
     val hostTools: HostToolBroker by lazy {
         DefaultHostToolBroker(
             policyProvider = {
@@ -74,9 +76,11 @@ object ServiceLocator {
                 val uri = runCatching { Uri.parse(grant.treeUri) }.getOrNull() ?: return@DefaultHostToolBroker null
                 SafWorkspaceDocumentStore(app, uri)
             },
-            // 写操作审批 UI 接入前默认拒绝，保证 fail closed
-            approval = DenyAllHostApprovalGateway,
+            approval = hostApprovalGateway,
         )
+    }
+    val hostToolRelay: HostToolRelay by lazy {
+        HostToolRelay(app, hostTools, appScope)
     }
     val envProbe: EnvironmentScanner by lazy { EmbeddedEnvironmentProbe(embeddedRuntime) }
     val installer: RecipeInstallation by lazy { EmbeddedRuntimeInstaller(app) }
@@ -99,6 +103,12 @@ object ServiceLocator {
     val codexProfile: CodexProfileRepository by lazy { CodexProfileRepository(app) }
     val codexBridge: CodexBridgeLauncher by lazy { CodexBridgeLauncher(runtime, codexProfile) }
     val chatAttachments: ChatAttachmentStore by lazy { ChatAttachmentStore(app, runtime) }
+
+    val appContext: Context
+        get() {
+            check(initialized) { "ServiceLocator 尚未初始化" }
+            return app
+        }
 
     fun init(context: Context) {
         if (initialized) return

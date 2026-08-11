@@ -6,9 +6,9 @@ All notable changes to AgentDeck are documented in this file.
 
 ### Added
 
-- Host Toolkit foundation (ADR-0011): L1 workspace policy, fail-closed broker, SAF grant store,
-  advanced-settings workspace picker, and unit tests. Write approvals remain deny-by-default until
-  chat approval UI is wired; Codex permission level never enables host capabilities.
+- Host Toolkit L1 (ADR-0011): fail-closed broker, SAF workspace grants, advanced-settings picker,
+  guest `agentdeck-host` CLI over `/run/agentdeck` IPC, chat write-approval sheet, and unit tests.
+  Host access stays independent of Codex sandbox permission level.
 
 ## 0.2.0-beta.5 - 2026-08-11
 

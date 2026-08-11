@@ -197,6 +197,8 @@ data class ChatUiState(
     val attachments: List<ChatAttachment> = emptyList(),
     val isImportingAttachment: Boolean = false,
     val approval: ChatApproval? = null,
+    /** L1 宿主工作区写操作审批（与 Codex sandbox 审批独立）。 */
+    val hostWriteApproval: HostWriteApproval? = null,
     /** Pending `item/tool/requestUserInput` server request, if any. */
     val userInputRequest: ChatUserInputRequest? = null,
     /** Message typed while a turn was running and steering failed; sent on turn end. */
@@ -217,5 +219,16 @@ data class ChatUiState(
     val canSend: Boolean =
         isConnected && !isConnecting &&
             (composer.isNotBlank() || attachments.isNotEmpty()) &&
-            !isImportingAttachment && approval == null && userInputRequest == null && queued == null
+            !isImportingAttachment &&
+            approval == null &&
+            hostWriteApproval == null &&
+            userInputRequest == null &&
+            queued == null
 }
+
+/** 宿主工作区写审批展示模型（ADR-0011）。 */
+@Immutable
+data class HostWriteApproval(
+    val id: String,
+    val summary: String,
+)

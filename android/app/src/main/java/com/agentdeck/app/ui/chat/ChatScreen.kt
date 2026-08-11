@@ -174,6 +174,7 @@ fun ChatScreen(
         }
     }
     var approvalSheetVisible by rememberSaveable { mutableStateOf(false) }
+    var hostWriteSheetVisible by rememberSaveable { mutableStateOf(false) }
     var inputSheetVisible by rememberSaveable { mutableStateOf(false) }
     var chatSettingsVisible by rememberSaveable { mutableStateOf(false) }
     var longPressedItem by remember { mutableStateOf<ChatItem?>(null) }
@@ -184,6 +185,10 @@ fun ChatScreen(
 
     LaunchedEffect(state.approval?.requestId?.toString()) {
         approvalSheetVisible = state.approval != null
+    }
+
+    LaunchedEffect(state.hostWriteApproval?.id) {
+        hostWriteSheetVisible = state.hostWriteApproval != null
     }
 
     LaunchedEffect(state.userInputRequest?.requestId?.toString()) {
@@ -304,6 +309,23 @@ fun ChatScreen(
                 onDecision = { decision ->
                     approvalSheetVisible = false
                     vm.decideApproval(decision)
+                },
+            )
+        }
+    }
+
+    state.hostWriteApproval?.takeIf { hostWriteSheetVisible }?.let { hostWrite ->
+        ModalBottomSheet(
+            onDismissRequest = {
+                hostWriteSheetVisible = false
+                vm.decideHostWrite(false)
+            },
+        ) {
+            HostWriteApprovalSheetContent(
+                summary = hostWrite.summary,
+                onDecision = { allow ->
+                    hostWriteSheetVisible = false
+                    vm.decideHostWrite(allow)
                 },
             )
         }
@@ -1701,6 +1723,54 @@ private fun DiffView(patches: List<FilePatch>, maxHeight: androidx.compose.ui.un
                 )
             }
             Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun HostWriteApprovalSheetContent(
+    summary: String,
+    onDecision: (Boolean) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+    ) {
+        Text("允许写入本机工作区？", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Agent 请求修改你授权的文件夹。与 Codex 沙箱权限无关；拒绝不会影响对话本身。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        ) {
+            Text(
+                summary,
+                modifier = Modifier.padding(12.dp),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                maxLines = 8,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.height(18.dp))
+        Button(
+            onClick = { onDecision(true) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("允许一次")
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { onDecision(false) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("拒绝")
         }
     }
 }

@@ -218,6 +218,12 @@ internal class EmbeddedRuntimeInstaller(
             }
             Os.chmod(destination.absolutePath, 0b111000000)
         }
+        // Guest CLI for L1 host workspace IPC (ADR-0011)
+        val hostCli = File(paths.stagingRootfs, "usr/local/bin/agentdeck-host")
+        app.assets.open("wrappers/agentdeck-host").use { input ->
+            FileOutputStream(hostCli).use(input::copyTo)
+        }
+        Os.chmod(hostCli.absolutePath, 0b111101101)
     }
 
     private suspend fun installBaseTools(androidAbi: String) {

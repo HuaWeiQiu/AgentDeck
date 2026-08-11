@@ -27,10 +27,13 @@ import com.agentdeck.app.domain.chat.ChatUiState
 import com.agentdeck.app.domain.chat.ChatUserInputRequest
 import com.agentdeck.app.domain.chat.CodexProtocol
 import com.agentdeck.app.domain.chat.ConversationIdentityPolicy
+import com.agentdeck.app.domain.chat.HostWriteApproval
 import com.agentdeck.app.domain.chat.QueuedChatMessage
+import com.agentdeck.app.domain.host.HostApprovalGateway
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -51,6 +54,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModel(
@@ -101,6 +105,10 @@ class ChatViewModel(
     private var reasoningEffort: String? = null
     private var developerInstructions: String? = null
     private var steerFailedForTurn: String? = null
+    private val hostWriteWaiters = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+    private val hostApprovalGateway = HostApprovalGateway { _, _, summary ->
+        awaitHostWriteApproval(summary)
+    }
 
     init {
         observeMarkdownItems()
@@ -326,6 +334,8 @@ class ChatViewModel(
                         require(value is String) { "developer_instructions 必须是字符串" }
                         value
                     }
+                // L1 host workspace: bind IPC session + inject CLI instructions before thread start
+                bindHostWorkspaceSession(endpoint.instanceKey)
 
                 val linkedThread = ServiceLocator.conversationLinks.threadId(cardId, runtimeKey)
                 val response = if (linkedThread == null) {
@@ -745,6 +755,65 @@ class ChatViewModel(
         }
     }
 
+    /** 宿主工作区写操作审批结果（ADR-0011）。 */
+    fun decideHostWrite(allow: Boolean) {
+        val pending = state.value.hostWriteApproval ?: return
+        mutableState.update { it.copy(hostWriteApproval = null) }
+        hostWriteWaiters.remove(pending.id)?.complete(allow)
+    }
+
+    private suspend fun awaitHostWriteApproval(summary: String): Boolean {
+        val id = UUID.randomUUID().toString()
+        val deferred = CompletableDeferred<Boolean>()
+        hostWriteWaiters[id] = deferred
+        mutableState.update {
+            it.copy(hostWriteApproval = HostWriteApproval(id = id, summary = summary))
+        }
+        return try {
+            deferred.await()
+        } finally {
+            hostWriteWaiters.remove(id)
+            mutableState.update { state ->
+                if (state.hostWriteApproval?.id == id) state.copy(hostWriteApproval = null) else state
+            }
+        }
+    }
+
+    private fun bindHostWorkspaceSession(instanceKey: String) {
+        val experience = ServiceLocator.experienceSettings
+        val enabled = experience.level.value.advancedEnabled &&
+            experience.hostWorkspaceEnabled.value &&
+            ServiceLocator.workspaceGrants.primaryGrant() != null
+        if (!enabled) {
+            ServiceLocator.hostToolRelay.unbind()
+            ServiceLocator.hostApprovalGateway.delegate =
+                com.agentdeck.app.domain.host.DenyAllHostApprovalGateway
+            return
+        }
+        ServiceLocator.hostApprovalGateway.delegate = hostApprovalGateway
+        ServiceLocator.hostToolRelay.bind(
+            conversationId = cardId,
+            instanceId = instanceKey,
+        )
+        developerInstructions = mergeHostWorkspaceInstructions(developerInstructions)
+    }
+
+    private fun mergeHostWorkspaceInstructions(base: String?): String {
+        val block = HOST_WORKSPACE_INSTRUCTIONS
+        if (base.isNullOrBlank()) return block
+        if (base.contains("agentdeck-host workspace.")) return base
+        return base.trimEnd() + "\n\n" + block
+    }
+
+    private fun unbindHostWorkspaceSession() {
+        hostWriteWaiters.values.forEach { it.complete(false) }
+        hostWriteWaiters.clear()
+        ServiceLocator.hostApprovalGateway.delegate =
+            com.agentdeck.app.domain.host.DenyAllHostApprovalGateway
+        ServiceLocator.hostToolRelay.unbind()
+        mutableState.update { it.copy(hostWriteApproval = null) }
+    }
+
     /**
      * Resume a session handed over by [ChatSessionRegistry]: replay items completed
      * while detached, redeliver pending approvals/questions, and keep consuming the
@@ -780,6 +849,7 @@ class ChatViewModel(
             developerInstructions = held.developerInstructions
             threadId = held.threadId
             activeTurnId = held.activeTurnId
+            bindHostWorkspaceSession(held.endpoint.instanceKey)
             ActiveCodexConnections.register(cardId, held.client)
 
             // The registry intentionally does not retain a second copy of transcript
@@ -1257,6 +1327,7 @@ class ChatViewModel(
      * onCleared() stays off the main thread without leaking coroutines.
      */
     private fun disconnectServer() {
+        unbindHostWorkspaceSession()
         ChatSessionRegistry.stopAndRemove(cardId)
         val rpc = client
         client = null
@@ -1287,6 +1358,18 @@ class ChatViewModel(
         private const val INITIAL_MARKDOWN_PREPARSE_COUNT = 6
         private const val INITIAL_HISTORY_TURNS = 50
         private const val MAX_RECONNECT_ATTEMPTS = 8
+        private val HOST_WORKSPACE_INSTRUCTIONS = """
+            AgentDeck Host Workspace (L1) is available for this conversation.
+            Access the user's authorized Android folder ONLY via:
+              agentdeck-host workspace.list --path .
+              agentdeck-host workspace.read --path RELATIVE
+              agentdeck-host workspace.write --path RELATIVE --content TEXT
+              agentdeck-host workspace.mkdir --path RELATIVE
+              agentdeck-host workspace.remove --path RELATIVE
+              agentdeck-host workspace.stat --path RELATIVE
+            Paths are relative to the authorized folder. Do not use /sdcard or absolute host paths.
+            Writes and deletes require interactive user approval. Prefer workspace tools over guessing paths.
+        """.trimIndent()
         private val APPROVAL_DECISIONS = setOf("accept", "acceptForSession", "decline", "cancel")
 
         fun factory(cardId: String): ViewModelProvider.Factory =
@@ -1336,7 +1419,11 @@ private data class MarkdownWindow(
 )
 
 internal fun shouldKeepSessionInBackground(state: ChatUiState): Boolean =
-    state.isStreaming || state.approval != null || state.userInputRequest != null || state.queued != null
+    state.isStreaming ||
+        state.approval != null ||
+        state.hostWriteApproval != null ||
+        state.userInputRequest != null ||
+        state.queued != null
 
 internal fun reconnectDelayMs(attempt: Int): Long {
     val schedule = longArrayOf(1_000L, 2_000L, 5_000L, 10_000L, 30_000L)

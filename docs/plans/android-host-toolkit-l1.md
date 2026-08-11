@@ -1,7 +1,7 @@
 # 计划：Android Host Toolkit L1（安全优先）
 
 - 对应 ADR：`docs/ADR-0011-ANDROID-HOST-TOOLKIT.md`
-- 状态：执行中 — P1–P3 核心与高级设置 L1 UI 已落地；P4 Codex 会话对接与聊天内写审批 UI 待续
+- 状态：**P0–P6 实现完成**（L1 + 文件 IPC + 写审批 UI）；后续仅维护与真机 soak
 - 工作方式：按 `deliver-review-fix-loop` 每阶段 Implement → Test → Review → Fix → Retest → Rereview →（可选）本地 commit
 - 总约束：安全 > 能力；默认拒绝；不实现 L2–L4 执行器
 

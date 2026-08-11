@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""AgentDeck host-workspace CLI (guest side). Talks to Android via /run/agentdeck IPC."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+import uuid
+from pathlib import Path
+
+SESSION = Path("/run/agentdeck/host-session.json")
+REQ_DIR = Path("/run/agentdeck/host-req")
+RES_DIR = Path("/run/agentdeck/host-res")
+TIMEOUT_SEC = 120.0
+
+
+def fail(msg: str, code: int = 2) -> None:
+    print(f"agentdeck-host: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def load_session() -> dict:
+    if not SESSION.is_file():
+        fail("host workspace session not active (enable L1 and reopen chat)")
+    try:
+        data = json.loads(SESSION.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        fail(f"invalid host session: {exc}")
+    for key in ("token", "conversationId", "instanceId"):
+        if not isinstance(data.get(key), str) or not data[key]:
+            fail(f"host session missing {key}")
+    return data
+
+
+def write_request(session: dict, tool: str, args: dict) -> str:
+    REQ_DIR.mkdir(parents=True, exist_ok=True)
+    RES_DIR.mkdir(parents=True, exist_ok=True)
+    req_id = uuid.uuid4().hex
+    payload = {
+        "id": req_id,
+        "tool": tool,
+        "args": args,
+        "token": session["token"],
+        "conversationId": session["conversationId"],
+        "instanceId": session["instanceId"],
+    }
+    path = REQ_DIR / f"{req_id}.json"
+    tmp = REQ_DIR / f".{req_id}.json.tmp"
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+    return req_id
+
+
+def wait_response(req_id: str) -> dict:
+    path = RES_DIR / f"{req_id}.json"
+    deadline = time.time() + TIMEOUT_SEC
+    while time.time() < deadline:
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            finally:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+            return data
+        time.sleep(0.05)
+    fail("host tool timed out waiting for Android", code=3)
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="agentdeck-host")
+    parser.add_argument(
+        "tool",
+        choices=[
+            "workspace.list",
+            "workspace.read",
+            "workspace.write",
+            "workspace.mkdir",
+            "workspace.remove",
+            "workspace.stat",
+        ],
+    )
+    parser.add_argument("--path", default="")
+    parser.add_argument("--content", default=None)
+    parser.add_argument("--encoding", default="utf8")
+    parser.add_argument("--depth", default=None)
+    args = parser.parse_args(argv)
+
+    call_args = {"path": args.path}
+    if args.tool == "workspace.write":
+        if args.content is None:
+            fail("workspace.write requires --content")
+        call_args["content"] = args.content
+        call_args["encoding"] = args.encoding
+    if args.tool == "workspace.list" and args.depth is not None:
+        call_args["depth"] = args.depth
+
+    session = load_session()
+    req_id = write_request(session, args.tool, call_args)
+    result = wait_response(req_id)
+    outcome = result.get("outcome")
+    if outcome == "ok":
+        payload = result.get("payload") or {}
+        # Prefer human-readable fields for the model.
+        if "entries" in payload:
+            print(payload["entries"])
+        elif "bytes" in payload and payload.get("encoding") == "base64":
+            import base64
+
+            raw = base64.b64decode(payload["bytes"])
+            sys.stdout.buffer.write(raw)
+            if not raw.endswith(b"\n"):
+                sys.stdout.buffer.write(b"\n")
+        else:
+            print(json.dumps(payload, ensure_ascii=False))
+        if result.get("truncated"):
+            print("agentdeck-host: output truncated", file=sys.stderr)
+        return 0
+    message = result.get("userMessage") or result.get("code") or "host tool failed"
+    print(f"agentdeck-host: {message}", file=sys.stderr)
+    return 1 if outcome == "denied" else 4
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
