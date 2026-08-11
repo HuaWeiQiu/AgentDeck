@@ -4,6 +4,30 @@ All notable changes to AgentDeck are documented in this file.
 
 ## Unreleased
 
+## 0.2.0-beta.7 - 2026-08-11
+
+### Fixed
+
+- Model service and session editors show the full discovered model list; when discovery
+  succeeds the model field is **read-only** (select only). Free-typed model IDs remain
+  only for providers that do not support `/models`.
+- Runtime rootfs/Codex download URLs, guest apt mirrors, and guest DNS order by **exit IP
+  region** (mainland China vs overseas) instead of always preferring domestic mirrors.
+  The other side stays as fallback.
+
+### Added
+
+- `NetworkRegionDetector`: Cloudflare/ipinfo country probe with 24h cache and
+  locale/timezone soft hint; shared `orderUrlsForRegion` for HTTPS artifact URLs.
+
+### Verified
+
+- JVM unit tests for model list filtering, region URL ordering, apt/DNS region
+  selection, and download fallback.
+- Secure beta installed on ARM64 Vivo V2301A for model picker and region-aware install path.
+
+## 0.2.0-beta.6 - 2026-08-11
+
 ### Added
 
 - Host Toolkit L1 (ADR-0011): fail-closed broker, SAF workspace grants, advanced-settings picker,
@@ -14,6 +38,15 @@ All notable changes to AgentDeck are documented in this file.
 - Lab channel tools: L2 `intent.open_url` / `intent.share_text`, L3 accessibility snapshot/click,
   L4 allowlisted app-UID shell; settings require developer mode + risk acceptance. Secure builds
   keep NoOp executors and channel caps.
+- Offline Vosk Chinese dictation (when system STT is unavailable).
+- Runtime catalog lists domestic mirrors (Tsinghua/Aliyun/USTC, ghfast) plus official URLs.
+
+### Fixed
+
+- Cold-start setup checklist no longer flashes when the environment is already ready;
+  missing runtime still surfaces a clear prompt with install entry.
+- Prefer China download mirrors for rootfs/Codex when probing is unavailable (superseded
+  for ordering by IP region in beta.7).
 
 ## 0.2.0-beta.5 - 2026-08-11
 

@@ -28,3 +28,18 @@ The Ubuntu Base and OpenAI Codex archives are not committed into the APK. The
 app selects the matching ABI from the version catalog in `EmbeddedRuntimeManifest`,
 downloads the fixed files declared for that target, limits the received byte count,
 and verifies exact size and SHA-256 before extraction.
+
+### Download mirrors and network region
+
+Each artifact lists **both** domestic and official HTTPS URLs in the catalog
+(Tsinghua / Aliyun / USTC cdimage mirrors and `ghfast.top` for GitHub, plus
+`cdimage.ubuntu.com` / `github.com`). At install time `NetworkRegionDetector`
+classifies the device exit IP (Cloudflare `cdn-cgi/trace`, then ipinfo, then
+locale/timezone soft hint; result cached 24h):
+
+- **Mainland China (`CN`)**: try domestic URLs first, then official.
+- **Overseas / other countries**: try official first, then domestic as fallback.
+
+Guest apt sources and DNS (`embeddedAptMirrorBases`, `embeddedRuntimeResolvConf`)
+use the same region ordering. Checksums are identical across mirrors; a failed
+host never mixes partial bytes into the next URL.

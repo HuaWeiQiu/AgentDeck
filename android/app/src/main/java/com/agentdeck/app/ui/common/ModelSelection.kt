@@ -3,15 +3,15 @@ package com.agentdeck.app.ui.common
 import com.agentdeck.app.domain.model.ProviderModel
 
 /**
- * 可搜索模型下拉的过滤规则。
+ * 模型下拉可选项。
  *
- * 输入框会回显当前已选 model id；若此时仍按 contains 过滤，列表会被收成「只剩当前项」。
- * 因此当 query 为空或等于已选 id 时展示全部，仅在用户主动改写搜索词时再过滤。
+ * 有发现列表时应只读选择；query 仅在需要时做过滤。query 为空或等于已选 id 时展示全部，
+ * 避免把列表收成「只剩当前项」。
  */
 internal fun filterSelectableModels(
     models: List<ProviderModel>,
-    query: String,
-    selectedId: String?,
+    query: String = "",
+    selectedId: String? = null,
     maxVisible: Int = DEFAULT_MAX_VISIBLE_MODELS,
 ): List<ProviderModel> {
     val trimmed = query.trim()

@@ -13,8 +13,8 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "0.2.0-beta.6"
+        versionCode = 12
+        versionName = "0.2.0-beta.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Secure channel defaults (ADR-0012); lab flavor overrides.
         buildConfigField("boolean", "HOST_LAB", "false")

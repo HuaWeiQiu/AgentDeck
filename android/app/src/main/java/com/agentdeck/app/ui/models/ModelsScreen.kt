@@ -685,26 +685,30 @@ private fun ProviderEditorScreen(
             }
             item {
                 if (draft.models.isNotEmpty()) {
+                    // 已拉取到模型列表：只能从列表选择，不允许手改 ID。
                     ModelDropdown(
                         selected = draft.model,
                         models = draft.models,
                         expanded = modelExpanded,
                         onExpandedChange = { modelExpanded = it },
-                        onQueryChange = {
-                            draft = draft.copy(model = "", error = null)
-                        },
                         onSelect = { model ->
                             draft = draft.copy(model = model.id, error = null)
                             modelExpanded = false
                         },
                     )
                 } else {
+                    // 仅当上游不支持 /models 时，允许手填模型 ID。
                     OutlinedTextField(
                         value = draft.model,
                         onValueChange = { draft = draft.copy(model = it, error = null) },
                         label = { Text("模型 ID") },
                         singleLine = true,
                         enabled = draft.status == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED,
+                        supportingText = if (draft.status == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED) {
+                            { Text("该服务不支持自动发现，请填写模型 ID") }
+                        } else {
+                            null
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -745,47 +749,38 @@ private fun ModelDropdown(
     models: List<ProviderModel>,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
-    onQueryChange: () -> Unit,
     onSelect: (ProviderModel) -> Unit,
 ) {
-    var query by remember(models) { mutableStateOf(selected) }
-    // 验证后 selected 会变，但 models 引用也可能不变；关闭态时与 selected 对齐。
-    LaunchedEffect(selected, expanded) {
-        if (!expanded) query = selected
-    }
-    val filtered = remember(models, query, selected) {
+    val options = remember(models) {
         filterSelectableModels(
             models = models,
-            query = query,
-            selectedId = selected.takeIf { it.isNotBlank() },
+            query = "",
+            selectedId = null,
             maxVisible = DEFAULT_MAX_VISIBLE_MODELS,
         )
     }
+    val selectedLabel = models.firstOrNull { it.id == selected }?.let { model ->
+        if (model.displayName != model.id) "${model.displayName}（${model.id}）" else model.id
+    } ?: selected
     ExposedDropdownMenuBox(
         expanded = expanded,
-        onExpandedChange = { next ->
-            if (!next) query = selected
-            onExpandedChange(next)
-        },
+        onExpandedChange = onExpandedChange,
     ) {
         OutlinedTextField(
-            value = query,
-            onValueChange = {
-                query = it
-                onQueryChange()
-                onExpandedChange(true)
-            },
+            value = selectedLabel,
+            onValueChange = {},
+            readOnly = true,
             label = { Text("默认模型") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             modifier = Modifier
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                 .fillMaxWidth(),
         )
         ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { onExpandedChange(false) },
         ) {
-            filtered.forEach { model ->
+            options.forEach { model ->
                 DropdownMenuItem(
                     text = {
                         Column {
@@ -799,10 +794,7 @@ private fun ModelDropdown(
                             }
                         }
                     },
-                    onClick = {
-                        query = model.id
-                        onSelect(model)
-                    },
+                    onClick = { onSelect(model) },
                 )
             }
         }

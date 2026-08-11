@@ -804,9 +804,6 @@ private fun CardEditorDialog(
     var providerExpanded by remember { mutableStateOf(false) }
     var modelExpanded by remember { mutableStateOf(false) }
     var permissionExpanded by remember { mutableStateOf(false) }
-    var modelQuery by remember(initial.id, initial.profileId) {
-        mutableStateOf(initial.modelId.orEmpty())
-    }
     val selectedAdapter = adapters.firstOrNull { it.recipeId == draft.recipeId }
     val compatibleProfiles = profiles.filter {
         it.type == selectedAdapter?.providerType &&
@@ -829,14 +826,18 @@ private fun CardEditorDialog(
             }
         }
     }.orEmpty()
-    val filteredModels = remember(availableModels, modelQuery, draft.modelId) {
+    // 有模型列表时只展示可选 id，不允许手改；DISCOVERY_UNSUPPORTED 只有默认一项也走选择。
+    val selectableModels = remember(availableModels) {
         filterSelectableModels(
             models = availableModels,
-            query = modelQuery,
-            selectedId = draft.modelId,
+            query = "",
+            selectedId = null,
             maxVisible = DEFAULT_MAX_VISIBLE_MODELS,
         )
     }
+    val selectedModelLabel = availableModels.firstOrNull { it.id == draft.modelId }?.let { model ->
+        if (model.displayName != model.id) "${model.displayName}（${model.id}）" else model.id
+    } ?: draft.modelId.orEmpty()
     val effectivePermission = CodexPermissionLevel.effective(
         draft.permissionLevel,
         defaultPermissionLevel,
@@ -887,7 +888,6 @@ private fun CardEditorDialog(
                                             modelId = null,
                                             workspacePath = adapter.defaultWorkspacePath,
                                         )
-                                        modelQuery = ""
                                         cliExpanded = false
                                     },
                                 )
@@ -917,7 +917,6 @@ private fun CardEditorDialog(
                             text = { Text("当前 Codex 配置") },
                             onClick = {
                                 draft = draft.copy(profileId = null, modelId = null)
-                                modelQuery = ""
                                 providerExpanded = false
                             },
                         )
@@ -929,7 +928,6 @@ private fun CardEditorDialog(
                                         profileId = profile.id,
                                         modelId = profile.defaultModel,
                                     )
-                                    modelQuery = profile.defaultModel
                                     providerExpanded = false
                                 },
                             )
@@ -939,29 +937,23 @@ private fun CardEditorDialog(
                 if (selectedProfile != null) {
                     ExposedDropdownMenuBox(
                         expanded = modelExpanded,
-                        onExpandedChange = { next ->
-                            if (!next) modelQuery = draft.modelId.orEmpty()
-                            modelExpanded = next
-                        },
+                        onExpandedChange = { modelExpanded = it },
                     ) {
                         OutlinedTextField(
-                            value = modelQuery,
-                            onValueChange = { query ->
-                                modelQuery = query
-                                draft = draft.copy(modelId = null)
-                                modelExpanded = true
-                            },
+                            value = selectedModelLabel,
+                            onValueChange = {},
+                            readOnly = true,
                             label = { Text("模型") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(modelExpanded) },
                             modifier = Modifier
-                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
+                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                                 .fillMaxWidth(),
                         )
                         ExposedDropdownMenu(
                             expanded = modelExpanded,
                             onDismissRequest = { modelExpanded = false },
                         ) {
-                            filteredModels.forEach { model ->
+                            selectableModels.forEach { model ->
                                 DropdownMenuItem(
                                     text = {
                                         Column {
@@ -977,7 +969,6 @@ private fun CardEditorDialog(
                                     },
                                     onClick = {
                                         draft = draft.copy(modelId = model.id)
-                                        modelQuery = model.id
                                         modelExpanded = false
                                     },
                                 )
