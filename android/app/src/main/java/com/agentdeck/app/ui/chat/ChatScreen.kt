@@ -2,11 +2,13 @@ package com.agentdeck.app.ui.chat
 
 import android.Manifest
 import android.content.ClipData
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.speech.RecognitionListener
+import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.widget.Toast
@@ -1424,7 +1426,15 @@ private fun VoiceInputButton(
     var listening by remember { mutableStateOf(false) }
     val baseBeforeListen = remember { mutableStateOf("") }
     val recognizerRef = remember { arrayOfNulls<SpeechRecognizer>(1) }
-    val available = remember(context) { SpeechRecognizer.isRecognitionAvailable(context) }
+    val speechComponent = remember(context) { resolveSpeechRecognitionComponent(context) }
+    val intentSpeechAvailable = remember(context) {
+        context.packageManager
+            .queryIntentActivities(
+                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH),
+                PackageManager.MATCH_DEFAULT_ONLY,
+            )
+            .isNotEmpty()
+    }
 
     fun mergeVoiceText(spoken: String) {
         val base = baseBeforeListen.value
@@ -1444,10 +1454,64 @@ private fun VoiceInputButton(
         }
     }
 
+    val intentSpeechLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        listening = false
+        val recognized = result.data
+            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+        if (!recognized.isNullOrBlank()) {
+            mergeVoiceText(recognized)
+        }
+    }
+
+    fun startIntentSpeechFallback() {
+        baseBeforeListen.value = composerState.value
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+            )
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "请说话")
+            // Prefer Google voice search when present (common on CN ROMs with broken defaults).
+            if (runCatching {
+                    context.packageManager.getPackageInfo(
+                        "com.google.android.googlequicksearchbox",
+                        0,
+                    )
+                }.isSuccess
+            ) {
+                setPackage("com.google.android.googlequicksearchbox")
+            }
+        }
+        listening = true
+        try {
+            intentSpeechLauncher.launch(intent)
+        } catch (_: Exception) {
+            listening = false
+            Toast.makeText(
+                context,
+                "无法启动语音识别。可安装/启用 Google 或系统语音服务后再试",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
     fun startVoice() {
         val recognizer = recognizerRef[0]
         if (recognizer == null) {
-            Toast.makeText(context, "当前设备不支持语音输入", Toast.LENGTH_SHORT).show()
+            if (intentSpeechAvailable || speechComponent != null) {
+                startIntentSpeechFallback()
+            } else {
+                Toast.makeText(
+                    context,
+                    "当前没有可用的语音识别服务（可安装 Google 语音或系统语音输入）",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
             return
         }
         baseBeforeListen.value = composerState.value
@@ -1465,16 +1529,22 @@ private fun VoiceInputButton(
             recognizer.startListening(intent)
         } catch (_: Exception) {
             listening = false
-            Toast.makeText(context, "无法启动语音识别", Toast.LENGTH_SHORT).show()
+            startIntentSpeechFallback()
         }
     }
 
-    DisposableEffect(available) {
-        if (!available) {
-            onDispose { }
-        } else {
-            val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
-            recognizerRef[0] = recognizer
+    DisposableEffect(speechComponent) {
+        val recognizer = runCatching {
+            if (speechComponent != null) {
+                SpeechRecognizer.createSpeechRecognizer(context, speechComponent)
+            } else if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                SpeechRecognizer.createSpeechRecognizer(context)
+            } else {
+                null
+            }
+        }.getOrNull()
+        recognizerRef[0] = recognizer
+        if (recognizer != null) {
             recognizer.setRecognitionListener(
                 object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) = Unit
@@ -1503,30 +1573,39 @@ private fun VoiceInputButton(
 
                     override fun onError(error: Int) {
                         listening = false
-                        val message = when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH -> "没听清，请再试"
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "没有检测到语音"
-                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "需要麦克风权限"
-                            SpeechRecognizer.ERROR_NETWORK,
-                            SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
-                            -> "语音服务网络异常"
+                        when (error) {
                             SpeechRecognizer.ERROR_CLIENT,
                             SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
-                            -> null
-                            else -> "语音识别失败"
-                        }
-                        if (message != null) {
-                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                            -> return
+                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
+                                Toast.makeText(context, "需要麦克风权限", Toast.LENGTH_SHORT).show()
+                                return
+                            }
+                            SpeechRecognizer.ERROR_NETWORK,
+                            SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
+                            SpeechRecognizer.ERROR_SERVER,
+                            -> {
+                                // Fall back to the system UI path once.
+                                startIntentSpeechFallback()
+                                return
+                            }
+                            SpeechRecognizer.ERROR_NO_MATCH ->
+                                Toast.makeText(context, "没听清，请再试", Toast.LENGTH_SHORT).show()
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                                Toast.makeText(context, "没有检测到语音", Toast.LENGTH_SHORT).show()
+                            else ->
+                                Toast.makeText(context, "语音识别失败，请再试", Toast.LENGTH_SHORT)
+                                    .show()
                         }
                     }
                 },
             )
-            onDispose {
-                runCatching { recognizer.cancel() }
-                runCatching { recognizer.destroy() }
-                recognizerRef[0] = null
-                listening = false
-            }
+        }
+        onDispose {
+            runCatching { recognizer?.cancel() }
+            runCatching { recognizer?.destroy() }
+            recognizerRef[0] = null
+            listening = false
         }
     }
 
@@ -1544,10 +1623,6 @@ private fun VoiceInputButton(
         onClick = {
             if (listening) {
                 stopVoice(cancel = true)
-                return@FilledTonalIconButton
-            }
-            if (!available) {
-                Toast.makeText(context, "当前设备不支持语音输入", Toast.LENGTH_SHORT).show()
                 return@FilledTonalIconButton
             }
             val granted = ContextCompat.checkSelfPermission(
@@ -1569,6 +1644,25 @@ private fun VoiceInputButton(
             Icon(Icons.Filled.Mic, contentDescription = "语音输入")
         }
     }
+}
+
+/** Prefer Google STT when present; otherwise first exported RecognitionService. */
+private fun resolveSpeechRecognitionComponent(context: android.content.Context): ComponentName? {
+    val intent = Intent(RecognitionService.SERVICE_INTERFACE)
+    val services = context.packageManager.queryIntentServices(intent, PackageManager.MATCH_ALL)
+    if (services.isEmpty()) return null
+    val preferred = services.firstOrNull { resolveInfo ->
+        val pkg = resolveInfo.serviceInfo?.packageName.orEmpty()
+        pkg.contains("google", ignoreCase = true) ||
+            pkg.contains("voicesearch", ignoreCase = true)
+    } ?: services.firstOrNull { resolveInfo ->
+        val pkg = resolveInfo.serviceInfo?.packageName.orEmpty()
+        // Skip assistants that register a RecognitionService but are not real STT engines.
+        !pkg.contains("claude", ignoreCase = true) &&
+            !pkg.contains("grok", ignoreCase = true)
+    } ?: services.first()
+    val info = preferred.serviceInfo ?: return null
+    return ComponentName(info.packageName, info.name)
 }
 
 @Composable
