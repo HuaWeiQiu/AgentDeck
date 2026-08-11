@@ -19,8 +19,18 @@ class SetupCoordinator(
     private val scope: CoroutineScope,
     private val managedProviderReady: suspend () -> Boolean = { false },
     private val onReport: (EnvironmentReport) -> Unit = {},
+    previousCanLaunchSessions: Boolean = false,
+    previousFullyReady: Boolean = false,
 ) {
-    private val mutableState = MutableStateFlow(SetupState(report = scanner.initialReport()))
+    private val mutableState = MutableStateFlow(
+        SetupState(
+            report = when {
+                previousFullyReady -> optimisticReport(fullyReady = true)
+                previousCanLaunchSessions -> optimisticReport(fullyReady = false)
+                else -> scanner.initialReport()
+            },
+        ),
+    )
     private var scanJob: Job? = null
     private var installJob: Job? = null
     private var lastScanCompletedAtMs: Long = 0L
@@ -41,12 +51,16 @@ class SetupCoordinator(
         ) {
             return
         }
-        mutableState.update {
-            it.copy(
-                isScanning = true,
-                message = "正在检测 Codex 运行环境",
-                error = null,
-            )
+        // 已就绪时后台静默复查，不把 isScanning 打到 UI，避免「未就绪」横幅闪一下。
+        val silent = !force && mutableState.value.canStartChat
+        if (!silent) {
+            mutableState.update {
+                it.copy(
+                    isScanning = true,
+                    message = "正在检测 Codex 运行环境",
+                    error = null,
+                )
+            }
         }
         scanJob = scope.launch {
             val report = safeScan()
@@ -139,6 +153,46 @@ class SetupCoordinator(
         private const val CODEX_RECIPE_ID = "recipe_codex"
         private const val MAX_ERROR_LENGTH = 480
         private const val SCAN_CACHE_WINDOW_MS = 45_000L
+
+        /**
+         * Seed UI with last-known-good checks so cold start does not flash
+         * "runtime not ready" while a background doctor runs.
+         */
+        internal fun optimisticReport(fullyReady: Boolean): EnvironmentReport {
+            val launchIds = listOf(
+                "embedded_supported",
+                "embedded_runtime",
+                "ubuntu_installed",
+                "embedded_tools",
+                "codex_installed",
+                "codex_wrapper",
+            )
+            val checks = buildList {
+                launchIds.forEach { id ->
+                    add(
+                        com.agentdeck.app.domain.model.EnvironmentCheck(
+                            id = id,
+                            label = id,
+                            status = EnvironmentCheckStatus.READY,
+                            detail = "沿用上次检查结果",
+                        ),
+                    )
+                }
+                add(
+                    com.agentdeck.app.domain.model.EnvironmentCheck(
+                        id = "codex_authenticated",
+                        label = "codex_authenticated",
+                        status = if (fullyReady) {
+                            EnvironmentCheckStatus.READY
+                        } else {
+                            EnvironmentCheckStatus.ACTION_REQUIRED
+                        },
+                        detail = if (fullyReady) "沿用上次检查结果" else "待确认模型连接",
+                    ),
+                )
+            }
+            return EnvironmentReport(checks)
+        }
     }
 }
 

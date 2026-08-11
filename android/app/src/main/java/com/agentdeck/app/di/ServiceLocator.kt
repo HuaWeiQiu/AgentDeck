@@ -113,6 +113,8 @@ object ServiceLocator {
                 }
             },
             onReport = onboarding::record,
+            previousCanLaunchSessions = onboarding.lastCanLaunchSessions(),
+            previousFullyReady = onboarding.lastFullyReady(),
         )
     }
     val conversationLinks: ConversationLinkRepository by lazy { ConversationLinkRepository(app) }

@@ -456,6 +456,8 @@ internal fun shouldShowSetupBanner(
     profiles: List<ProviderProfile>,
 ): Boolean {
     if (setupState.isReady) return false
+    // Don't flash "not ready" while a background re-check is running and launch is already OK.
+    if (setupState.isScanning && setupState.canStartChat) return false
     return cards.none { card ->
         val profile = card.profileId?.let { profileId ->
             profiles.firstOrNull { it.id == profileId }
