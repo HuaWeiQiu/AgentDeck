@@ -70,20 +70,15 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(vertical = AppSpacing.sm),
         ) {
-            item { SectionLabel("连接与运行") }
+            item { SectionLabel("开始使用") }
             item {
                 SettingsDestination(
-                    title = "模型连接",
-                    summary = "ChatGPT、OpenAI API 与第三方 Responses 服务",
-                    icon = { Icon(Icons.Filled.Hub, contentDescription = null) },
-                    onClick = onOpenModels,
-                )
-            }
-            item { HorizontalDivider() }
-            item {
-                SettingsDestination(
-                    title = "内嵌运行环境",
-                    summary = if (state.canStartChat) "本机 Runtime · 可用" else "本机 Runtime · 需要完成准备",
+                    title = "运行环境",
+                    summary = if (state.canStartChat) {
+                        "已就绪，可以创建对话"
+                    } else {
+                        "需要安装或修复后才能对话"
+                    },
                     icon = {
                         Icon(
                             if (state.canStartChat) Icons.Filled.CheckCircle else Icons.Filled.ErrorOutline,
@@ -99,24 +94,35 @@ fun SettingsScreen(
                 )
             }
             item { HorizontalDivider() }
-            item { SectionLabel("对话与 Codex") }
             item {
                 SettingsDestination(
-                    title = "对话默认值",
-                    summary = "${permissionPresentation.title} · " +
-                        if (experienceLevel.advancedEnabled) "显示高级选项" else "标准选项",
+                    title = "模型服务",
+                    summary = "登录 ChatGPT 或填写 API 密钥",
+                    icon = { Icon(Icons.Filled.Hub, contentDescription = null) },
+                    onClick = onOpenModels,
+                )
+            }
+            item { HorizontalDivider() }
+            item { SectionLabel("会话") }
+            item {
+                SettingsDestination(
+                    title = "会话高级设置",
+                    summary = "权限默认「${permissionPresentation.title}」· " +
+                        if (experienceLevel.advancedEnabled) "已开启高级选项" else "标准模式",
                     icon = { Icon(Icons.Filled.Tune, contentDescription = null) },
                     onClick = onOpenConversationDefaults,
                 )
             }
-            item { HorizontalDivider() }
-            item {
-                SettingsDestination(
-                    title = "Codex 参数",
-                    summary = "agentdeck.config.toml · 可选参数 · 启动前同步",
-                    icon = { Icon(Icons.Filled.Description, contentDescription = null) },
-                    onClick = onOpenCodexConfig,
-                )
+            if (experienceLevel.advancedEnabled) {
+                item { HorizontalDivider() }
+                item {
+                    SettingsDestination(
+                        title = "Codex 配置文件",
+                        summary = "给熟悉配置的人用，一般可忽略",
+                        icon = { Icon(Icons.Filled.Description, contentDescription = null) },
+                        onClick = onOpenCodexConfig,
+                    )
+                }
             }
             item { HorizontalDivider() }
             item { SectionLabel("关于") }
@@ -171,7 +177,7 @@ fun ConversationDefaultsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("对话默认值") },
+                title = { Text("会话高级设置") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -186,8 +192,10 @@ fun ConversationDefaultsScreen(
         ) {
             item {
                 ListItem(
-                    headlineContent = { Text("显示高级选项") },
-                    supportingContent = { Text("在对话编辑器中显示项目目录等技术选项") },
+                    headlineContent = { Text("开启高级选项") },
+                    supportingContent = {
+                        Text("本机工作区、项目路径等；新手可保持关闭")
+                    },
                     leadingContent = { Icon(Icons.Filled.Memory, contentDescription = null) },
                     trailingContent = {
                         Switch(
@@ -201,7 +209,7 @@ fun ConversationDefaultsScreen(
                 )
             }
             item { HorizontalDivider() }
-            item { SectionLabel("默认 Codex 权限") }
+            item { SectionLabel("新会话默认权限") }
             CodexPermissionLevel.entries.forEach { level ->
                 item(key = level.name) {
                     val presentation = codexPermissionPresentation(level)

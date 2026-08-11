@@ -103,9 +103,27 @@ fun SessionsScreen(
     var editor by remember { mutableStateOf<CardDraft?>(null) }
     var deleting by remember { mutableStateOf<AgentCard?>(null) }
     var renaming by remember { mutableStateOf<SessionCardUi?>(null) }
+    var runtimeMissingDialog by remember { mutableStateOf(false) }
     val showSetupBanner = shouldShowSetupBanner(setupState, cardItems.map { it.card }, profiles)
     val activeItems = remember(visibleItems) { visibleItems.filter { !it.card.archived } }
     val archivedItems = remember(visibleItems) { visibleItems.filter { it.card.archived } }
+    val runtimeReady = setupState.canStartChat
+
+    fun tryCreateSession() {
+        if (!runtimeReady) {
+            runtimeMissingDialog = true
+        } else {
+            editor = vm.newDraft()
+        }
+    }
+
+    fun tryOpenChat(cardId: String) {
+        if (!runtimeReady) {
+            runtimeMissingDialog = true
+        } else {
+            onOpenChat(cardId)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -113,10 +131,10 @@ fun SessionsScreen(
                 title = { Text("对话") },
                 actions = {
                     IconButton(
-                        onClick = { editor = vm.newDraft() },
+                        onClick = { tryCreateSession() },
                         enabled = vm.availableAdapters.isNotEmpty(),
                     ) {
-                        Icon(Icons.Filled.Add, contentDescription = "新建对话")
+                        Icon(Icons.Filled.Add, contentDescription = "新建会话")
                     }
                 },
             )
@@ -134,6 +152,7 @@ fun SessionsScreen(
                         SetupBanner(
                             state = setupState,
                             onClick = onOpenSetup,
+                            titleOverride = "运行环境未就绪",
                         )
                     }
                 }
@@ -182,22 +201,27 @@ fun SessionsScreen(
                         )
                         Spacer(Modifier.height(AppSpacing.md))
                         Text(
-                            "暂无对话",
+                            "还没有会话",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.height(AppSpacing.xs))
                         Text(
-                            "新建一个对话，开始在手机上使用 Codex",
+                            if (runtimeReady) {
+                                "点右上角 + 新建会话，开始使用"
+                            } else {
+                                "请先准备运行环境，再新建会话"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(AppSpacing.lg))
                         Button(
-                            onClick = { editor = vm.newDraft() },
+                            onClick = { tryCreateSession() },
                             enabled = vm.availableAdapters.isNotEmpty(),
                         ) {
-                            Text("新建对话")
+                            Text(if (runtimeReady) "新建会话" else "准备运行环境")
                         }
                     }
                 }
@@ -222,7 +246,7 @@ fun SessionsScreen(
                         if (!canStartConversation(setupState, item.profile)) {
                             onOpenSetup()
                         } else {
-                            onOpenChat(item.card.id)
+                            tryOpenChat(item.card.id)
                         }
                     },
                     onEdit = { editor = vm.editDraft(item.card) },
@@ -273,7 +297,7 @@ fun SessionsScreen(
                             if (!canStartConversation(setupState, item.profile)) {
                                 onOpenSetup()
                             } else {
-                                onOpenChat(item.card.id)
+                                tryOpenChat(item.card.id)
                             }
                         },
                         onEdit = { editor = vm.editDraft(item.card) },
@@ -392,6 +416,33 @@ fun SessionsScreen(
             },
         )
     }
+
+    if (runtimeMissingDialog) {
+        AlertDialog(
+            onDismissRequest = { runtimeMissingDialog = false },
+            title = { Text("需要先准备运行环境") },
+            text = {
+                Text(
+                    "本机还没有装好对话所需的运行环境。可以现在去安装，也可以稍后在「设置 → 运行环境」里完成。",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        runtimeMissingDialog = false
+                        onOpenSetup()
+                    },
+                ) {
+                    Text("去安装")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { runtimeMissingDialog = false }) {
+                    Text("稍后")
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -463,6 +514,7 @@ internal fun conversationSummary(
 private fun SetupBanner(
     state: SetupState,
     onClick: () -> Unit,
+    titleOverride: String? = null,
 ) {
     val presentation = customerSetupPresentation(state)
     Surface(
@@ -483,12 +535,16 @@ private fun SetupBanner(
             Spacer(Modifier.width(AppSpacing.md))
             Column(Modifier.weight(1f)) {
                 Text(
-                    presentation.title,
+                    titleOverride ?: presentation.title,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                 )
                 Text(
-                    presentation.summary,
+                    if (titleOverride != null) {
+                        "点此安装或修复，装好后即可新建会话"
+                    } else {
+                        presentation.summary
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                     maxLines = 2,
