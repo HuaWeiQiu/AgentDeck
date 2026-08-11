@@ -1,12 +1,15 @@
 package com.agentdeck.app.data.voice
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -24,6 +27,7 @@ class VoskDictationEngine(
     context: Context,
     private val modelStore: VoskModelStore = VoskModelStore(context),
 ) {
+    private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
     private val active = AtomicBoolean(false)
 
@@ -183,6 +187,12 @@ class VoskDictationEngine(
     }
 
     private fun openRecorder(bufferSize: Int): AudioRecord? {
+        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "RECORD_AUDIO not granted")
+            return null
+        }
         val sources = intArrayOf(
             MediaRecorder.AudioSource.MIC,
             MediaRecorder.AudioSource.VOICE_RECOGNITION,
@@ -198,6 +208,8 @@ class VoskDictationEngine(
                     AudioFormat.ENCODING_PCM_16BIT,
                     bufferSize,
                 )
+            } catch (_: SecurityException) {
+                return null
             } catch (_: Exception) {
                 null
             }
