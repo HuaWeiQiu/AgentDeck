@@ -78,20 +78,30 @@ class CodexRpcTimeoutException(
 internal sealed interface CodexSocketEvent {
     data class Text(val value: String) : CodexSocketEvent
     data class Disconnected(val message: String, val cause: Throwable? = null) : CodexSocketEvent
+    data class Handoff(
+        val onDrained: () -> Unit,
+        val acknowledgement: CompletableDeferred<Unit>,
+    ) : CodexSocketEvent
 }
 
 internal interface CodexRpcTransport : AutoCloseable {
     val events: Flow<CodexSocketEvent>
     fun send(text: String): Boolean
+
+    /** The fence shares the socket ingress queue so accepted messages cannot overtake it. */
+    fun tryEnqueueHandoff(event: CodexSocketEvent.Handoff): Boolean
 }
 
 private class OkHttpCodexTransport(
     private val socket: WebSocket,
-    eventChannel: Channel<CodexSocketEvent>,
+    private val eventChannel: Channel<CodexSocketEvent>,
 ) : CodexRpcTransport {
     override val events: Flow<CodexSocketEvent> = eventChannel.receiveAsFlow()
 
     override fun send(text: String): Boolean = socket.send(text)
+
+    override fun tryEnqueueHandoff(event: CodexSocketEvent.Handoff): Boolean =
+        eventChannel.trySend(event).isSuccess
 
     override fun close() {
         if (!socket.close(NORMAL_CLOSE_CODE, "AgentDeck closed")) {
@@ -212,8 +222,8 @@ class CodexRpcClient internal constructor(
     internal fun tryEnqueueEventHandoff(onDrained: () -> Unit = {}): CompletableDeferred<Unit>? {
         if (closed.get()) return null
         val acknowledgement = CompletableDeferred<Unit>()
-        val event = CodexInbound.Handoff(onDrained, acknowledgement)
-        return acknowledgement.takeIf { inbound.trySend(event).isSuccess }
+        val event = CodexSocketEvent.Handoff(onDrained, acknowledgement)
+        return acknowledgement.takeIf { transport.tryEnqueueHandoff(event) }
     }
 
     init {
@@ -297,6 +307,9 @@ class CodexRpcClient internal constructor(
                     is CodexSocketEvent.Disconnected -> throw IllegalStateException(
                         event.message,
                         event.cause,
+                    )
+                    is CodexSocketEvent.Handoff -> inbound.send(
+                        CodexInbound.Handoff(event.onDrained, event.acknowledgement),
                     )
                 }
             }

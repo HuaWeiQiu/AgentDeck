@@ -282,6 +282,9 @@ class CodexRpcClientTest {
 
         override fun send(text: String): Boolean = sendSucceeds && sent.trySend(text).isSuccess
 
+        override fun tryEnqueueHandoff(event: CodexSocketEvent.Handoff): Boolean =
+            incoming.trySend(event).isSuccess
+
         suspend fun receive(payload: JSONObject) {
             incoming.send(CodexSocketEvent.Text(payload.toString()))
         }

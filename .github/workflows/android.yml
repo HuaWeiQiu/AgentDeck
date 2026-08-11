@@ -57,3 +57,5 @@ jobs:
             android/app/build/reports/lint-results-secureBeta.html
             android/app/build/reports/lint-results-labBeta.html
             android/app/build/reports/stability/host-matrix.json
+            android/app/build/reports/tests/
+            android/app/build/test-results/
