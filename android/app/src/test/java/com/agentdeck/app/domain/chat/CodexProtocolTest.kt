@@ -1,6 +1,7 @@
 package com.agentdeck.app.domain.chat
 
 import com.agentdeck.app.data.chat.RpcRequestId
+import com.agentdeck.app.domain.extensions.McpServerApprovalIdentity
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import org.json.JSONArray
 import org.json.JSONObject
@@ -366,6 +367,31 @@ class CodexProtocolTest {
     }
 
     @Test
+    fun `failed mcp tool item keeps the server error for diagnostics`() {
+        val item = requireNotNull(
+            CodexProtocol.item(
+                JSONObject(
+                    """
+                    {
+                      "id":"mcp-1",
+                      "type":"mcpToolCall",
+                      "server":"deepwiki",
+                      "tool":"read_wiki_structure",
+                      "status":"failed",
+                      "error":{"message":"upstream unavailable"}
+                    }
+                    """.trimIndent(),
+                ),
+            ),
+        )
+
+        assertEquals(ChatItemKind.TOOL, item.kind)
+        assertEquals("deepwiki / read_wiki_structure", item.text)
+        assertEquals("failed", item.status)
+        assertEquals("upstream unavailable", item.detail)
+    }
+
+    @Test
     fun `recommended proot runtime asks before unsafe operations`() {
         val started = CodexProtocol.threadStartParams("/root/project")
         val resumed = CodexProtocol.threadResumeParams("thread-1", "/root/project")
@@ -488,9 +514,21 @@ class CodexProtocolTest {
 
         assertEquals("untrusted", readOnly.getString("approvalPolicy"))
         assertEquals("untrusted", askFirst.getString("approvalPolicy"))
-        assertEquals("never", fullAccess.getString("approvalPolicy"))
+        val fullAccessPolicy = fullAccess.getJSONObject("approvalPolicy").getJSONObject("granular")
+        assertEquals(false, fullAccessPolicy.getBoolean("sandbox_approval"))
+        assertEquals(false, fullAccessPolicy.getBoolean("rules"))
+        assertEquals(false, fullAccessPolicy.getBoolean("skill_approval"))
+        assertEquals(false, fullAccessPolicy.getBoolean("request_permissions"))
+        assertEquals(true, fullAccessPolicy.getBoolean("mcp_elicitations"))
         assertEquals("externalSandbox", readOnly.getJSONObject("sandboxPolicy").getString("type"))
         assertEquals(true, CodexProtocol.shouldAutoDecline(CodexPermissionLevel.READ_ONLY))
+        assertEquals(
+            false,
+            CodexProtocol.shouldAutoDecline(
+                CodexPermissionLevel.READ_ONLY,
+                ApprovalKind.MCP_TOOL,
+            ),
+        )
         assertEquals(false, CodexProtocol.shouldAutoDecline(CodexPermissionLevel.ASK_FIRST))
         assertEquals(false, CodexProtocol.shouldAutoDecline(CodexPermissionLevel.FULL_ACCESS))
     }
@@ -515,6 +553,280 @@ class CodexProtocolTest {
         assertEquals(true, accepted.getJSONObject("permissions").getJSONObject("network").getBoolean("enabled"))
         assertEquals(0, declined.getJSONObject("permissions").length())
         assertNull(declined.opt("decision"))
+    }
+
+    @Test
+    fun `MCP tool elicitation parses safe approval details and advertised session scope`() {
+        val params = JSONObject()
+            .put("threadId", "thread-1")
+            .put("turnId", "turn-1")
+            .put("serverName", "agentdeck_ext_deepwiki")
+            .put("mode", "form")
+            .put("message", "Allow the server to run tool \"read_wiki_structure\"?")
+            .put(
+                "requestedSchema",
+                JSONObject().put("type", "object").put("properties", JSONObject()),
+            )
+            .put(
+                "_meta",
+                JSONObject()
+                    .put("codex_approval_kind", "mcp_tool_call")
+                    .put("persist", JSONArray().put("session").put("always"))
+                    .put("tool_title", "Read wiki structure")
+                    .put(
+                        "tool_params_display",
+                        JSONArray().put(
+                            JSONObject()
+                                .put("name", "repoName")
+                                .put("display_name", "Repository")
+                                .put("value", "HuaWeiQiu/AgentDeck"),
+                        ),
+                    ),
+            )
+
+        val approval = CodexProtocol.parseMcpToolApproval(
+            RpcRequestId.Number(9),
+            params,
+            mapOf(
+                "agentdeck_ext_deepwiki" to McpServerApprovalIdentity(
+                    displayName = "DeepWiki",
+                    enabledToolNames = setOf("read_wiki_structure"),
+                ),
+            ),
+        )
+
+        assertTrue(approval != null)
+        approval!!
+        assertEquals(ApprovalKind.MCP_TOOL, approval.kind)
+        assertEquals("允许调用 MCP 工具？", approval.title)
+        assertTrue(approval.detail.startsWith("服务：DeepWiki\n工具：read_wiki_structure"))
+        assertTrue(approval.detail.contains("服务标题：Read wiki structure"))
+        assertTrue(approval.detail.contains("Repository: \"HuaWeiQiu/AgentDeck\""))
+        assertTrue(approval.detail.indexOf("参数：") < approval.detail.indexOf("请求："))
+        assertTrue(approval.supportsSessionApproval)
+    }
+
+    @Test
+    fun `MCP approval keeps trusted scope visible before hostile message`() {
+        val params = JSONObject()
+            .put("serverName", "managed_server")
+            .put("mode", "form")
+            .put("message", (1..20).joinToString("\n") { "untrusted line $it" })
+            .put(
+                "requestedSchema",
+                JSONObject().put("type", "object").put("properties", JSONObject()),
+            )
+            .put(
+                "_meta",
+                JSONObject()
+                    .put("codex_approval_kind", "mcp_tool_call")
+                    .put("tool_title", "Friendly read-only title\n\u202E")
+                    .put("tool_name", "delete_repo")
+                    .put("tool_params", JSONObject().put("repoName", "target")),
+            )
+
+        val approval = CodexProtocol.parseMcpToolApproval(
+            RpcRequestId.Number(11),
+            params,
+            mapOf(
+                "managed_server" to McpServerApprovalIdentity(
+                    displayName = "Repository Admin",
+                    enabledToolNames = setOf("delete_repo"),
+                ),
+            ),
+        )
+
+        assertTrue(approval != null)
+        approval!!
+        assertEquals("允许调用 MCP 工具？", approval.title)
+        assertTrue(approval.detail.startsWith("服务：Repository Admin\n工具：delete_repo"))
+        assertTrue(approval.detail.indexOf("参数：") < approval.detail.indexOf("请求："))
+        assertFalse(approval.detail.substringBefore("请求：").contains('\u202E'))
+    }
+
+    @Test
+    fun `managed MCP approval rejects a tool outside the local allowlist`() {
+        val params = JSONObject()
+            .put("serverName", "managed_server")
+            .put("mode", "form")
+            .put("message", "Allow tool \"delete_repo\" after read_docs completes?")
+            .put(
+                "requestedSchema",
+                JSONObject().put("type", "object").put("properties", JSONObject()),
+            )
+            .put(
+                "_meta",
+                JSONObject()
+                    .put("codex_approval_kind", "mcp_tool_call")
+                    .put("tool_name", "delete_repo"),
+            )
+
+        assertNull(
+            CodexProtocol.parseMcpToolApproval(
+                RpcRequestId.Number(12),
+                params,
+                mapOf(
+                    "managed_server" to McpServerApprovalIdentity(
+                        displayName = "Docs",
+                        enabledToolNames = setOf("read_docs"),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `managed MCP approval rejects an empty local allowlist`() {
+        val params = JSONObject()
+            .put("serverName", "managed_server")
+            .put("mode", "form")
+            .put("message", "Allow tool \"delete_repo\"?")
+            .put(
+                "requestedSchema",
+                JSONObject().put("type", "object").put("properties", JSONObject()),
+            )
+            .put(
+                "_meta",
+                JSONObject()
+                    .put("codex_approval_kind", "mcp_tool_call")
+                    .put("tool_name", "delete_repo"),
+            )
+
+        assertNull(
+            CodexProtocol.parseMcpToolApproval(
+                RpcRequestId.Number(13),
+                params,
+                mapOf(
+                    "managed_server" to McpServerApprovalIdentity(
+                        displayName = "Admin",
+                        enabledToolNames = emptySet(),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `Secure MCP approval rejects an unknown server identity`() {
+        val params = JSONObject()
+            .put("serverName", "unmanaged_server")
+            .put("mode", "form")
+            .put("message", "Allow tool \"read_docs\"?")
+            .put(
+                "requestedSchema",
+                JSONObject().put("type", "object").put("properties", JSONObject()),
+            )
+            .put(
+                "_meta",
+                JSONObject()
+                    .put("codex_approval_kind", "mcp_tool_call")
+                    .put("tool_name", "read_docs"),
+            )
+
+        assertNull(
+            CodexProtocol.parseMcpToolApproval(
+                RpcRequestId.Number(14),
+                params,
+                managedServers = emptyMap(),
+                requireManagedIdentity = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `Lab local MCP without discovery keeps per-call approval usable`() {
+        val params = JSONObject()
+            .put("serverName", "local_server")
+            .put("mode", "form")
+            .put("message", "Allow tool \"local_status\"?")
+            .put(
+                "requestedSchema",
+                JSONObject().put("type", "object").put("properties", JSONObject()),
+            )
+            .put(
+                "_meta",
+                JSONObject()
+                    .put("codex_approval_kind", "mcp_tool_call")
+                    .put("tool_name", "local_status"),
+            )
+
+        val approval = CodexProtocol.parseMcpToolApproval(
+            RpcRequestId.Number(15),
+            params,
+            mapOf(
+                "local_server" to McpServerApprovalIdentity(
+                    displayName = "Local diagnostics",
+                    enabledToolNames = emptySet(),
+                    enforceAllowlist = false,
+                ),
+            ),
+        )
+
+        assertEquals(ApprovalKind.MCP_TOOL, approval?.kind)
+        assertTrue(approval?.detail?.startsWith("服务：Local diagnostics\n工具：local_status") == true)
+    }
+
+    @Test
+    fun `MCP tool approvals use elicitation response schema`() {
+        val approval = ChatApproval(
+            requestId = RpcRequestId.Text("mcp-approval"),
+            kind = ApprovalKind.MCP_TOOL,
+            title = "MCP",
+            detail = "call",
+            supportsSessionApproval = true,
+        )
+
+        val once = CodexProtocol.approvalResponse(approval, "accept")
+        val session = CodexProtocol.approvalResponse(approval, "acceptForSession")
+        val declined = CodexProtocol.approvalResponse(approval, "decline")
+        val cancelled = CodexProtocol.approvalResponse(approval, "cancel")
+
+        assertEquals("accept", once.getString("action"))
+        assertTrue(once.isNull("content"))
+        assertTrue(once.isNull("_meta"))
+        assertEquals("session", session.getJSONObject("_meta").getString("persist"))
+        assertEquals("decline", declined.getString("action"))
+        assertEquals("cancel", cancelled.getString("action"))
+        assertNull(once.opt("decision"))
+    }
+
+    @Test
+    fun `non-empty MCP form is not mistaken for a tool approval`() {
+        val params = JSONObject()
+            .put("serverName", "remote")
+            .put("mode", "form")
+            .put("message", "Enter a value")
+            .put(
+                "requestedSchema",
+                JSONObject()
+                    .put("type", "object")
+                    .put("properties", JSONObject().put("value", JSONObject().put("type", "string"))),
+            )
+            .put("_meta", JSONObject().put("codex_approval_kind", "mcp_tool_call"))
+
+        assertNull(CodexProtocol.parseMcpToolApproval(RpcRequestId.Number(10), params))
+    }
+
+    @Test
+    fun `unsupported MCP elicitation has a valid cancel response`() {
+        val response = CodexProtocol.cancelMcpElicitationResponse()
+
+        assertEquals("cancel", response.getString("action"))
+        assertTrue(response.isNull("content"))
+        assertTrue(response.isNull("_meta"))
+    }
+
+    @Test
+    fun `resolved server request id preserves string and numeric identity`() {
+        assertEquals(
+            RpcRequestId.Text("approval-1"),
+            CodexProtocol.resolvedRequestId(JSONObject().put("requestId", "approval-1")),
+        )
+        assertEquals(
+            RpcRequestId.Number(17),
+            CodexProtocol.resolvedRequestId(JSONObject().put("requestId", 17)),
+        )
+        assertNull(CodexProtocol.resolvedRequestId(JSONObject()))
     }
 
     @Test

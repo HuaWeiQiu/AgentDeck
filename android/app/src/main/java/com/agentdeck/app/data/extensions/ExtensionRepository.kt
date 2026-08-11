@@ -21,6 +21,7 @@ import com.agentdeck.app.domain.extensions.ExtensionSessionPlan
 import com.agentdeck.app.domain.extensions.ExtensionStatus
 import com.agentdeck.app.domain.extensions.ExtensionTool
 import com.agentdeck.app.domain.extensions.ManagedExtension
+import com.agentdeck.app.domain.extensions.McpServerApprovalIdentity
 import com.agentdeck.app.domain.model.AgentCard
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -31,6 +32,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.InputStream
@@ -44,6 +46,7 @@ internal class ExtensionRepository(
     private val credentials: ExtensionCredentialVault,
     private val paths: EmbeddedRuntimePaths,
     private val skills: SkillPackageInstaller = SkillPackageInstaller(paths),
+    private val secureMcpClient: OkHttpClient = secureMcpHttpClient(),
 ) {
     private val skillImportMutex = Mutex()
     private val storageReconcileMutex = Mutex()
@@ -312,12 +315,13 @@ internal class ExtensionRepository(
             )
             resources += snapshot
             val servers = JSONObject()
-            val sessionSalt = randomHex(16)
+            val approvalIdentities = linkedMapOf<String, McpServerApprovalIdentity>()
             selected.filter { it.kind != ExtensionKind.SKILL }.forEach { extension ->
                 val mcp = requireNotNull(extension.mcp) { "MCP 配置不存在" }
+                val toolAllowlist = extensionToolAllowlist(extension.kind, extension.tools)
                 val config = JSONObject()
                     .put("enabled", true)
-                    .put("required", false)
+                    .put("required", true)
                     .put("default_tools_approval_mode", "prompt")
                     .put("startup_timeout_sec", 15)
                     .put("tool_timeout_sec", 90)
@@ -328,10 +332,10 @@ internal class ExtensionRepository(
                             upstream = endpoint,
                             credentialVault = credentials,
                             credentialRef = mcp.credentialRef,
+                            client = secureMcpClient,
                         )
                         resources += proxy
                         config.put("url", proxy.url)
-                        config.put("enabled_tools", JSONArray(extension.tools.filter { it.enabled }.map { it.name }))
                     }
                     ExtensionKind.LOCAL_MCP -> {
                         val command = requireNotNull(mcp.command)
@@ -340,7 +344,16 @@ internal class ExtensionRepository(
                     }
                     ExtensionKind.SKILL -> Unit
                 }
-                servers.put(serverId(extension.id, sessionSalt), config)
+                if (toolAllowlist.enforce) {
+                    config.put("enabled_tools", JSONArray(toolAllowlist.enabledToolNames))
+                }
+                val managedServerId = serverId(extension.id)
+                servers.put(managedServerId, config)
+                approvalIdentities[managedServerId] = McpServerApprovalIdentity(
+                    displayName = extension.name,
+                    enabledToolNames = toolAllowlist.enabledToolNames.toSet(),
+                    enforceAllowlist = toolAllowlist.enforce,
+                )
             }
             val overlay = JSONObject().put("mcp_servers", servers)
             return ExtensionSessionHandle(
@@ -348,6 +361,7 @@ internal class ExtensionRepository(
                     configOverlay = overlay.toString(),
                     skillSnapshotKey = snapshot.key,
                     enabledNames = selected.map(ManagedExtension::name),
+                    mcpApprovalIdentities = approvalIdentities,
                 ),
                 resources = resources,
             )
@@ -356,6 +370,9 @@ internal class ExtensionRepository(
             throw error
         }
     }
+
+    fun discoverRemote(url: String, bearer: ByteArray? = null): List<ExtensionTool> =
+        RemoteMcpToolDiscovery(policy, secureMcpClient).discover(url, bearer)
 
     fun mergeSessionConfig(
         base: JSONObject,
@@ -409,9 +426,9 @@ internal class ExtensionRepository(
         private fun randomHex(bytes: Int): String = ByteArray(bytes).also(SecureRandom()::nextBytes)
             .joinToString("") { byte -> "%02x".format(byte) }
 
-        internal fun serverId(extensionId: String, sessionSalt: String): String {
+        internal fun serverId(extensionId: String): String {
             val digest = MessageDigest.getInstance("SHA-256")
-                .digest("$sessionSalt:$extensionId".toByteArray(StandardCharsets.UTF_8))
+                .digest("agentdeck-managed-mcp-v1:$extensionId".toByteArray(StandardCharsets.UTF_8))
                 .take(8)
                 .joinToString("") { byte -> "%02x".format(byte) }
             return "agentdeck_ext_$digest"
@@ -428,3 +445,16 @@ internal fun preserveToolSelections(
         tool.copy(enabled = enabledByName[tool.name] ?: tool.enabled)
     }
 }
+
+internal data class ExtensionToolAllowlist(
+    val enforce: Boolean,
+    val enabledToolNames: List<String>,
+)
+
+internal fun extensionToolAllowlist(
+    kind: ExtensionKind,
+    tools: List<ExtensionTool>,
+): ExtensionToolAllowlist = ExtensionToolAllowlist(
+    enforce = kind == ExtensionKind.REMOTE_MCP || tools.isNotEmpty(),
+    enabledToolNames = tools.filter(ExtensionTool::enabled).map(ExtensionTool::name),
+)

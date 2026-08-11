@@ -7,6 +7,7 @@ import com.agentdeck.app.data.chat.ChatAttachmentStore
 import com.agentdeck.app.data.chat.ConversationLinkRepository
 import com.agentdeck.app.data.db.AppDatabase
 import com.agentdeck.app.data.extensions.ExtensionRepository
+import com.agentdeck.app.data.extensions.secureMcpHttpClient
 import com.agentdeck.app.data.provider.OkHttpProviderModelDiscovery
 import com.agentdeck.app.data.provider.ProviderModelDiscovery
 import com.agentdeck.app.data.repo.CardRepository
@@ -67,6 +68,7 @@ object ServiceLocator {
             policy = ExtensionPolicy(BuildConfig.EXTENSION_MAX_LEVEL),
             credentials = extensionCredentials,
             paths = EmbeddedRuntimePaths(app),
+            secureMcpClient = secureMcpHttpClient(app),
         )
     }
     val modelDiscovery: ProviderModelDiscovery by lazy { OkHttpProviderModelDiscovery() }

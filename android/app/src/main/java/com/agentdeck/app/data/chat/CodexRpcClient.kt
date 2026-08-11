@@ -10,6 +10,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -36,6 +37,11 @@ sealed interface CodexInbound {
     ) : CodexInbound
 
     data class Disconnected(val message: String) : CodexInbound
+
+    data class Handoff(
+        val onDrained: () -> Unit,
+        val acknowledgement: CompletableDeferred<Unit>,
+    ) : CodexInbound
 }
 
 sealed interface RpcRequestId {
@@ -193,6 +199,22 @@ class CodexRpcClient internal constructor(
     private val closed = AtomicBoolean(false)
 
     val events: Flow<CodexInbound> = inbound.receiveAsFlow()
+
+    internal fun eventsUntilHandoff(): Flow<CodexInbound> = events.takeWhile { event ->
+        if (event !is CodexInbound.Handoff) return@takeWhile true
+        runCatching(event.onDrained).fold(
+            onSuccess = { event.acknowledgement.complete(Unit) },
+            onFailure = { event.acknowledgement.completeExceptionally(it) },
+        )
+        false
+    }
+
+    internal fun tryEnqueueEventHandoff(onDrained: () -> Unit = {}): CompletableDeferred<Unit>? {
+        if (closed.get()) return null
+        val acknowledgement = CompletableDeferred<Unit>()
+        val event = CodexInbound.Handoff(onDrained, acknowledgement)
+        return acknowledgement.takeIf { inbound.trySend(event).isSuccess }
+    }
 
     init {
         scope.launch { readLoop() }

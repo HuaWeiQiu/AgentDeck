@@ -3,6 +3,7 @@ package com.agentdeck.app.ui.chat
 import com.agentdeck.app.data.chat.CodexRpcException
 import com.agentdeck.app.domain.chat.CodexModelOption
 import com.agentdeck.app.domain.chat.ChatUiState
+import com.agentdeck.app.domain.chat.HostWriteApproval
 import com.agentdeck.app.domain.chat.QueuedChatMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -78,8 +79,31 @@ class ChatRecoveryTest {
                 ChatUiState(isConnected = true, isStreaming = true),
             ),
         )
+        assertFalse(
+            shouldKeepSessionInBackground(
+                state = ChatUiState(isConnected = true, isStreaming = true),
+                hasServerResponseInFlight = true,
+            ),
+        )
+        assertFalse(
+            shouldKeepSessionInBackground(
+                ChatUiState(
+                    isConnected = true,
+                    isStreaming = true,
+                    hostWriteApproval = HostWriteApproval("write-1", "写入宿主文件"),
+                ),
+            ),
+        )
         assertTrue(
             shouldKeepSessionInBackground(
+                ChatUiState(
+                    isConnected = true,
+                    queued = QueuedChatMessage("queued", "next"),
+                ),
+            ),
+        )
+        assertFalse(
+            hasActiveSessionWork(
                 ChatUiState(
                     isConnected = true,
                     queued = QueuedChatMessage("queued", "next"),

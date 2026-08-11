@@ -70,10 +70,17 @@ data class ManagedExtension(
     val updatedAtEpochMs: Long,
 )
 
+data class McpServerApprovalIdentity(
+    val displayName: String,
+    val enabledToolNames: Set<String>,
+    val enforceAllowlist: Boolean = true,
+)
+
 data class ExtensionSessionPlan(
     val configOverlay: String = "{}",
     val skillSnapshotKey: String? = null,
     val enabledNames: List<String> = emptyList(),
+    val mcpApprovalIdentities: Map<String, McpServerApprovalIdentity> = emptyMap(),
 )
 
 class ExtensionSessionHandle(

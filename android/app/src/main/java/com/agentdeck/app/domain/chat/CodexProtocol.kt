@@ -3,6 +3,7 @@ package com.agentdeck.app.domain.chat
 import org.json.JSONArray
 import org.json.JSONObject
 import com.agentdeck.app.data.chat.RpcRequestId
+import com.agentdeck.app.domain.extensions.McpServerApprovalIdentity
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 
 object CodexProtocol {
@@ -98,7 +99,7 @@ object CodexProtocol {
         JSONObject()
             .put("threadId", threadId)
             .put("input", turnInput(text, attachments))
-            .put("approvalPolicy", permissionLevel.approvalPolicy)
+            .put("approvalPolicy", approvalPolicy(permissionLevel))
             .apply {
                 if (modelOverride != null) put("model", modelOverride)
                 collaborationModel?.let { model ->
@@ -239,12 +240,19 @@ object CodexProtocol {
         return JSONObject().put("answers", answersJson)
     }
 
-    fun shouldAutoDecline(permissionLevel: CodexPermissionLevel): Boolean =
-        permissionLevel == CodexPermissionLevel.READ_ONLY
+    fun shouldAutoDecline(
+        permissionLevel: CodexPermissionLevel,
+        approvalKind: ApprovalKind? = null,
+    ): Boolean = permissionLevel == CodexPermissionLevel.READ_ONLY &&
+        approvalKind != ApprovalKind.MCP_TOOL
 
     fun approvalResponse(approval: ChatApproval, decision: String): JSONObject {
-        if (approval.kind != ApprovalKind.PERMISSIONS) {
-            return JSONObject().put("decision", decision)
+        when (approval.kind) {
+            ApprovalKind.MCP_TOOL -> return mcpToolApprovalResponse(approval, decision)
+            ApprovalKind.PERMISSIONS -> Unit
+            ApprovalKind.COMMAND,
+            ApprovalKind.FILE_CHANGE,
+            -> return JSONObject().put("decision", decision)
         }
         val permissions = if (decision == "accept" || decision == "acceptForSession") {
             approval.requestedPermissions?.let(::JSONObject) ?: JSONObject()
@@ -255,6 +263,159 @@ object CodexProtocol {
             .put("permissions", permissions)
             .put("scope", if (decision == "acceptForSession") "session" else "turn")
     }
+
+    fun parseMcpToolApproval(
+        id: RpcRequestId,
+        params: JSONObject,
+        managedServers: Map<String, McpServerApprovalIdentity> = emptyMap(),
+        requireManagedIdentity: Boolean = false,
+    ): ChatApproval? {
+        if (params.optString("mode") != "form") return null
+        val meta = params.optJSONObject("_meta") ?: return null
+        if (meta.optString("codex_approval_kind") != "mcp_tool_call") return null
+        val schema = params.optJSONObject("requestedSchema") ?: return null
+        if (schema.optString("type") != "object") return null
+        val properties = schema.optJSONObject("properties") ?: return null
+        if (properties.length() != 0) return null
+
+        val serverId = params.nullableString("serverName")
+            ?.safeApprovalLabel(MAX_APPROVAL_LABEL_LENGTH)
+            ?: return null
+        val managedIdentity = managedServers[serverId]
+        if (requireManagedIdentity && managedIdentity == null) return null
+        val server = managedIdentity?.displayName
+            ?.safeApprovalLabel(MAX_APPROVAL_LABEL_LENGTH)
+            ?: serverId
+        val message = params.nullableString("message")
+            ?.safeApprovalMessage(MAX_APPROVAL_MESSAGE_LENGTH)
+            ?: return null
+        val toolTitle = meta.nullableString("tool_title")
+            ?.safeApprovalLabel(MAX_APPROVAL_LABEL_LENGTH)
+        val advertisedToolName = meta.nullableString("tool_name")
+            ?.safeApprovalLabel(MAX_APPROVAL_LABEL_LENGTH)
+        val toolName = canonicalMcpToolName(
+            advertised = advertisedToolName,
+            message = message,
+            identity = managedIdentity,
+        ) ?: return null
+        val detail = buildList {
+            add("服务：$server")
+            add("工具：$toolName")
+            toolTitle?.takeUnless { it == toolName }?.let { add("服务标题：$it") }
+            formatMcpToolParams(meta)?.let { add("参数：\n$it") }
+            add("请求：$message")
+        }.joinToString("\n").take(MAX_DETAIL_LENGTH)
+
+        return ChatApproval(
+            requestId = id,
+            kind = ApprovalKind.MCP_TOOL,
+            title = "允许调用 MCP 工具？",
+            detail = detail,
+            supportsSessionApproval = meta.persistOptions().contains("session"),
+        )
+    }
+
+    private fun canonicalMcpToolName(
+        advertised: String?,
+        message: String,
+        identity: McpServerApprovalIdentity?,
+    ): String? {
+        val quotedMessageTool = MCP_TOOL_NAME_IN_MESSAGE.find(message)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.safeApprovalLabel(MAX_APPROVAL_LABEL_LENGTH)
+        val candidate = advertised ?: quotedMessageTool
+        if (identity == null) return candidate
+        if (!identity.enforceAllowlist) return candidate
+        return identity.enabledToolNames.firstOrNull { it == candidate }
+    }
+
+    private fun mcpToolApprovalResponse(approval: ChatApproval, decision: String): JSONObject {
+        val action = when (decision) {
+            "accept", "acceptForSession" -> "accept"
+            "decline" -> "decline"
+            else -> "cancel"
+        }
+        return JSONObject()
+            .put("action", action)
+            .put("content", JSONObject.NULL)
+            .put(
+                "_meta",
+                if (decision == "acceptForSession" && approval.supportsSessionApproval) {
+                    JSONObject().put("persist", "session")
+                } else {
+                    JSONObject.NULL
+                },
+            )
+    }
+
+    fun cancelMcpElicitationResponse(): JSONObject = JSONObject()
+        .put("action", "cancel")
+        .put("content", JSONObject.NULL)
+        .put("_meta", JSONObject.NULL)
+
+    fun resolvedRequestId(params: JSONObject): RpcRequestId? {
+        val value = params.opt("requestId")?.takeUnless { it == JSONObject.NULL } ?: return null
+        return runCatching { RpcRequestId.from(value) }.getOrNull()
+    }
+
+    private fun formatMcpToolParams(meta: JSONObject): String? {
+        val display = meta.optJSONArray("tool_params_display")
+        if (display != null && display.length() > 0) {
+            val lines = display.objects()
+                .take(MAX_APPROVAL_PARAMS)
+                .mapNotNull { item ->
+                    val name = item.nullableString("display_name")
+                        ?.safeApprovalLabel(MAX_APPROVAL_LABEL_LENGTH)
+                        ?: item.nullableString("name")
+                            ?.safeApprovalLabel(MAX_APPROVAL_LABEL_LENGTH)
+                        ?: return@mapNotNull null
+                    val value = item.opt("value")
+                    "$name: ${formatApprovalValue(value)}"
+                }
+            if (lines.isNotEmpty()) return lines.joinToString("\n").take(MAX_APPROVAL_PARAMS_LENGTH)
+        }
+        val params = meta.optJSONObject("tool_params") ?: return null
+        return params.keys().asSequence()
+            .take(MAX_APPROVAL_PARAMS)
+            .map { name -> "$name: ${formatApprovalValue(params.opt(name))}" }
+            .joinToString("\n")
+            .takeIf(String::isNotBlank)
+            ?.take(MAX_APPROVAL_PARAMS_LENGTH)
+    }
+
+    private fun formatApprovalValue(value: Any?): String = when (value) {
+        null, JSONObject.NULL -> "null"
+        is String -> JSONObject.quote(value.take(MAX_APPROVAL_VALUE_LENGTH))
+        is Number, is Boolean -> value.toString()
+        is JSONObject -> "{${value.length()} 个字段}"
+        is JSONArray -> "[${value.length()} 项]"
+        else -> value.toString().take(MAX_APPROVAL_VALUE_LENGTH)
+    }
+
+    private fun JSONObject.persistOptions(): Set<String> {
+        val value = opt("persist")
+        return when (value) {
+            is String -> setOf(value)
+            is JSONArray -> value.strings().toSet()
+            else -> emptySet()
+        }
+    }
+
+    private fun String.safeApprovalLabel(maxLength: Int): String? =
+        replace(Regex("\\s+"), " ")
+            .replace(Regex("[\\p{C}]"), "")
+            .trim()
+            .take(maxLength)
+            .takeIf(String::isNotBlank)
+
+    private fun String.safeApprovalMessage(maxLength: Int): String? =
+        replace(Regex("[\\p{C}&&[^\\n\\t]]"), "")
+            .lineSequence()
+            .joinToString("\n") { it.trimEnd() }
+            .trim()
+            .take(maxLength)
+            .takeIf(String::isNotBlank)
 
     fun threadId(response: JSONObject): String =
         requireNotNull(response.optJSONObject("thread")?.nullableString("id")) {
@@ -398,6 +559,9 @@ object CodexProtocol {
                 listOfNotNull(value.nullableString("server"), value.nullableString("tool"))
                     .joinToString(" / ")
                     .ifBlank { "MCP 工具" },
+                detail = value.optJSONObject("error")
+                    ?.nullableString("message")
+                    ?.takeLast(MAX_DETAIL_LENGTH),
                 status = value.nullableString("status"),
             )
 
@@ -524,7 +688,7 @@ object CodexProtocol {
         }
         return JSONObject()
             .put("cwd", cwd)
-            .put("approvalPolicy", permissionLevel.approvalPolicy)
+            .put("approvalPolicy", approvalPolicy(permissionLevel))
             // Keep thread bootstrap read-only so opening a chat does not mark the project
             // trusted. Every executable turn atomically overrides this with externalSandbox.
             .put("sandbox", "read-only")
@@ -541,6 +705,21 @@ object CodexProtocol {
                 modelProviderOverride?.let { put("modelProvider", it) }
             }
     }
+
+    private fun approvalPolicy(permissionLevel: CodexPermissionLevel): Any =
+        if (permissionLevel == CodexPermissionLevel.FULL_ACCESS) {
+            JSONObject().put(
+                "granular",
+                JSONObject()
+                    .put("sandbox_approval", false)
+                    .put("rules", false)
+                    .put("skill_approval", false)
+                    .put("request_permissions", false)
+                    .put("mcp_elicitations", true),
+            )
+        } else {
+            permissionLevel.approvalPolicy
+        }
 
     private fun turnsPageParams(limit: Int): JSONObject = JSONObject()
         .put("limit", limit)
@@ -609,6 +788,15 @@ object CodexProtocol {
     }
 
     private const val MAX_DETAIL_LENGTH = 8_000
+    private const val MAX_APPROVAL_LABEL_LENGTH = 160
+    private const val MAX_APPROVAL_MESSAGE_LENGTH = 2_000
+    private const val MAX_APPROVAL_PARAMS_LENGTH = 4_000
+    private const val MAX_APPROVAL_PARAMS = 16
+    private const val MAX_APPROVAL_VALUE_LENGTH = 512
+    private val MCP_TOOL_NAME_IN_MESSAGE = Regex(
+        """\btool\s+[\"']([^\"']+)[\"']""",
+        RegexOption.IGNORE_CASE,
+    )
     private const val MODEL_LIST_PAGE_SIZE = 100
     private const val MAX_MODEL_ID_LENGTH = 160
     private const val MAX_MODEL_DISPLAY_NAME_LENGTH = 160

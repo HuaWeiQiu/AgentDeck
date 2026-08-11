@@ -1,5 +1,9 @@
 package com.agentdeck.app.data.extensions
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.util.Log
 import com.agentdeck.app.data.secure.ExtensionCredentialVault
 import com.agentdeck.app.domain.extensions.ExtensionPolicy
 import com.agentdeck.app.domain.extensions.ExtensionTool
@@ -33,17 +37,21 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-internal object PublicOnlyDns : Dns {
+internal class PublicOnlyDns(
+    private val delegate: Dns = Dns.SYSTEM,
+    private val allowVpnFakeIp: (String) -> Boolean = { false },
+) : Dns {
     override fun lookup(hostname: String): List<InetAddress> {
         if (ExtensionPolicy.isPrivateLiteral(hostname)) throw UnknownHostException("private address")
-        val addresses = Dns.SYSTEM.lookup(hostname)
-        if (addresses.isEmpty() || addresses.any(::isBlockedAddress)) {
+        val addresses = delegate.lookup(hostname)
+        val vpnFakeIpAllowed = allowVpnFakeIp(hostname)
+        if (addresses.isEmpty() || addresses.any { isBlockedAddress(it, vpnFakeIpAllowed) }) {
             throw UnknownHostException("private or non-routable address")
         }
         return addresses
     }
 
-    private fun isBlockedAddress(address: InetAddress): Boolean {
+    private fun isBlockedAddress(address: InetAddress, vpnFakeIpAllowed: Boolean): Boolean {
         if (address.isAnyLocalAddress || address.isLoopbackAddress || address.isLinkLocalAddress ||
             address.isSiteLocalAddress || address.isMulticastAddress
         ) return true
@@ -53,21 +61,25 @@ internal object PublicOnlyDns : Dns {
                 bytes[0] == 0 || bytes[0] == 100 && bytes[1] in 64..127 ||
                     bytes[0] == 192 && bytes[1] == 0 && bytes[2] == 0 ||
                     bytes[0] == 192 && bytes[1] == 0 && bytes[2] == 2 ||
-                    bytes[0] == 198 && bytes[1] in 18..19 ||
+                    !vpnFakeIpAllowed && bytes[0] == 198 && bytes[1] in 18..19 ||
                     bytes[0] == 198 && bytes[1] == 51 && bytes[2] == 100 ||
-                    bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113
+                    bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113 ||
+                    bytes[0] >= 240
             }
             is Inet6Address -> {
-                val first = address.address[0].toInt() and 0xff
-                first and 0xfe == 0xfc
+                val bytes = address.address.map(Byte::toInt).map { it and 0xff }
+                bytes[0] and 0xfe == 0xfc ||
+                    bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0d && bytes[3] == 0xb8
             }
             else -> true
         }
     }
 }
 
-internal fun secureMcpHttpClient(): OkHttpClient = OkHttpClient.Builder()
-    .dns(PublicOnlyDns)
+internal fun secureMcpHttpClient(
+    allowVpnFakeIp: (String) -> Boolean = { false },
+): OkHttpClient = OkHttpClient.Builder()
+    .dns(PublicOnlyDns(allowVpnFakeIp = allowVpnFakeIp))
     .proxy(Proxy.NO_PROXY)
     .followRedirects(false)
     .followSslRedirects(false)
@@ -75,6 +87,21 @@ internal fun secureMcpHttpClient(): OkHttpClient = OkHttpClient.Builder()
     .writeTimeout(30, TimeUnit.SECONDS)
     .readTimeout(0, TimeUnit.MILLISECONDS)
     .build()
+
+internal fun secureMcpHttpClient(context: Context): OkHttpClient = secureMcpHttpClient {
+    val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    connectivity.getNetworkCapabilities(connectivity.activeNetwork)
+        ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+}
+
+internal fun mcpContentTypeCategory(contentType: String?): String = when (
+    contentType?.substringBefore(';')?.trim()?.lowercase()
+) {
+    null, "" -> "none"
+    "application/json" -> "json"
+    "text/event-stream" -> "sse"
+    else -> "other"
+}
 
 internal class SecureMcpProxy(
     private val upstream: HttpUrl,
@@ -140,6 +167,14 @@ internal class SecureMcpProxy(
                 executor.execute {
                     try {
                         runCatching { socket.use(::serve) }
+                            .onFailure { error ->
+                                runCatching {
+                                    Log.w(
+                                        TAG,
+                                        "Secure MCP proxy request failed: ${error.javaClass.simpleName}",
+                                    )
+                                }
+                            }
                     } finally {
                         sockets -= socket
                     }
@@ -186,54 +221,64 @@ internal class SecureMcpProxy(
             require(count > 0) { "incomplete request" }
             offset += count
         }
-        val upstreamUrl = upstream.newBuilder().apply {
-            val query = target.substringAfter('?', "")
-            if (query.isNotEmpty()) encodedQuery(query)
-        }.build()
-        val request = Request.Builder().url(upstreamUrl).apply {
-            headers["accept"]?.let { header("Accept", it.take(MAX_HEADER_VALUE_BYTES)) }
-            headers["content-type"]?.let { header("Content-Type", it.take(MAX_HEADER_VALUE_BYTES)) }
-            headers["mcp-protocol-version"]?.let { header("MCP-Protocol-Version", it) }
-            headers["mcp-session-id"]?.let { header("MCP-Session-Id", it) }
-            headers["last-event-id"]?.let { header("Last-Event-ID", it) }
-            authorizationHeader()?.let { header("Authorization", it) }
-            val mediaType = headers["content-type"]?.toMediaType()
-                ?: "application/json".toMediaType()
-            when (method) {
-                "POST" -> post(body.toRequestBody(mediaType))
-                "DELETE" -> delete(if (body.isEmpty()) null else body.toRequestBody(mediaType))
-                else -> get()
-            }
-        }.build()
-        body.fill(0)
-        val call = client.newCall(request)
-        when (method) {
-            "POST" -> call.timeout().timeout(UPSTREAM_POST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            "DELETE" -> call.timeout().timeout(UPSTREAM_DELETE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        }
-        val registered = synchronized(calls) {
-            if (closed.get()) false else calls.add(call)
-        }
-        if (!registered) {
-            call.cancel()
-            error("MCP 代理已关闭")
-        }
         try {
-            call.execute().use { response ->
-                val output = socket.getOutputStream()
-                output.write("HTTP/1.1 ${response.code} ${response.message}\r\n".toByteArray())
-                listOf("Content-Type", "MCP-Session-Id", "Cache-Control").forEach { name ->
-                    response.header(name)?.take(MAX_HEADER_VALUE_BYTES)?.let { value ->
-                        output.write("$name: $value\r\n".toByteArray())
-                    }
+            val upstreamUrl = upstream.newBuilder().apply {
+                val query = target.substringAfter('?', "")
+                if (query.isNotEmpty()) encodedQuery(query)
+            }.build()
+            val request = Request.Builder().url(upstreamUrl).apply {
+                headers["accept"]?.let { header("Accept", it.take(MAX_HEADER_VALUE_BYTES)) }
+                headers["content-type"]?.let { header("Content-Type", it.take(MAX_HEADER_VALUE_BYTES)) }
+                headers["mcp-protocol-version"]?.let { header("MCP-Protocol-Version", it) }
+                headers["mcp-session-id"]?.let { header("MCP-Session-Id", it) }
+                headers["last-event-id"]?.let { header("Last-Event-ID", it) }
+                authorizationHeader()?.let { header("Authorization", it) }
+                val mediaType = headers["content-type"]?.toMediaType()
+                    ?: "application/json".toMediaType()
+                when (method) {
+                    "POST" -> post(body.toRequestBody(mediaType))
+                    "DELETE" -> delete(if (body.isEmpty()) null else body.toRequestBody(mediaType))
+                    else -> get()
                 }
-                output.write("Connection: close\r\n\r\n".toByteArray())
-                val source = response.body?.byteStream()
-                if (source != null) copyBounded(source, output, MAX_RESPONSE_BODY_BYTES)
-                output.flush()
+            }.build()
+            val call = client.newCall(request)
+            when (method) {
+                "POST" -> call.timeout().timeout(UPSTREAM_POST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                "DELETE" -> call.timeout().timeout(UPSTREAM_DELETE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            }
+            val registered = synchronized(calls) {
+                if (closed.get()) false else calls.add(call)
+            }
+            if (!registered) {
+                call.cancel()
+                error("MCP 代理已关闭")
+            }
+            try {
+                call.execute().use { response ->
+                    runCatching {
+                        Log.d(
+                            TAG,
+                            "Secure MCP upstream response: status=${response.code}, " +
+                                "type=${mcpContentTypeCategory(response.header("Content-Type"))}",
+                        )
+                    }
+                    val output = socket.getOutputStream()
+                    output.write("HTTP/1.1 ${response.code} ${response.message}\r\n".toByteArray())
+                    listOf("Content-Type", "MCP-Session-Id", "Cache-Control").forEach { name ->
+                        response.header(name)?.take(MAX_HEADER_VALUE_BYTES)?.let { value ->
+                            output.write("$name: $value\r\n".toByteArray())
+                        }
+                    }
+                    output.write("Connection: close\r\n\r\n".toByteArray())
+                    val source = response.body?.byteStream()
+                    if (source != null) copyBounded(source, output, MAX_RESPONSE_BODY_BYTES)
+                    output.flush()
+                }
+            } finally {
+                calls -= call
             }
         } finally {
-            calls -= call
+            body.fill(0)
         }
     }
 
@@ -289,6 +334,7 @@ internal class SecureMcpProxy(
     }
 
     companion object {
+        private const val TAG = "AgentDeckMcpProxy"
         private const val MAX_CONNECTIONS = 4
         private const val MAX_PENDING_CONNECTIONS = 4
         private const val MAX_STREAMING_CONNECTIONS = 1

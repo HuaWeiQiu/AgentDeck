@@ -25,6 +25,63 @@ import java.net.Socket
 
 class SecureMcpNetworkTest {
     @Test
+    fun `fake ip dns requires an active vpn and never accepts literals or private ranges`() {
+        val fakeIp = InetAddress.getByName("198.18.0.135")
+        val delegate = object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> = listOf(fakeIp)
+        }
+
+        assertTrue(
+            runCatching {
+                PublicOnlyDns(delegate) { false }.lookup("mcp.deepwiki.com")
+            }.isFailure,
+        )
+        assertEquals(
+            listOf(fakeIp),
+            PublicOnlyDns(delegate) { true }.lookup("mcp.deepwiki.com"),
+        )
+        assertTrue(
+            runCatching {
+                PublicOnlyDns(delegate) { true }.lookup("198.18.0.135")
+            }.isFailure,
+        )
+        val privateDelegate = object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> =
+                listOf(InetAddress.getByName("192.168.1.2"))
+        }
+        assertTrue(
+            runCatching {
+                PublicOnlyDns(privateDelegate) { true }.lookup("mcp.deepwiki.com")
+            }.isFailure,
+        )
+        listOf("240.0.0.1", "255.255.255.255", "2001:db8::1").forEach { reserved ->
+            val reservedDelegate = object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> =
+                    listOf(InetAddress.getByName(reserved))
+            }
+            assertTrue(
+                runCatching {
+                    PublicOnlyDns(reservedDelegate) { true }.lookup("mcp.deepwiki.com")
+                }.isFailure,
+            )
+        }
+        val mixedDelegate = object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> = listOf(
+                InetAddress.getByName("8.8.8.8"),
+                InetAddress.getByName("240.0.0.1"),
+            )
+        }
+        assertTrue(
+            runCatching {
+                PublicOnlyDns(mixedDelegate) { true }.lookup("mcp.deepwiki.com")
+            }.isFailure,
+        )
+        assertEquals("json", mcpContentTypeCategory("application/json; charset=utf-8"))
+        assertEquals("sse", mcpContentTypeCategory("text/event-stream"))
+        assertEquals("other", mcpContentTypeCategory("text/token-secret"))
+    }
+
+    @Test
     fun `proxy forwards mcp payload and adds vault bearer without exposing it in url`() {
         val server = MockWebServer()
         val tls = configureTls(server)
@@ -57,6 +114,7 @@ class SecureMcpNetworkTest {
             val forwarded = server.takeRequest(2, TimeUnit.SECONDS)!!
             assertEquals("Bearer private-token", forwarded.getHeader("Authorization"))
             assertEquals("/mcp", forwarded.path)
+            assertEquals("{}", forwarded.body.readUtf8())
         } finally {
             proxy.close()
             server.shutdown()

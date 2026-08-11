@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -374,8 +375,8 @@ fun ExtensionDetailScreen(
                                 supportingContent = {
                                     Text(
                                         listOfNotNull(
+                                            extensionToolAccessLabel(tool),
                                             tool.name.takeIf { it != tool.title },
-                                            if (tool.access == ExtensionToolAccess.READ) "只读" else "写入时确认",
                                         ).joinToString(" · "),
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
@@ -620,6 +621,33 @@ private fun RemoteMcpEditorDialog(
                 }
                 if (tools.isNotEmpty()) {
                     Text("已发现 ${tools.size} 个工具", style = MaterialTheme.typography.bodyMedium)
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().height(180.dp),
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        items(tools, key = ExtensionTool::name) { tool ->
+                            ListItem(
+                                headlineContent = {
+                                    Text(
+                                        tool.title.ifBlank { tool.name },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                supportingContent = {
+                                    Text(
+                                        listOfNotNull(
+                                            extensionToolAccessLabel(tool),
+                                            tool.name.takeIf { it != tool.title },
+                                        ).joinToString(" · "),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                            )
+                            HorizontalDivider()
+                        }
+                    }
                 }
             }
         },
@@ -713,6 +741,13 @@ internal fun extensionKindTitle(kind: ExtensionKind): String = when (kind) {
     ExtensionKind.REMOTE_MCP -> "远程 MCP"
     ExtensionKind.LOCAL_MCP -> "本地 MCP"
 }
+
+internal fun extensionToolAccessLabel(tool: ExtensionTool): String =
+    if (tool.access == ExtensionToolAccess.READ) {
+        "服务声明只读"
+    } else {
+        "可能写入 · 调用时确认"
+    }
 
 private fun extensionKindIcon(kind: ExtensionKind): ImageVector = when (kind) {
     ExtensionKind.SKILL -> Icons.Filled.Description

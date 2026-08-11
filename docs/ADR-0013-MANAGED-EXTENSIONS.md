@@ -41,8 +41,9 @@ Room 7→8 新增规范化表：
 1. 远程地址必须是无 userinfo/fragment 的公共 HTTPS URL；DNS 解析拒绝回环、私网、链路本地、组播、文档网段与元数据地址，并关闭重定向。
 2. Bearer 由独立 Android Keystore alias 加密，Room 只保存随机 `credentialRef`。Codex 只连接带 256-bit capability 的 Android 回环代理，Token 不进入 Codex 配置、环境变量、argv 或日志。
 3. 代理固定单一上游，限制并发、Header、请求/响应大小和超时，不是通用转发代理。
-4. 每个 MCP 使用会话随机化的受管 server ID，配置 `enabled_tools` 和 `default_tools_approval_mode = "prompt"`。远端的 `readOnlyHint` 只用于界面分级，不能免除上游 Codex 审批。
+4. 每个 MCP 使用按持久扩展 ID 稳定派生的受管 server ID，配置 `enabled_tools` 和 `default_tools_approval_mode = "prompt"`；继承配置中出现同名 server 时 fail-closed。代理 capability 仍逐会话随机。远端的 `readOnlyHint` 只用于界面分级，不能免除上游 Codex 审批。
 5. 启动前调用 `config/read` 获取有效 MCP 名称。Secure 为所有非受管名称注入 `enabled = false`；读取失败则停止连接。`agentdeck.config.toml` 在 Secure 中也拒绝活动的 `[mcp_servers.*]`。
+6. 用户主动启用的 Android VPN 属于网络信任边界。仅当系统确认当前默认网络含 VPN 时，域名解析结果可使用 RFC 2544 `198.18.0.0/15` Fake-IP；URL 中直接填写该网段始终拒绝，其他私网/保留网段不放开，连接仍固定 HTTPS 主机、禁重定向并执行系统 TLS 证书校验。
 
 ## Skill 隔离
 

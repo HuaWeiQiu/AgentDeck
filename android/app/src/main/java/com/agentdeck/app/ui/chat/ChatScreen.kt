@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.QuestionAnswer
@@ -326,7 +327,12 @@ fun ChatScreen(
         val approvalPatches: List<FilePatch> = approval.itemId
             ?.let(vm::approvalPatches)
             .orEmpty()
-        ModalBottomSheet(onDismissRequest = { approvalSheetVisible = false }) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                approvalSheetVisible = false
+                vm.decideApproval("cancel")
+            },
+        ) {
             ApprovalSheetContent(
                 approval = approval,
                 patches = approvalPatches,
@@ -1626,6 +1632,7 @@ private fun UserInputSheetContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
             .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1890,15 +1897,18 @@ private fun ApprovalSheetContent(
         ApprovalKind.COMMAND -> Icons.Filled.Code
         ApprovalKind.FILE_CHANGE -> Icons.Filled.Description
         ApprovalKind.PERMISSIONS -> Icons.Filled.LockOpen
+        ApprovalKind.MCP_TOOL -> Icons.Filled.Extension
     }
     val summary = when (approval.kind) {
         ApprovalKind.COMMAND -> "Codex 想在本地环境中运行下面的命令。"
         ApprovalKind.FILE_CHANGE -> "Codex 想修改当前项目中的文件。"
         ApprovalKind.PERMISSIONS -> "Codex 需要本轮额外的文件或网络权限。"
+        ApprovalKind.MCP_TOOL -> "Codex 想调用当前对话已启用的 MCP 工具。"
     }
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
             .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
     ) {
         Row(
@@ -1975,7 +1985,9 @@ private fun ApprovalSheetContent(
             modifier = Modifier.fillMaxWidth(),
         ) { Text("仅允许这次") }
         Spacer(Modifier.height(8.dp))
-        if (showTechnicalDetails) {
+        val showSessionApproval = approval.supportsSessionApproval &&
+            (approval.kind == ApprovalKind.MCP_TOOL || showTechnicalDetails)
+        if (showSessionApproval) {
             OutlinedButton(
                 onClick = { onDecision("acceptForSession") },
                 modifier = Modifier.fillMaxWidth(),

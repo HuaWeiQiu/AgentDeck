@@ -165,7 +165,9 @@ class ModelsViewModel : ViewModel() {
                                     event.params,
                                     session.login.loginId,
                                 ) != null
-                        is CodexInbound.ServerRequest -> false
+                        is CodexInbound.ServerRequest,
+                        is CodexInbound.Handoff,
+                        -> false
                     }
                 }
                 when (terminalEvent) {
@@ -185,7 +187,9 @@ class ModelsViewModel : ViewModel() {
                         )
                         ServiceLocator.setup.scan(force = true)
                     }
-                    is CodexInbound.ServerRequest -> Unit
+                    is CodexInbound.ServerRequest,
+                    is CodexInbound.Handoff,
+                    -> Unit
                 }
             } catch (error: CancellationException) {
                 throw error

@@ -46,4 +46,29 @@ class ExtensionConfigComposerTest {
         assertEquals("/usr/bin/server", merged.getJSONObject("mcp_servers").getJSONObject("raw").getString("command"))
         assertTrue(!managed.has("enabled"))
     }
+
+    @Test
+    fun `managed server ids are stable and secure rejects inherited collisions`() {
+        val first = ExtensionRepository.serverId("ext_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        val second = ExtensionRepository.serverId("ext_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+        assertEquals(first, ExtensionRepository.serverId("ext_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+        assertTrue(first.startsWith("agentdeck_ext_"))
+        assertTrue(first != second)
+
+        val overlay = JSONObject().put(
+            "mcp_servers",
+            JSONObject().put(first, JSONObject().put("url", "http://127.0.0.1:1234/capability")),
+        )
+        assertTrue(
+            runCatching {
+                ExtensionConfigComposer.merge(
+                    base = JSONObject(),
+                    overlay = overlay,
+                    managedOnly = true,
+                    inheritedServerIds = setOf(first),
+                )
+            }.isFailure,
+        )
+    }
 }

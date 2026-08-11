@@ -94,6 +94,7 @@ enum class ApprovalKind {
     COMMAND,
     FILE_CHANGE,
     PERMISSIONS,
+    MCP_TOOL,
 }
 
 @Immutable
@@ -103,6 +104,8 @@ data class ChatApproval(
     val title: String,
     val detail: String,
     val requestedPermissions: String? = null,
+    /** Whether Codex advertised a session-scoped approval choice for this request. */
+    val supportsSessionApproval: Boolean = true,
     /** Item that triggered the approval; used to attach live patch data for previews. */
     val itemId: String? = null,
 )
@@ -127,8 +130,8 @@ data class ToolUserInputQuestion(
 
 /**
  * A pending `item/tool/requestUserInput` server request. Mirrors the approval
- * slot semantics: one at a time, latest request replaces the previous one, and
- * the slot clears on disconnect.
+ * slot semantics: one is shown at a time while additional requests wait in a
+ * bounded FIFO, and every slot clears on disconnect.
  */
 @Immutable
 data class ChatUserInputRequest(

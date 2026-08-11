@@ -20,6 +20,10 @@ internal object ExtensionConfigComposer {
         }
 
         val secureServers = JSONObject()
+        val conflicts = inheritedServerIds.filter(managedServers::has)
+        require(conflicts.isEmpty()) {
+            "受管 MCP 名称与 Codex 用户或项目配置冲突，请移除同名原始 MCP"
+        }
         inheritedServerIds.forEach { id ->
             if (!managedServers.has(id)) secureServers.put(id, JSONObject().put("enabled", false))
         }

@@ -21,19 +21,42 @@ All notable changes to AgentDeck are documented in this file.
 - MCP Bearer values use an extension-specific Android Keystore alias and an authenticated
   loopback proxy, never Codex TOML, Runtime environment variables, argv, or Room.
 - Secure rejects raw TOML MCP, disables effective global/project MCP servers before thread
-  start, randomizes managed server IDs, validates public HTTPS/DNS destinations, and fails
-  closed when effective config cannot be read.
+  start, derives stable per-extension managed server IDs with collision checks, validates public
+  HTTPS/DNS destinations, and fails closed when effective config cannot be read.
 - Each app-server gets an integrity-checked Skill snapshot containing only the current
   conversation's selected Skills; background session ownership now includes all extension
   resources.
+- Active Android VPNs may use RFC 2544 `198.18.0.0/15` Fake-IP DNS; Secure accepts that range
+  only for domain lookups while a VPN is active, still rejects literal/private destinations,
+  keeps the upstream fixed to HTTPS, disables redirects, and relies on system TLS validation.
+
+### Fixed
+
+- Fixed the Secure MCP proxy clearing a request body before OkHttp transmitted it and added
+  fail-closed required-server startup, bounded proxy resources, protocol pagination/timeouts,
+  and sanitized diagnostics.
+- Added exact Codex 0.147 MCP elicitation responses, trusted service/tool labels, bounded FIFO
+  approval and user-input queues, and lossless foreground/background event-stream handoff.
+- MCP approvals now resolve stable server IDs to the local extension name, require the canonical
+  tool to match the local allowlist in Secure, show parameters before remote text, and remain
+  scrollable on small screens.
+- Added a fixed-height, independently scrollable discovered-tool preview with explicit
+  service-declared read-only and possible-write labels.
+- Added the normal Android network-state permission required for VPN detection, fixing repeated
+  MCP initialization failures under v2ray Fake-IP mode.
+- Kept managed MCP server IDs stable across app-server restarts so Codex can resume an existing
+  thread without losing its recorded tool namespace or returning `unsupported call`.
 
 ### Verified
 
-- Secure and Lab JVM suites: 295 tests each.
+- Secure and Lab JVM suites: 319 tests each.
 - Secure and Lab Android Lint, R8 Beta builds, ARM64/x86_64 ABI APK splits.
 - Secure APK does not contain the Lab local MCP adapter; both Lab APKs do.
-- Secure ARM64 device acceptance remains required before publishing beta.8. Lab device
-  testing is intentionally outside this release pass.
+- Secure ARM64 on Android 16: DeepWiki discovery exposed three tools, the fixed tool list
+  scrolled, `read_wiki_structure` required explicit approval and returned its real result,
+  then the app was force-stopped and the same thread resumed, requested approval again, and
+  returned the real tool result while v2ray Fake-IP mode was active. Lab device testing was
+  intentionally outside this release pass.
 
 ## 0.2.0-beta.7 - 2026-08-11
 

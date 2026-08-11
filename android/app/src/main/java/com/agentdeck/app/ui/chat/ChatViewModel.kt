@@ -14,6 +14,7 @@ import com.agentdeck.app.data.chat.CodexRpcException
 import com.agentdeck.app.data.chat.CodexRpcTimeoutException
 import com.agentdeck.app.data.chat.ConversationLinkRepository
 import com.agentdeck.app.data.chat.ManagedProviderRuntime
+import com.agentdeck.app.data.chat.RpcRequestId
 import com.agentdeck.app.data.secure.ProviderCredentialBroker
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.chat.ApprovalKind
@@ -29,6 +30,8 @@ import com.agentdeck.app.domain.chat.CodexProtocol
 import com.agentdeck.app.domain.chat.ConversationIdentityPolicy
 import com.agentdeck.app.domain.chat.HostWriteApproval
 import com.agentdeck.app.domain.chat.QueuedChatMessage
+import com.agentdeck.app.domain.chat.PendingApprovalQueue
+import com.agentdeck.app.domain.chat.PendingUserInputQueue
 import com.agentdeck.app.domain.extensions.ExtensionSessionHandle
 import com.agentdeck.app.domain.extensions.ExtensionSessionPlan
 import com.agentdeck.app.domain.host.HostApprovalGateway
@@ -98,6 +101,7 @@ class ChatViewModel(
     private var endpoint: CodexBridgeEndpoint? = null
     private var connectJob: Job? = null
     private var eventJob: Job? = null
+    private var eventCollectorScope: CoroutineScope? = null
     private var turnStartJob: Job? = null
     private var reconnectJob: Job? = null
     private var reconnectAttempts = 0
@@ -110,6 +114,12 @@ class ChatViewModel(
     private var reasoningEffort: String? = null
     private var developerInstructions: String? = null
     private var steerFailedForTurn: String? = null
+    private val pendingApprovalQueue = PendingApprovalQueue()
+    private var respondingApproval: ChatApproval? = null
+    private val pendingUserInputQueue = PendingUserInputQueue()
+    private var respondingUserInput: ChatUserInputRequest? = null
+    private val serverResponsesInFlight = mutableSetOf<RpcRequestId>()
+    private var handoffInProgress = false
     private val hostWriteWaiters = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     /** 仅当前对话有效的「本会话允许写真实目录」。 */
     @Volatile
@@ -249,7 +259,6 @@ class ChatViewModel(
                 return@launch
             }
             disconnectServer()
-            eventJob?.cancel()
             mutableState.update {
                 it.copy(
                     isConnecting = true,
@@ -327,7 +336,7 @@ class ChatViewModel(
                 val rpc = CodexRpcClient.connect(endpoint)
                 client = rpc
                 ActiveCodexConnections.register(cardId, rpc)
-                eventJob = viewModelScope.launch { rpc.events.collect(::handleInbound) }
+                startEventCollection(rpc)
                 rpc.initialize(BuildConfig.VERSION_NAME)
                 val shouldDiscoverModels = managedRuntime == null &&
                     !endpoint.profileConfig.usesCustomProvider
@@ -607,18 +616,34 @@ class ChatViewModel(
     fun respondUserInput(answers: Map<String, List<String>>) {
         val rpc = client ?: return
         val request = state.value.userInputRequest ?: return
+        if (respondingUserInput != null) return
+        if (!serverResponsesInFlight.add(request.requestId)) return
+        respondingUserInput = request
         mutableState.update { it.copy(userInputRequest = null) }
         viewModelScope.launch {
             runCatching {
                 rpc.respond(request.requestId, CodexProtocol.userInputResponse(request, answers))
-            }.onFailure { error ->
-                mutableState.update {
-                    it.copy(
-                        error = ChatError.from(error.message ?: "无法提交回答"),
-                        userInputRequest = request,
-                    )
+            }.fold(
+                onSuccess = {
+                    serverResponsesInFlight.remove(request.requestId)
+                    if (respondingUserInput?.requestId == request.requestId) {
+                        respondingUserInput = null
+                        promoteNextUserInput()
+                    }
+                },
+                onFailure = { error ->
+                    serverResponsesInFlight.remove(request.requestId)
+                    if (respondingUserInput?.requestId == request.requestId) {
+                        respondingUserInput = null
+                        mutableState.update {
+                            it.copy(
+                                error = ChatError.from(error.message ?: "无法提交回答"),
+                                userInputRequest = request,
+                            )
+                        }
+                    }
                 }
-            }
+            )
         }
     }
 
@@ -762,18 +787,34 @@ class ChatViewModel(
         require(decision in APPROVAL_DECISIONS)
         val rpc = client ?: return
         val approval = state.value.approval ?: return
+        if (respondingApproval != null) return
+        respondingApproval = approval
+        serverResponsesInFlight.add(approval.requestId)
         mutableState.update { it.copy(approval = null) }
         viewModelScope.launch {
             runCatching {
                 rpc.respond(approval.requestId, CodexProtocol.approvalResponse(approval, decision))
-            }.onFailure { error ->
-                mutableState.update {
-                    it.copy(
-                        error = ChatError.from(error.message ?: "无法提交审批结果"),
-                        approval = approval,
-                    )
+            }.fold(
+                onSuccess = {
+                    serverResponsesInFlight.remove(approval.requestId)
+                    if (respondingApproval?.requestId == approval.requestId) {
+                        respondingApproval = null
+                        promoteNextApproval()
+                    }
+                },
+                onFailure = { error ->
+                    serverResponsesInFlight.remove(approval.requestId)
+                    if (respondingApproval?.requestId == approval.requestId) {
+                        respondingApproval = null
+                        mutableState.update {
+                            it.copy(
+                                error = ChatError.from(error.message ?: "无法提交审批结果"),
+                                approval = approval,
+                            )
+                        }
+                    }
                 }
-            }
+            )
         }
     }
 
@@ -978,11 +1019,14 @@ class ChatViewModel(
             transcriptRepository.updateItems { current ->
                 replayed.fold(current, CodexProtocol::upsert)
             }
-            eventJob?.cancel()
-            eventJob = viewModelScope.launch { held.client.events.collect(::handleInbound) }
+            stopEventCollection()
             resetStreaming()
             autoReconnecting = false
             reconnectAttempts = 0
+            respondingApproval = null
+            pendingApprovalQueue.restore(held.pendingApprovals)
+            respondingUserInput = null
+            pendingUserInputQueue.restore(held.pendingUserInputs)
             mutableState.update { current ->
                 current.copy(
                     card = card,
@@ -1002,8 +1046,15 @@ class ChatViewModel(
                 )
             }
             held.pendingRequests.toList().forEach { request -> handleServerRequest(request) }
-            if (!held.isBusy && held.queued != null) {
-                startTurn(held.queued.text, held.queued.attachments, held.client, held.threadId)
+            promoteNextApproval()
+            promoteNextUserInput()
+            // The handoff fence keeps post-marker events in the client channel. Restore
+            // the authoritative held snapshot before consuming them so a resolved event
+            // cannot race with and then be overwritten by stale pending UI state.
+            startEventCollection(held.client)
+            val queued = held.queued
+            if (!held.isBusy && queued != null) {
+                startTurn(queued.text, queued.attachments, held.client, held.threadId)
             }
         } catch (error: CancellationException) {
             disconnectServer()
@@ -1072,6 +1123,7 @@ class ChatViewModel(
                 disconnectServer()
                 beginReconnect("Codex 连接已断开：${inbound.message}")
             }
+            is CodexInbound.Handoff -> Unit
         }
     }
 
@@ -1120,6 +1172,24 @@ class ChatViewModel(
                 }
             }
 
+            "serverRequest/resolved" -> {
+                val requestId = CodexProtocol.resolvedRequestId(params) ?: return
+                pendingApprovalQueue.remove(requestId)
+                pendingUserInputQueue.remove(requestId)
+                serverResponsesInFlight.remove(requestId)
+                if (respondingApproval?.requestId == requestId) respondingApproval = null
+                if (respondingUserInput?.requestId == requestId) respondingUserInput = null
+                mutableState.update { current ->
+                    current.copy(
+                        approval = current.approval?.takeUnless { it.requestId == requestId },
+                        userInputRequest = current.userInputRequest
+                            ?.takeUnless { it.requestId == requestId },
+                    )
+                }
+                promoteNextApproval()
+                promoteNextUserInput()
+            }
+
             "item/agentMessage/delta" -> {
                 val itemId = params.optString("itemId")
                 val delta = params.optString("delta")
@@ -1147,6 +1217,10 @@ class ChatViewModel(
                 }
                 activeTurnId = null
                 steerFailedForTurn = null
+                respondingApproval = null
+                pendingApprovalQueue.clear()
+                respondingUserInput = null
+                pendingUserInputQueue.clear()
                 // Flush partial streamed text first so cancelled/failed turns keep it;
                 // authoritative items below replace it when the server sent full text.
                 commitStreaming()
@@ -1161,13 +1235,15 @@ class ChatViewModel(
                         ?.takeIf(String::isNotBlank)
                     current.copy(
                         isStreaming = false,
+                        approval = null,
+                        userInputRequest = null,
                         error = turnError?.let(ChatError::from) ?: current.error,
                     )
                 }
                 // A message queued while steering failed goes out as a fresh turn once
                 // the previous turn completed successfully.
                 val queued = state.value.queued
-                if (method == "turn/completed" && queued != null &&
+                if (!handoffInProgress && method == "turn/completed" && queued != null &&
                     client != null && threadId != null
                 ) {
                     startTurn(
@@ -1299,10 +1375,28 @@ class ChatViewModel(
         if (request.method == "item/tool/requestUserInput") {
             val inputRequest = CodexProtocol.parseUserInputRequest(request.id, params)
             if (inputRequest == null) {
-                client?.respondUnsupported(request.id, request.method)
+                respondUnsupportedToServer(request.id, request.method)
+            } else if (state.value.userInputRequest != null || respondingUserInput != null) {
+                if (!pendingUserInputQueue.offer(inputRequest)) {
+                    respondUnsupportedToServer(request.id, "too many pending user input requests")
+                }
             } else {
                 mutableState.update { it.copy(userInputRequest = inputRequest) }
             }
+            return
+        }
+        val mcpApproval = if (request.method == "mcpServer/elicitation/request") {
+            CodexProtocol.parseMcpToolApproval(
+                request.id,
+                params,
+                extensionSession?.plan?.mcpApprovalIdentities.orEmpty(),
+                requireManagedIdentity = ServiceLocator.extensions.requiresManagedMcp,
+            )
+        } else {
+            null
+        }
+        if (request.method == "mcpServer/elicitation/request" && mcpApproval == null) {
+            respondToServer(request.id, CodexProtocol.cancelMcpElicitationResponse())
             return
         }
         val approval = when (request.method) {
@@ -1338,13 +1432,18 @@ class ChatViewModel(
                 )
             }
 
+            "mcpServer/elicitation/request" -> mcpApproval
+
             else -> null
         }
         if (approval == null) {
-            client?.respondUnsupported(request.id, request.method)
-        } else if (CodexProtocol.shouldAutoDecline(permissionLevel)) {
+            respondUnsupportedToServer(request.id, request.method)
+        } else if (CodexProtocol.shouldAutoDecline(permissionLevel, approval.kind)) {
             try {
-                client?.respond(request.id, CodexProtocol.approvalResponse(approval, "decline"))
+                respondToServer(
+                    request.id,
+                    CodexProtocol.approvalResponse(approval, "decline"),
+                )
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -1366,8 +1465,49 @@ class ChatViewModel(
                     status = "blocked",
                 )
             }
+        } else if (state.value.approval != null || respondingApproval != null) {
+            if (!pendingApprovalQueue.offer(approval)) {
+                respondToServer(
+                    request.id,
+                    CodexProtocol.approvalResponse(approval, "cancel"),
+                )
+            }
         } else {
             mutableState.update { it.copy(approval = approval) }
+        }
+    }
+
+    private fun promoteNextApproval() {
+        if (respondingApproval != null || state.value.approval != null) return
+        pendingApprovalQueue.poll()?.let { next ->
+            mutableState.update { it.copy(approval = next) }
+        }
+    }
+
+    private fun promoteNextUserInput() {
+        if (respondingUserInput != null || state.value.userInputRequest != null) return
+        pendingUserInputQueue.poll()?.let { next ->
+            mutableState.update { it.copy(userInputRequest = next) }
+        }
+    }
+
+    private suspend fun respondToServer(requestId: RpcRequestId, response: JSONObject) {
+        val rpc = client ?: return
+        serverResponsesInFlight.add(requestId)
+        try {
+            rpc.respond(requestId, response)
+        } finally {
+            serverResponsesInFlight.remove(requestId)
+        }
+    }
+
+    private suspend fun respondUnsupportedToServer(requestId: RpcRequestId, method: String) {
+        val rpc = client ?: return
+        serverResponsesInFlight.add(requestId)
+        try {
+            rpc.respondUnsupported(requestId, method)
+        } finally {
+            serverResponsesInFlight.remove(requestId)
         }
     }
 
@@ -1412,11 +1552,11 @@ class ChatViewModel(
         val rpc = client
         val currentThread = threadId
         val currentEndpoint = endpoint
-        // The registry collector takes over event consumption; stop ours first so the
-        // underlying channel is not drained by two collectors at once.
-        eventJob?.cancel()
-        eventJob = null
-        if (shouldKeepSessionInBackground(state.value) &&
+        handoffInProgress = true
+        if (shouldKeepSessionInBackground(
+                state = state.value,
+                hasServerResponseInFlight = serverResponsesInFlight.isNotEmpty(),
+            ) &&
             rpc != null && currentThread != null && currentEndpoint != null &&
             state.value.isConnected &&
             ChatSessionRegistry.hold(
@@ -1435,19 +1575,39 @@ class ChatViewModel(
                 developerInstructions = developerInstructions,
                 activeTurnId = activeTurnId,
                 pendingApproval = state.value.approval,
+                pendingApprovals = pendingApprovalQueue.snapshot(),
                 pendingUserInput = state.value.userInputRequest,
+                pendingUserInputs = pendingUserInputQueue.snapshot(),
                 queued = state.value.queued,
                 broker = credentialBroker,
                 extensionSession = extensionSession,
+                onDrained = { held ->
+                    val current = state.value
+                    held.activeTurnId = activeTurnId
+                    held.isBusy = hasActiveSessionWork(current)
+                    held.pendingApproval = current.approval
+                    held.pendingApprovals.clear()
+                    held.pendingApprovals.addAll(pendingApprovalQueue.snapshot())
+                    held.pendingUserInput = current.userInputRequest
+                    held.pendingUserInputs.clear()
+                    held.pendingUserInputs.addAll(pendingUserInputQueue.snapshot())
+                    held.queued = current.queued
+                    client = null
+                    handoffInProgress = false
+                },
             )
         ) {
-            client = null
+            // The collector drains to the handoff marker and exits naturally. Direct
+            // cancellation could lose a Channel element already dequeued for delivery.
+            eventJob = null
+            eventCollectorScope = null
             endpoint = null
             credentialBroker = null
             extensionSession = null
             ActiveCodexConnections.unregister(cardId, rpc)
             return
         }
+        handoffInProgress = false
         disconnectServer()
     }
 
@@ -1457,6 +1617,13 @@ class ChatViewModel(
      * onCleared() stays off the main thread without leaking coroutines.
      */
     private fun disconnectServer() {
+        handoffInProgress = false
+        respondingApproval = null
+        respondingUserInput = null
+        serverResponsesInFlight.clear()
+        pendingApprovalQueue.clear()
+        pendingUserInputQueue.clear()
+        stopEventCollection()
         unbindHostWorkspaceSession()
         ChatSessionRegistry.stopAndRemove(cardId)
         val rpc = client
@@ -1483,6 +1650,32 @@ class ChatViewModel(
                 }
             }
         }
+    }
+
+    private fun startEventCollection(rpc: CodexRpcClient) {
+        stopEventCollection()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        eventCollectorScope = scope
+        eventJob = scope.launch {
+            try {
+                rpc.eventsUntilHandoff().collect(::handleInbound)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (client === rpc) {
+                    commitStreaming()
+                    disconnectServer()
+                    beginReconnect("Codex 事件处理失败：${error.message ?: "未知错误"}")
+                }
+            }
+        }
+    }
+
+    private fun stopEventCollection() {
+        eventJob?.cancel()
+        eventJob = null
+        eventCollectorScope?.cancel()
+        eventCollectorScope = null
     }
 
     companion object {
@@ -1561,12 +1754,17 @@ private data class MarkdownWindow(
     val streamingItemId: String?,
 )
 
-internal fun shouldKeepSessionInBackground(state: ChatUiState): Boolean =
+internal fun shouldKeepSessionInBackground(
+    state: ChatUiState,
+    hasServerResponseInFlight: Boolean = false,
+): Boolean = !hasServerResponseInFlight &&
+    state.hostWriteApproval == null &&
+    (hasActiveSessionWork(state) || state.queued != null)
+
+internal fun hasActiveSessionWork(state: ChatUiState): Boolean =
     state.isStreaming ||
         state.approval != null ||
-        state.hostWriteApproval != null ||
-        state.userInputRequest != null ||
-        state.queued != null
+        state.userInputRequest != null
 
 internal fun reconnectDelayMs(attempt: Int): Long {
     val schedule = longArrayOf(1_000L, 2_000L, 5_000L, 10_000L, 30_000L)
@@ -1593,6 +1791,7 @@ private fun ChatApproval.blockedActionLabel(): String = when (kind) {
     ApprovalKind.COMMAND -> "命令执行"
     ApprovalKind.FILE_CHANGE -> "文件修改"
     ApprovalKind.PERMISSIONS -> "额外权限请求"
+    ApprovalKind.MCP_TOOL -> "MCP 工具调用"
 }
 
 private fun CodexRpcException.isMissingThread(): Boolean {

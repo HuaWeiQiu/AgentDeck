@@ -4,7 +4,6 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.agentdeck.app.BuildConfig
-import com.agentdeck.app.data.extensions.RemoteMcpToolDiscovery
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.extensions.ExtensionAuthType
 import com.agentdeck.app.domain.extensions.ExtensionPolicy
@@ -81,8 +80,7 @@ class ExtensionsViewModel : ViewModel() {
         runOperation(onResult) {
             val bearer = bearerForDiscovery(existingId, url, authType, bearerToken)
             try {
-                RemoteMcpToolDiscovery(extensionPolicy)
-                    .discover(url, bearer)
+                repository.discoverRemote(url, bearer)
             } finally {
                 bearer?.fill(0)
             }

@@ -144,6 +144,45 @@ class CodexRpcClientTest {
     }
 
     @Test
+    fun `handoff fence drains prior events and leaves later events for next owner`() = runBlocking {
+        val transport = FakeTransport()
+        val client = CodexRpcClient(transport)
+        val firstOwnerEvents = mutableListOf<CodexInbound>()
+        val drained = CompletableDeferred<Unit>()
+
+        try {
+            val firstOwner = launch {
+                client.eventsUntilHandoff().toList(firstOwnerEvents)
+            }
+            transport.receive(
+                JSONObject(
+                    """{"method":"before/handoff","params":{}}""",
+                ),
+            )
+            val handoff = client.tryEnqueueEventHandoff { drained.complete(Unit) }
+                ?: error("handoff should fit in an otherwise empty queue")
+            transport.receive(
+                JSONObject(
+                    """{"method":"after/handoff","params":{}}""",
+                ),
+            )
+
+            withTimeout(1_000) { handoff.await() }
+            firstOwner.join()
+            assertTrue(drained.isCompleted)
+            assertEquals(
+                listOf("before/handoff"),
+                firstOwnerEvents.filterIsInstance<CodexInbound.Notification>().map { it.method },
+            )
+
+            val nextOwner = withTimeout(1_000) { client.eventsUntilHandoff().first() }
+            assertEquals("after/handoff", (nextOwner as CodexInbound.Notification).method)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun `normal transport completion fails pending request immediately`() = runBlocking {
         val transport = FakeTransport()
         val client = CodexRpcClient(transport)
