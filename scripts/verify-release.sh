@@ -23,27 +23,57 @@ done
 python3 scripts/test-file-adapter.py
 
 cd android
-./gradlew :app:testDebugUnitTest :app:assembleBeta :app:lintBeta
+# Product flavors (ADR-0012): secure = daily L1, lab = experimental L2–L4.
+./gradlew \
+  :app:testSecureDebugUnitTest \
+  :app:testLabDebugUnitTest \
+  :app:assembleSecureBeta \
+  :app:assembleLabBeta \
+  :app:lintSecureBeta \
+  :app:lintLabBeta
 
-arm64_apk="app/build/outputs/apk/beta/app-arm64-v8a-beta.apk"
-x86_apk="app/build/outputs/apk/beta/app-x86_64-beta.apk"
-test -s "$arm64_apk"
-test -s "$x86_apk"
-test -s app/build/reports/lint-results-beta.html
-for apk in "$arm64_apk" "$x86_apk"; do
+secure_arm64="app/build/outputs/apk/secure/beta/app-secure-arm64-v8a-beta.apk"
+secure_x86="app/build/outputs/apk/secure/beta/app-secure-x86_64-beta.apk"
+lab_arm64="app/build/outputs/apk/lab/beta/app-lab-arm64-v8a-beta.apk"
+lab_x86="app/build/outputs/apk/lab/beta/app-lab-x86_64-beta.apk"
+for apk in "$secure_arm64" "$secure_x86" "$lab_arm64" "$lab_x86"; do
+  test -s "$apk"
+done
+test -s app/build/reports/lint-results-secureBeta.html
+test -s app/build/reports/lint-results-labBeta.html
+
+verify_apk_common() {
+  local apk="$1"
+  local apk_entries
   apk_entries="$(unzip -Z1 "$apk")"
   grep -Fxq 'assets/licenses/PROOT-GPL-2.0.txt' <<<"$apk_entries"
   grep -Fxq 'assets/dexopt/baseline.prof' <<<"$apk_entries"
-done
-arm64_entries="$(unzip -Z1 "$arm64_apk")"
-x86_entries="$(unzip -Z1 "$x86_apk")"
-grep -Fxq 'lib/arm64-v8a/libproot.so' <<<"$arm64_entries"
-grep -Fxq 'lib/arm64-v8a/libproot-loader.so' <<<"$arm64_entries"
-grep -Fxq 'lib/arm64-v8a/libtalloc.so' <<<"$arm64_entries"
-! grep -Fq 'lib/x86_64/libproot.so' <<<"$arm64_entries"
-grep -Fxq 'lib/x86_64/libproot.so' <<<"$x86_entries"
-grep -Fxq 'lib/x86_64/libproot-loader.so' <<<"$x86_entries"
-grep -Fxq 'lib/x86_64/libtalloc.so' <<<"$x86_entries"
-! grep -Fq 'lib/arm64-v8a/libproot.so' <<<"$x86_entries"
+}
 
-echo "AgentDeck release verification passed."
+verify_abi_split() {
+  local arm64_apk="$1"
+  local x86_apk="$2"
+  local arm64_entries x86_entries
+  arm64_entries="$(unzip -Z1 "$arm64_apk")"
+  x86_entries="$(unzip -Z1 "$x86_apk")"
+  grep -Fxq 'lib/arm64-v8a/libproot.so' <<<"$arm64_entries"
+  grep -Fxq 'lib/arm64-v8a/libproot-loader.so' <<<"$arm64_entries"
+  grep -Fxq 'lib/arm64-v8a/libtalloc.so' <<<"$arm64_entries"
+  ! grep -Fq 'lib/x86_64/libproot.so' <<<"$arm64_entries"
+  grep -Fxq 'lib/x86_64/libproot.so' <<<"$x86_entries"
+  grep -Fxq 'lib/x86_64/libproot-loader.so' <<<"$x86_entries"
+  grep -Fxq 'lib/x86_64/libtalloc.so' <<<"$x86_entries"
+  ! grep -Fq 'lib/arm64-v8a/libproot.so' <<<"$x86_entries"
+}
+
+for apk in "$secure_arm64" "$secure_x86" "$lab_arm64" "$lab_x86"; do
+  verify_apk_common "$apk"
+done
+verify_abi_split "$secure_arm64" "$secure_x86"
+verify_abi_split "$lab_arm64" "$lab_x86"
+
+# Channel isolation: secure must not ship Lab a11y; lab must include it.
+! unzip -p "$secure_arm64" AndroidManifest.xml | strings | grep -Fq 'LabAccessibilityService'
+unzip -p "$lab_arm64" AndroidManifest.xml | strings | grep -Fq 'LabAccessibilityService'
+
+echo "AgentDeck release verification passed (secure + lab)."

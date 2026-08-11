@@ -29,18 +29,23 @@ sdk.dir=/path/to/android-sdk
 
 ```bash
 cd android
-./gradlew :app:testDebugUnitTest :app:assembleBeta :app:lintBeta
+./gradlew \
+  :app:testSecureDebugUnitTest \
+  :app:testLabDebugUnitTest \
+  :app:assembleSecureBeta \
+  :app:assembleLabBeta \
+  :app:lintSecureBeta \
+  :app:lintLabBeta
 ```
 
-| 项目 | 值 |
-|---|---|
-| Beta application ID | `com.agentdeck.app.debug` |
-| 版本 | `0.2.0-beta.4`（`versionCode=9`，测试预发布） |
-| ARM64 APK | `app/build/outputs/apk/beta/app-arm64-v8a-beta.apk` |
-| x86_64 APK | `app/build/outputs/apk/beta/app-x86_64-beta.apk` |
-| Lint | `app/build/reports/lint-results-beta.html` |
+| 项目 | 安全版 Secure | Lab 实验版 |
+|---|---|---|
+| applicationId（beta） | `com.agentdeck.app.debug` | `com.agentdeck.app.lab.debug` |
+| 版本 | `0.2.0-beta.6`（`versionCode=11`） | `0.2.0-beta.6-lab` |
+| ARM64 APK | `app/build/outputs/apk/secure/beta/app-secure-arm64-v8a-beta.apk` | `app/build/outputs/apk/lab/beta/app-lab-arm64-v8a-beta.apk` |
+| Lint | `app/build/reports/lint-results-secureBeta.html` | `app/build/reports/lint-results-labBeta.html` |
 
-`beta` 使用测试签名以便覆盖现有测试安装，但继承 release 的 R8、资源压缩和依赖 Baseline Profile；`debug` 只用于开发，不再作为真机预发布产物。
+`beta` 使用测试签名以便覆盖现有测试安装，但继承 release 的 R8、资源压缩和依赖 Baseline Profile；`debug` 只用于开发，不再作为真机预发布产物。Secure 默认仅 L1；Lab 含 L2–L4 组件（默认关闭）。
 
 ## 模块
 

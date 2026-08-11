@@ -1,5 +1,6 @@
 package com.agentdeck.app.data.runtime
 
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -14,6 +15,13 @@ import com.agentdeck.app.MainActivity
 import com.agentdeck.app.R
 import java.util.concurrent.atomic.AtomicInteger
 
+/**
+ * Local Codex session foreground service.
+ *
+ * Manifest already declares `foregroundServiceType="specialUse"`. Lint can still
+ * false-positive [ForegroundServiceType] on multi-service (Lab a11y) merges.
+ */
+@SuppressLint("ForegroundServiceType")
 class EmbeddedRuntimeService : Service() {
     override fun onCreate() {
         super.onCreate()

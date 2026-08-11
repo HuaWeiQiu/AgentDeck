@@ -50,7 +50,10 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
           path: |
-            android/app/build/outputs/apk/beta/app-arm64-v8a-beta.apk
-            android/app/build/outputs/apk/beta/app-x86_64-beta.apk
-            android/app/build/reports/lint-results-beta.html
+            android/app/build/outputs/apk/secure/beta/app-secure-arm64-v8a-beta.apk
+            android/app/build/outputs/apk/secure/beta/app-secure-x86_64-beta.apk
+            android/app/build/outputs/apk/lab/beta/app-lab-arm64-v8a-beta.apk
+            android/app/build/outputs/apk/lab/beta/app-lab-x86_64-beta.apk
+            android/app/build/reports/lint-results-secureBeta.html
+            android/app/build/reports/lint-results-labBeta.html
             android/app/build/reports/stability/host-matrix.json

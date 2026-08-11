@@ -48,7 +48,7 @@ PY
 trap write_report EXIT
 
 python3 "$repo_root/scripts/test-file-adapter.py"
-"$repo_root/android/gradlew" -p "$repo_root/android" :app:testDebugUnitTest \
+"$repo_root/android/gradlew" -p "$repo_root/android" :app:testSecureDebugUnitTest \
   --tests 'com.agentdeck.app.data.chat.CodexRpcClientTest' \
   --tests 'com.agentdeck.app.data.chat.ChatAttachmentStoreTest' \
   --tests 'com.agentdeck.app.domain.chat.CodexProtocolTest' \
