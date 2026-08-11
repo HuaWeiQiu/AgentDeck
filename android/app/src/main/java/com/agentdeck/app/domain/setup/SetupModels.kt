@@ -19,6 +19,11 @@ data class SetupState(
     val progress: RecipeInstallProgress? = null,
     val message: String? = null,
     val error: String? = null,
+    /**
+     * False until we either restore a previous good result or finish one scan.
+     * Prevents flashing "not ready" on the first frames of a cold start.
+     */
+    val checkSettled: Boolean = false,
 ) {
     val canStartChat: Boolean
         get() = report.canLaunchSessions

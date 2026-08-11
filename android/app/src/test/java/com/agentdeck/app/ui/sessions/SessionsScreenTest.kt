@@ -46,8 +46,7 @@ class SessionsScreenTest {
     }
 
     @Test
-    fun `setup banner hides when a managed conversation is ready`() {
-        val setup = SetupState(reportWithoutAuthentication())
+    fun `setup banner only after settled failure and never when runtime can launch`() {
         val card = AgentCard(
             id = "card",
             name = "Codex",
@@ -62,9 +61,38 @@ class SessionsScreenTest {
             distro = "ubuntu",
             innerBin = "codex",
         )
+        val profiles = listOf(readyProfile())
 
-        assertFalse(shouldShowSetupBanner(setup, listOf(card), listOf(readyProfile())))
-        assertTrue(shouldShowSetupBanner(setup, listOf(card.copy(profileId = null)), listOf(readyProfile())))
+        // Runtime launchable (even if model auth pending) → no runtime banner.
+        assertFalse(
+            shouldShowSetupBanner(
+                SetupState(reportWithoutAuthentication(), checkSettled = true),
+                listOf(card),
+                profiles,
+            ),
+        )
+        // Not settled yet → no flash.
+        assertFalse(
+            shouldShowSetupBanner(
+                SetupState(readyReport(), checkSettled = false, isScanning = true),
+                emptyList(),
+                emptyList(),
+            ),
+        )
+        // Settled and runtime cannot launch → show banner.
+        val broken = SetupState(
+            report = EnvironmentReport(
+                readyReport().checks.map { check ->
+                    if (check.id == "embedded_runtime") {
+                        check.copy(status = EnvironmentCheckStatus.ACTION_REQUIRED)
+                    } else {
+                        check
+                    }
+                },
+            ),
+            checkSettled = true,
+        )
+        assertTrue(shouldShowSetupBanner(broken, emptyList(), emptyList()))
     }
 
     @Test

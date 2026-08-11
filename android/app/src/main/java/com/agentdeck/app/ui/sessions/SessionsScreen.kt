@@ -455,15 +455,12 @@ internal fun shouldShowSetupBanner(
     cards: List<AgentCard>,
     profiles: List<ProviderProfile>,
 ): Boolean {
-    if (setupState.isReady) return false
-    // Don't flash "not ready" while a background re-check is running and launch is already OK.
-    if (setupState.isScanning && setupState.canStartChat) return false
-    return cards.none { card ->
-        val profile = card.profileId?.let { profileId ->
-            profiles.firstOrNull { it.id == profileId }
-        }
-        card.enabled && canStartConversation(setupState, profile)
-    }
+    // Runtime already launchable → never show the "runtime not ready" strip.
+    if (setupState.canStartChat) return false
+    // Still checking / not settled → don't flash a premature failure.
+    if (!setupState.checkSettled || setupState.isScanning) return false
+    // Confirmed not ready after a real check.
+    return true
 }
 
 internal fun canStartConversation(

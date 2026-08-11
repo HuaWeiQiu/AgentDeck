@@ -29,6 +29,8 @@ class SetupCoordinator(
                 previousCanLaunchSessions -> optimisticReport(fullyReady = false)
                 else -> scanner.initialReport()
             },
+            // Previously-good installs start settled so UI does not flash failure.
+            checkSettled = previousCanLaunchSessions || previousFullyReady,
         ),
     )
     private var scanJob: Job? = null
@@ -51,8 +53,8 @@ class SetupCoordinator(
         ) {
             return
         }
-        // 已就绪时后台静默复查，不把 isScanning 打到 UI，避免「未就绪」横幅闪一下。
-        val silent = !force && mutableState.value.canStartChat
+        // 已就绪 / 已有上次结果：后台静默复查，不把「检查中」打到 UI。
+        val silent = !force && (mutableState.value.canStartChat || mutableState.value.checkSettled)
         if (!silent) {
             mutableState.update {
                 it.copy(
@@ -71,6 +73,7 @@ class SetupCoordinator(
                     report = report,
                     isScanning = false,
                     message = null,
+                    checkSettled = true,
                 )
             }
         }
@@ -152,7 +155,8 @@ class SetupCoordinator(
     companion object {
         private const val CODEX_RECIPE_ID = "recipe_codex"
         private const val MAX_ERROR_LENGTH = 480
-        private const val SCAN_CACHE_WINDOW_MS = 45_000L
+        // Resume re-checks at most every few minutes once already settled.
+        private const val SCAN_CACHE_WINDOW_MS = 3 * 60_000L
 
         /**
          * Seed UI with last-known-good checks so cold start does not flash
