@@ -4,6 +4,26 @@ All notable changes to AgentDeck are documented in this file.
 
 ## Unreleased
 
+## 0.2.0-beta.5 - 2026-08-11
+
+### Fixed
+
+- Runtime base-tool install now clears Ubuntu default apt sources and tries domestic
+  HTTP mirrors in order (Aliyun → Tsinghua → USTC) before installing
+  `ca-certificates`, `git`, `python3`, and `poppler-utils`.
+- Guest DNS prefers public China resolvers (`223.5.5.5`, `119.29.29.29`) and still
+  falls back to `8.8.8.8` / `1.1.1.1`; apt retries and HTTP timeouts are configured
+  for slow first-run networks.
+- Setup failure banners now show the real install reason instead of only a generic
+  “retry” message; retained error text is longer for apt/network diagnostics.
+
+### Verified
+
+- JVM unit coverage for domestic apt source generation, install script mirror
+  fallback, and customer-facing error presentation.
+- ARM64 Vivo V2301A fresh install after data clear completed local Runtime setup
+  with the domestic mirror path (3/4 ready before model connection).
+
 ## 0.2.0-beta.4 - 2026-08-10
 
 ### Added

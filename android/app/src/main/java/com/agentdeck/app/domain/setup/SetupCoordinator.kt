@@ -137,7 +137,7 @@ class SetupCoordinator(
 
     companion object {
         private const val CODEX_RECIPE_ID = "recipe_codex"
-        private const val MAX_ERROR_LENGTH = 240
+        private const val MAX_ERROR_LENGTH = 480
         private const val SCAN_CACHE_WINDOW_MS = 45_000L
     }
 }

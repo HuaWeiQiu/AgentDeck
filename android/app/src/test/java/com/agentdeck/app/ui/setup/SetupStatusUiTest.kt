@@ -7,7 +7,6 @@ import com.agentdeck.app.domain.install.RecipeInstallProgress
 import com.agentdeck.app.domain.setup.SetupState
 import com.agentdeck.app.domain.setup.readyReport
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class SetupStatusUiTest {
@@ -75,17 +74,29 @@ class SetupStatusUiTest {
     }
 
     @Test
-    fun `customer error does not expose raw runtime details`() {
+    fun `customer error surfaces actionable install reason`() {
         val presentation = customerSetupPresentation(
             SetupState(
                 report = readyReport(),
-                error = "Termux app-server exited with code 127",
+                error = "安装基础工具失败：Could not resolve 'ports.ubuntu.com'",
             ),
         )
 
         assertEquals("准备未完成", presentation.title)
-        assertFalse(presentation.errorMessage.orEmpty().contains("Termux"))
-        assertFalse(presentation.errorMessage.orEmpty().contains("127"))
+        val message = presentation.errorMessage.orEmpty()
+        assertEquals(true, message.contains("未能完成当前步骤"))
+        assertEquals(true, message.contains("现有对话和项目不会受到影响"))
+        assertEquals(true, message.contains("原因：安装基础工具失败"))
+        assertEquals(true, message.contains("ports.ubuntu.com"))
+    }
+
+    @Test
+    fun `customer setup error message collapses whitespace`() {
+        val message = customerSetupErrorMessage("  安装失败\n\n  网络超时  ")
+        assertEquals(
+            "未能完成当前步骤。现有对话和项目不会受到影响。\n\n原因：安装失败 网络超时",
+            message,
+        )
     }
 
     @Test
@@ -133,6 +144,7 @@ class SetupStatusUiTest {
 
         assertEquals("安装基础工具", presentation.title)
         assertEquals("阶段 5 / 7", presentation.stageLabel)
+        assertEquals(true, presentation.detail.contains("国内软件源"))
         assertEquals(true, presentation.detail.contains("可能需要几分钟"))
     }
 }

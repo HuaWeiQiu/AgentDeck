@@ -72,12 +72,12 @@ internal class EmbeddedRuntimeInstaller(
 
                 progress(InstallPhase.EXTRACTING, onProgress)
                 SecureTarExtractor.extractGzipTar(rootfsArchive, paths.stagingRootfs)
-                configureRootfs()
+                configureRootfs(runtime.androidAbi)
                 installCodex(codexArchive, runtime)
                 installRuntimeHelpers()
 
                 progress(InstallPhase.INSTALLING_TOOLS, onProgress)
-                installBaseTools()
+                installBaseTools(runtime.androidAbi)
 
                 progress(InstallPhase.VERIFYING_RUNTIME, onProgress)
                 verifyStagingRuntime()
@@ -144,7 +144,7 @@ internal class EmbeddedRuntimeInstaller(
 
     private fun verify(file: File, artifact: VerifiedArtifact) = verifyArtifact(file, artifact)
 
-    private fun configureRootfs() {
+    private fun configureRootfs(androidAbi: String) {
         listOf(
             "root/projects/default",
             "root/.codex",
@@ -154,17 +154,31 @@ internal class EmbeddedRuntimeInstaller(
             "var/cache/apt/archives/partial",
             "var/lib/dpkg/updates",
             "etc/dpkg/dpkg.cfg.d",
+            "etc/apt/apt.conf.d",
+            "etc/apt/sources.list.d",
             "usr/local/bin",
             "usr/local/lib/agentdeck",
         ).forEach { relative -> check(File(paths.stagingRootfs, relative).mkdirs() || File(paths.stagingRootfs, relative).isDirectory) }
 
         replaceRegularFile(
             File(paths.stagingRootfs, "etc/resolv.conf"),
-            "nameserver 8.8.8.8\nnameserver 1.1.1.1\n",
+            embeddedRuntimeResolvConf(),
         )
         replaceRegularFile(
             File(paths.stagingRootfs, "etc/hosts"),
             "127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n",
+        )
+        // Ubuntu Base 可能自带 ports.ubuntu.com / deb822 sources；清掉后只走国内镜像。
+        File(paths.stagingRootfs, "etc/apt/sources.list.d").listFiles()
+            ?.filter { it.isFile && (it.name.endsWith(".list") || it.name.endsWith(".sources")) }
+            ?.forEach { source -> check(source.delete()) { "无法清理默认软件源 ${source.name}" } }
+        replaceRegularFile(
+            File(paths.stagingRootfs, "etc/apt/sources.list"),
+            embeddedAptSourcesList(androidAbi),
+        )
+        replaceRegularFile(
+            File(paths.stagingRootfs, "etc/apt/apt.conf.d/80-agentdeck"),
+            embeddedAptConf(),
         )
         File(paths.stagingRootfs, "etc/dpkg/dpkg.cfg.d/force-unsafe-io")
             .writeText("force-unsafe-io\n")
@@ -206,11 +220,9 @@ internal class EmbeddedRuntimeInstaller(
         }
     }
 
-    private suspend fun installBaseTools() {
+    private suspend fun installBaseTools(androidAbi: String) {
         val result = EmbeddedProotProcess(paths, paths.stagingRootfs).execute(
-            script = "set -e; apt-get update; " +
-                "apt-get install -y --no-install-recommends ca-certificates git python3 poppler-utils; " +
-                "apt-get clean; mkdir -p /root/projects/default",
+            script = embeddedInstallBaseToolsScript(androidAbi),
             timeoutMillis = TOOLS_TIMEOUT_MILLIS,
         ).getOrThrow()
         check(result.commandSucceeded) {
@@ -384,3 +396,71 @@ internal fun verifyArtifact(file: File, artifact: VerifiedArtifact) {
 private const val HTTP_PARTIAL = 206
 private const val DOWNLOAD_BUFFER_BYTES = 128 * 1024
 private val RETRY_BACKOFF_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)
+
+/** Guest DNS：优先国内公共 DNS，再回退公共解析，降低 apt 阶段解析失败概率。 */
+internal fun embeddedRuntimeResolvConf(): String =
+    "nameserver 223.5.5.5\n" +
+        "nameserver 119.29.29.29\n" +
+        "nameserver 8.8.8.8\n" +
+        "nameserver 1.1.1.1\n"
+
+internal fun embeddedAptConf(): String =
+    "Acquire::Retries \"5\";\n" +
+        "Acquire::http::Timeout \"30\";\n" +
+        "Acquire::https::Timeout \"30\";\n"
+
+/**
+ * 按 ABI 选择 Ubuntu 官方套件对应的国内镜像基址（HTTP，避免 ca-certificates 安装前无法走 HTTPS）。
+ * arm64 走 ubuntu-ports，x86_64 走 ubuntu。
+ */
+internal fun embeddedAptMirrorBases(androidAbi: String): List<String> {
+    val path = when (androidAbi) {
+        "arm64-v8a" -> "ubuntu-ports"
+        "x86_64" -> "ubuntu"
+        else -> error("不支持的架构: $androidAbi")
+    }
+    return listOf(
+        "http://mirrors.aliyun.com/$path",
+        "http://mirrors.tuna.tsinghua.edu.cn/$path",
+        "http://mirrors.ustc.edu.cn/$path",
+    )
+}
+
+internal fun embeddedAptSourcesList(
+    androidAbi: String,
+    mirrorBase: String = embeddedAptMirrorBases(androidAbi).first(),
+    suite: String = "noble",
+): String {
+    val components = "main restricted universe multiverse"
+    return buildString {
+        listOf("", "-updates", "-backports", "-security").forEach { pocket ->
+            append("deb $mirrorBase $suite$pocket $components\n")
+        }
+    }
+}
+
+/**
+ * 在 PRoot 内安装基础工具：按国内镜像顺序尝试 apt-get update，成功后再 install。
+ * 使用 heredoc 写 sources.list，避免依赖已安装的 sed/python。
+ */
+internal fun embeddedInstallBaseToolsScript(androidAbi: String): String = buildString {
+    appendLine("set -e")
+    appendLine("updated=0")
+    embeddedAptMirrorBases(androidAbi).forEach { mirror ->
+        appendLine("if [ \"\$updated\" -eq 0 ]; then")
+        appendLine("cat > /etc/apt/sources.list <<'AGENTDECK_APT_EOF'")
+        append(embeddedAptSourcesList(androidAbi, mirrorBase = mirror))
+        appendLine("AGENTDECK_APT_EOF")
+        appendLine("rm -rf /var/lib/apt/lists/* || true")
+        appendLine("mkdir -p /var/lib/apt/lists/partial")
+        appendLine("apt-get update && updated=1 || true")
+        appendLine("fi")
+    }
+    appendLine("test \"\$updated\" -eq 1")
+    appendLine(
+        "apt-get install -y --no-install-recommends " +
+            "ca-certificates git python3 poppler-utils",
+    )
+    appendLine("apt-get clean")
+    appendLine("mkdir -p /root/projects/default")
+}

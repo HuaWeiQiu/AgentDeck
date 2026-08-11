@@ -2,7 +2,7 @@
 
 AgentDeck 是 Android 上聊天优先的本地 Codex 客户端。`0.2` 测试版可以在 App 私有目录中准备经过校验的 Ubuntu/Codex Runtime，不要求新用户安装 Termux；App 内呈现真实消息、工具活动、审批和停止。AgentDeck 不重写 Codex 的 Agent 循环，也不解析终端屏幕伪造消息。
 
-最新测试预发布为 [`v0.2.0-beta.4`](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.4)，按 ARM64/x86_64 拆分 APK。ARM64 已完成 Android 16 真机覆盖安装与文件适配验收；x86_64 已完成构建和包内容校验，但实际 Runtime 启动仍待 x86_64 Android 虚拟设备验证。Beta APK 使用测试签名，不是正式签名的稳定版；构建本身启用 R8、资源压缩和依赖 Baseline Profile。`v0.1.0` 是早期骨架。
+最新测试预发布为 [`v0.2.0-beta.5`](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.5)，按 ARM64/x86_64 拆分 APK。ARM64 已完成 Android 16 真机首次 Runtime 准备（含国内 apt 源）验收；x86_64 已完成构建和包内容校验，但实际 Runtime 启动仍待 x86_64 Android 虚拟设备验证。Beta APK 使用测试签名，不是正式签名的稳定版；构建本身启用 R8、资源压缩和依赖 Baseline Profile。`v0.1.0` 是早期骨架。
 
 ## 当前能力
 
@@ -29,7 +29,7 @@ Claude Code 目前只是 P1 规划项，不提供安装或启动入口。受管 
 - 思考和工具过程默认显示简洁摘要；原始命令、协议事件和日志进入高级或开发者设置。
 - 高级设置提供 Provider、Endpoint、模型、工作区、权限和内嵌 Runtime 状态；开发者模式提供脱敏诊断与测试工具，但不能绕过安全边界。
 
-完整决策见 [三级体验](docs/ADR-0008-CUSTOMER-EXPERIENCE-MODES.md) 和 [内嵌本地 Runtime](docs/ADR-0009-EMBEDDED-LOCAL-RUNTIME.md)。`0.2.0-beta.4` 已通过一台 Android 16 ARM64 真机的覆盖安装、Runtime 恢复和文件适配关键路径验收，稳定版仍需更多 OEM、异常恢复、审批和正式签名覆盖。
+完整决策见 [三级体验](docs/ADR-0008-CUSTOMER-EXPERIENCE-MODES.md) 和 [内嵌本地 Runtime](docs/ADR-0009-EMBEDDED-LOCAL-RUNTIME.md)。`0.2.0-beta.5` 已通过一台 Android 16 ARM64 真机的空白数据首次 Runtime 准备（国内软件源）验收，稳定版仍需更多 OEM、异常恢复、审批和正式签名覆盖。
 
 ## 运行边界
 
@@ -90,8 +90,8 @@ AgentDeck/
 ## 发布状态
 
 - 早期骨架：[v0.1.0](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.0)
-- 当前测试预发布：[v0.2.0-beta.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.4)（ARM64/x86_64 拆分、文件适配层、稳定性矩阵；x86_64 运行门禁待完成）
-- 历史测试预发布：[v0.2.0-beta.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.3)、[v0.2.0-beta.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.2)、[v0.2.0-beta.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.1)、[v0.1.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.4)、[v0.1.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.3)、[v0.1.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.2)
+- 当前测试预发布：[v0.2.0-beta.5](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.5)（国内 apt 源与真实安装错误；x86_64 运行门禁待完成）
+- 历史测试预发布：[v0.2.0-beta.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.4)、[v0.2.0-beta.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.3)、[v0.2.0-beta.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.2)、[v0.2.0-beta.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.1)、[v0.1.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.4)、[v0.1.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.3)、[v0.1.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.2)
 - 已知损坏版本：[v0.1.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.1)（新安装首次启动会崩溃）
 - 转为稳定版前的阻塞项：更多 OEM/Android 版本、首次完整安装、审批、异常恢复和历史数据升级验收；正式签名配置。
 

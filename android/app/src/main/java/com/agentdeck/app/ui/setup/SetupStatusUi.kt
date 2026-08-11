@@ -98,7 +98,7 @@ fun setupInstallProgressPresentation(
         -> ProgressStage(
             5,
             "安装基础工具",
-            "配置证书、Git、Python 和 PDF 解析工具，可能需要几分钟",
+            "通过国内软件源安装证书、Git、Python 和 PDF 工具，可能需要几分钟",
             0.76f,
         )
         InstallPhase.VERIFYING,
@@ -161,10 +161,14 @@ fun customerSetupPresentation(state: SetupState): CustomerSetupPresentation {
         title = title,
         summary = summary,
         primaryActionLabel = primaryActionLabel,
-        errorMessage = state.error?.let {
-            "未能完成当前步骤。请重试；现有对话和项目不会受到影响。"
-        },
+        errorMessage = state.error?.let(::customerSetupErrorMessage),
     )
+}
+
+/** 准备失败时保留可操作原因；不伪造成功，也不再吞掉具体错误。 */
+internal fun customerSetupErrorMessage(rawError: String): String {
+    val reason = rawError.trim().replace(Regex("\\s+"), " ").ifBlank { "未知错误" }
+    return "未能完成当前步骤。现有对话和项目不会受到影响。\n\n原因：$reason"
 }
 
 fun customerSetupSteps(report: EnvironmentReport): List<SetupDisplayStep> {
