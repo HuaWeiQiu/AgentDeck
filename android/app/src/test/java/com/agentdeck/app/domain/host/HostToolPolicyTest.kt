@@ -67,4 +67,34 @@ class HostToolPolicyTest {
         assertEquals(2, HostCapability.SHARE_INTENT.level)
         assertTrue(HostCapability.SHARE_INTENT.level > secure.maxHostLevel)
     }
+
+    @Test
+    fun `secure channel denies intent even if flags look enabled`() {
+        val secure = HostToolPolicy(
+            experienceLevel = ExperienceLevel.DEVELOPER,
+            workspaceEnabled = true,
+            hasWorkspaceGrant = true,
+            maxHostLevel = 1,
+            intentEnabled = true,
+            labRiskAccepted = true,
+        )
+        val denied = secure.evaluate(HostToolName.INTENT_OPEN_URL)
+        assertNotNull(denied)
+        assertEquals("host_channel_cap", denied!!.code)
+        assertEquals("安全版仅支持本机文件夹", denied.userMessage)
+    }
+
+    @Test
+    fun `lab can enable intent without workspace`() {
+        val policy = HostToolPolicy(
+            experienceLevel = ExperienceLevel.DEVELOPER,
+            workspaceEnabled = false,
+            hasWorkspaceGrant = false,
+            maxHostLevel = 4,
+            intentEnabled = true,
+            labRiskAccepted = true,
+        )
+        assertNull(policy.evaluate(HostToolName.INTENT_OPEN_URL))
+        assertEquals(setOf(HostCapability.SHARE_INTENT), policy.listEnabledCapabilities())
+    }
 }

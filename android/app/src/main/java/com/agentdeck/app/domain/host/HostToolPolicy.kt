@@ -21,9 +21,9 @@ data class HostToolPolicy(
             return HostToolResult.Denied(
                 code = "host_channel_cap",
                 userMessage = if (maxHostLevel <= 1) {
-                    "当前为安全版，仅支持本机工作区（L1）"
+                    "安全版仅支持本机文件夹"
                 } else {
-                    "当前通道不支持该宿主能力等级"
+                    "当前版本不支持该能力"
                 },
             )
         }
@@ -38,13 +38,13 @@ data class HostToolPolicy(
             if (experienceLevel != ExperienceLevel.DEVELOPER) {
                 return HostToolResult.Denied(
                     code = "host_lab_developer_required",
-                    userMessage = "Lab 高权限能力需要开启开发者模式",
+                    userMessage = "请先开启开发者模式",
                 )
             }
             if (!labRiskAccepted) {
                 return HostToolResult.Denied(
                     code = "host_lab_risk_not_accepted",
-                    userMessage = "请先在设置中确认 Lab 高权限风险",
+                    userMessage = "请先确认 Lab 风险",
                 )
             }
         }

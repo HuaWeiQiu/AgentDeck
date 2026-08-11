@@ -136,9 +136,9 @@ fun SettingsScreen(
                             buildString {
                                 append("版本 ${BuildConfig.VERSION_NAME}")
                                 if (BuildConfig.HOST_LAB) {
-                                    append(" · 高权限实验通道")
+                                    append(" · 实验版（非日常）")
                                 } else {
-                                    append(" · 安全通道（L1）")
+                                    append(" · 安全版")
                                 }
                             },
                         )
@@ -343,11 +343,11 @@ fun ConversationDefaultsScreen(
             }
             if (vm.isLabBuild && experienceLevel.advancedEnabled) {
                 item { HorizontalDivider() }
-                item { SectionLabel("Lab 高权限（实验）") }
+                item { SectionLabel("Lab 实验能力") }
                 item {
                     ListItem(
                         headlineContent = { Text("开发者模式") },
-                        supportingContent = { Text("L2–L4 需要开发者模式") },
+                        supportingContent = { Text("解锁下方实验开关") },
                         trailingContent = {
                             Switch(
                                 checked = experienceLevel == ExperienceLevel.DEVELOPER,
@@ -358,9 +358,9 @@ fun ConversationDefaultsScreen(
                 }
                 item {
                     ListItem(
-                        headlineContent = { Text("我理解 Lab 风险") },
+                        headlineContent = { Text("我理解风险") },
                         supportingContent = {
-                            Text("可能打开链接、读取界面并执行受限命令。仅用于测试机。")
+                            Text("仅测试机；可打开链接、读界面、跑白名单命令")
                         },
                         trailingContent = {
                             Switch(
@@ -373,8 +373,8 @@ fun ConversationDefaultsScreen(
                 }
                 item {
                     ListItem(
-                        headlineContent = { Text("L2 Intent 协作") },
-                        supportingContent = { Text("打开 https 链接 / 系统分享文本") },
+                        headlineContent = { Text("Intent 协作") },
+                        supportingContent = { Text("打开链接、系统分享") },
                         trailingContent = {
                             Switch(
                                 checked = labIntent,
@@ -386,8 +386,8 @@ fun ConversationDefaultsScreen(
                 }
                 item {
                     ListItem(
-                        headlineContent = { Text("L3 屏幕代理") },
-                        supportingContent = { Text("还需在系统无障碍中开启 AgentDeck Lab") },
+                        headlineContent = { Text("屏幕代理") },
+                        supportingContent = { Text("系统无障碍中开启 AgentDeck Lab") },
                         trailingContent = {
                             Switch(
                                 checked = labUi,
@@ -399,8 +399,8 @@ fun ConversationDefaultsScreen(
                 }
                 item {
                     ListItem(
-                        headlineContent = { Text("L4 特权壳（白名单）") },
-                        supportingContent = { Text("App UID 下 id/uname/getprop/pm list 等") },
+                        headlineContent = { Text("特权壳") },
+                        supportingContent = { Text("白名单探测命令，非完整 Root") },
                         trailingContent = {
                             Switch(
                                 checked = labPriv,

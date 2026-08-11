@@ -21,6 +21,7 @@
 | C3 | Lab：L3 无障碍 Service + snapshot/click | 完成 |
 | C4 | Lab：L4 白名单 shell（非完整 Shizuku） | 完成 |
 | C5 | 构建 secure/lab beta | 完成 |
+| C6 | Lab 会话绑定修复 + guest CLI L2–L4 + 文案精简 | 完成 |
 
 ## 验收
 
@@ -28,3 +29,6 @@
 - [x] `assembleLabBeta` 包名含 `.lab`，关于页标明实验  
 - [x] Secure 上 L2+ 通道 cap Denied  
 - [x] 单测：max level / Lab flags 门控  
+- [x] 仅开 Lab 能力（无 L1）时聊天仍 bind host session  
+- [x] `agentdeck-host` 支持 intent/ui/priv 命令  
+

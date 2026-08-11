@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AgentDeck host-workspace CLI (guest side). Talks to Android via /run/agentdeck IPC."""
+"""AgentDeck host tools CLI (guest side). Talks to Android via /run/agentdeck IPC."""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +15,25 @@ REQ_DIR = Path("/run/agentdeck/host-req")
 RES_DIR = Path("/run/agentdeck/host-res")
 TIMEOUT_SEC = 120.0
 
+WORKSPACE_TOOLS = {
+    "workspace.list",
+    "workspace.read",
+    "workspace.write",
+    "workspace.mkdir",
+    "workspace.remove",
+    "workspace.stat",
+    "workspace.pull",
+    "workspace.push",
+}
+LAB_TOOLS = {
+    "intent.open_url",
+    "intent.share_text",
+    "ui.snapshot",
+    "ui.click_text",
+    "priv.shell",
+}
+ALL_TOOLS = sorted(WORKSPACE_TOOLS | LAB_TOOLS)
+
 
 def fail(msg: str, code: int = 2) -> None:
     print(f"agentdeck-host: {msg}", file=sys.stderr)
@@ -23,7 +42,7 @@ def fail(msg: str, code: int = 2) -> None:
 
 def load_session() -> dict:
     if not SESSION.is_file():
-        fail("host workspace session not active (enable L1 and reopen chat)")
+        fail("host session not active (open chat with host tools enabled)")
     try:
         data = json.loads(SESSION.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
@@ -70,45 +89,67 @@ def wait_response(req_id: str) -> dict:
     fail("host tool timed out waiting for Android", code=3)
 
 
+def build_args(tool: str, ns: argparse.Namespace) -> dict:
+    if tool in WORKSPACE_TOOLS:
+        call_args = {"path": ns.path or ""}
+        if tool == "workspace.write":
+            if ns.content is None:
+                fail("workspace.write requires --content")
+            call_args["content"] = ns.content
+            call_args["encoding"] = ns.encoding
+        if tool == "workspace.list" and ns.depth is not None:
+            call_args["depth"] = ns.depth
+        return call_args
+    if tool == "intent.open_url":
+        if not ns.url:
+            fail("intent.open_url requires --url")
+        return {"url": ns.url}
+    if tool == "intent.share_text":
+        if ns.text is None:
+            fail("intent.share_text requires --text")
+        return {"text": ns.text}
+    if tool == "ui.snapshot":
+        out = {}
+        if ns.max_chars is not None:
+            out["max_chars"] = str(ns.max_chars)
+        return out
+    if tool == "ui.click_text":
+        if not ns.text:
+            fail("ui.click_text requires --text")
+        return {"text": ns.text}
+    if tool == "priv.shell":
+        if not ns.command:
+            fail("priv.shell requires --command")
+        return {"command": ns.command}
+    fail(f"unsupported tool {tool}")
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentdeck-host")
-    parser.add_argument(
-        "tool",
-        choices=[
-            "workspace.list",
-            "workspace.read",
-            "workspace.write",
-            "workspace.mkdir",
-            "workspace.remove",
-            "workspace.stat",
-            "workspace.pull",
-            "workspace.push",
-        ],
-    )
+    parser.add_argument("tool", choices=ALL_TOOLS)
     parser.add_argument("--path", default="")
     parser.add_argument("--content", default=None)
     parser.add_argument("--encoding", default="utf8")
     parser.add_argument("--depth", default=None)
+    parser.add_argument("--url", default=None)
+    parser.add_argument("--text", default=None)
+    parser.add_argument("--max-chars", dest="max_chars", type=int, default=None)
+    parser.add_argument("--command", default=None)
     args = parser.parse_args(argv)
 
-    call_args = {"path": args.path}
-    if args.tool == "workspace.write":
-        if args.content is None:
-            fail("workspace.write requires --content")
-        call_args["content"] = args.content
-        call_args["encoding"] = args.encoding
-    if args.tool == "workspace.list" and args.depth is not None:
-        call_args["depth"] = args.depth
-
+    call_args = build_args(args.tool, args)
     session = load_session()
     req_id = write_request(session, args.tool, call_args)
     result = wait_response(req_id)
     outcome = result.get("outcome")
     if outcome == "ok":
         payload = result.get("payload") or {}
-        # Prefer human-readable fields for the model.
         if "entries" in payload:
             print(payload["entries"])
+        elif "tree" in payload:
+            print(payload["tree"], end="" if str(payload["tree"]).endswith("\n") else "\n")
+        elif "output" in payload:
+            print(payload["output"], end="" if str(payload["output"]).endswith("\n") else "\n")
         elif "bytes" in payload and payload.get("encoding") == "base64":
             import base64
 

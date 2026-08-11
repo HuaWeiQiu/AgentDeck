@@ -83,11 +83,10 @@ class HostToolRelay(
         }
     }
 
-    /** 覆盖安装/旧 Runtime 补齐 guest CLI，不改动已验证 marker。 */
+    /** 每次 bind 覆盖 guest CLI，确保 Lab 工具命令与资产一致。 */
     private fun ensureGuestCli() {
         if (!paths.isReady()) return
         val dest = File(paths.activeRootfs, "usr/local/bin/agentdeck-host")
-        if (dest.isFile && dest.canExecute()) return
         runCatching {
             dest.parentFile?.mkdirs()
             app.assets.open("wrappers/agentdeck-host").use { input ->

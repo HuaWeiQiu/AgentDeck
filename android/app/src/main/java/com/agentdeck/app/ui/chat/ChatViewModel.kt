@@ -800,13 +800,21 @@ class ChatViewModel(
 
     private fun bindHostWorkspaceSession(instanceKey: String) {
         val experience = ServiceLocator.experienceSettings
-        val enabled = experience.level.value.advancedEnabled &&
+        val advanced = experience.level.value.advancedEnabled
+        val workspaceOn = advanced &&
             experience.hostWorkspaceEnabled.value &&
             ServiceLocator.workspaceGrants.primaryGrant() != null
-        if (!enabled) {
+        val labOn = com.agentdeck.app.BuildConfig.HOST_LAB &&
+            experience.level.value == com.agentdeck.app.domain.settings.ExperienceLevel.DEVELOPER &&
+            experience.labRiskAccepted.value &&
+            (experience.labIntentEnabled.value ||
+                experience.labUiEnabled.value ||
+                experience.labPrivEnabled.value)
+        if (!workspaceOn && !labOn) {
             ServiceLocator.hostToolRelay.unbind()
             ServiceLocator.hostApprovalGateway.delegate =
                 com.agentdeck.app.domain.host.DenyAllHostApprovalGateway
+            mutableState.update { it.copy(hostWorkspaceBanner = null) }
             return
         }
         ServiceLocator.hostApprovalGateway.delegate = hostApprovalGateway
@@ -814,19 +822,65 @@ class ChatViewModel(
             conversationId = cardId,
             instanceId = instanceKey,
         )
-        developerInstructions = mergeHostWorkspaceInstructions(developerInstructions)
-        val grantName = ServiceLocator.workspaceGrants.primaryGrant()?.displayName ?: "已授权文件夹"
-        mutableState.update {
-            it.copy(
-                hostWorkspaceBanner = "本机文件夹 · $grantName",
+        if (workspaceOn) {
+            developerInstructions = mergeHostInstructions(
+                developerInstructions,
+                HOST_WORKSPACE_INSTRUCTIONS,
+                marker = "agentdeck-host workspace.",
             )
+        }
+        if (labOn) {
+            developerInstructions = mergeHostInstructions(
+                developerInstructions,
+                buildLabHostInstructions(experience),
+                marker = "AgentDeck Lab Host",
+            )
+        }
+        val bannerParts = buildList {
+            if (workspaceOn) {
+                val grantName =
+                    ServiceLocator.workspaceGrants.primaryGrant()?.displayName ?: "已授权文件夹"
+                add("本机文件夹 · $grantName")
+            }
+            if (labOn) {
+                val labs = buildList {
+                    if (experience.labIntentEnabled.value) add("Intent")
+                    if (experience.labUiEnabled.value) add("屏幕")
+                    if (experience.labPrivEnabled.value) add("特权壳")
+                }
+                add("Lab · ${labs.joinToString("/")}")
+            }
+        }
+        mutableState.update {
+            it.copy(hostWorkspaceBanner = bannerParts.joinToString("  |  ").ifBlank { null })
         }
     }
 
-    private fun mergeHostWorkspaceInstructions(base: String?): String {
-        val block = HOST_WORKSPACE_INSTRUCTIONS
+    private fun buildLabHostInstructions(
+        experience: com.agentdeck.app.data.repo.ExperienceSettingsRepository,
+    ): String = buildString {
+        appendLine("AgentDeck Lab Host tools are available (experimental, user-gated).")
+        appendLine("Use only via agentdeck-host; never invent raw Android paths.")
+        if (experience.labIntentEnabled.value) {
+            appendLine("L2 Intent:")
+            appendLine("  agentdeck-host intent.open_url --url https://example.com")
+            appendLine("  agentdeck-host intent.share_text --text HELLO")
+        }
+        if (experience.labUiEnabled.value) {
+            appendLine("L3 UI (requires system Accessibility for AgentDeck Lab):")
+            appendLine("  agentdeck-host ui.snapshot")
+            appendLine("  agentdeck-host ui.click_text --text LABEL")
+        }
+        if (experience.labPrivEnabled.value) {
+            appendLine("L4 whitelist shell only (id / uname -a / getprop ... / pm list packages -3):")
+            appendLine("  agentdeck-host priv.shell --command 'id'")
+        }
+        append("Click/shell may require user approval.")
+    }
+
+    private fun mergeHostInstructions(base: String?, block: String, marker: String): String {
         if (base.isNullOrBlank()) return block
-        if (base.contains("agentdeck-host workspace.")) return base
+        if (base.contains(marker)) return base
         return base.trimEnd() + "\n\n" + block
     }
 
