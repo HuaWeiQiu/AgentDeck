@@ -2,6 +2,7 @@ package com.agentdeck.app.data.repo
 
 import android.content.Context
 import androidx.core.content.edit
+import com.agentdeck.app.BuildConfig
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.settings.ExperienceLevel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,20 +20,38 @@ class ExperienceSettingsRepository(context: Context) {
     private val mutableHostWorkspaceEnabled = MutableStateFlow(
         preferences.getBoolean(KEY_HOST_WORKSPACE_ENABLED, false),
     )
+    private val mutableLabRiskAccepted = MutableStateFlow(
+        preferences.getBoolean(KEY_LAB_RISK, false) && BuildConfig.HOST_LAB,
+    )
+    private val mutableLabIntentEnabled = MutableStateFlow(
+        preferences.getBoolean(KEY_LAB_INTENT, false) && BuildConfig.HOST_LAB,
+    )
+    private val mutableLabUiEnabled = MutableStateFlow(
+        preferences.getBoolean(KEY_LAB_UI, false) && BuildConfig.HOST_LAB,
+    )
+    private val mutableLabPrivEnabled = MutableStateFlow(
+        preferences.getBoolean(KEY_LAB_PRIV, false) && BuildConfig.HOST_LAB,
+    )
 
     val level: StateFlow<ExperienceLevel> = mutableLevel.asStateFlow()
     val codexPermissionLevel: StateFlow<CodexPermissionLevel> =
         mutableCodexPermissionLevel.asStateFlow()
     /** L1 本机工作区总开关；默认 false，与 Codex 权限档位无关。 */
     val hostWorkspaceEnabled: StateFlow<Boolean> = mutableHostWorkspaceEnabled.asStateFlow()
+    val labRiskAccepted: StateFlow<Boolean> = mutableLabRiskAccepted.asStateFlow()
+    val labIntentEnabled: StateFlow<Boolean> = mutableLabIntentEnabled.asStateFlow()
+    val labUiEnabled: StateFlow<Boolean> = mutableLabUiEnabled.asStateFlow()
+    val labPrivEnabled: StateFlow<Boolean> = mutableLabPrivEnabled.asStateFlow()
 
     fun setLevel(level: ExperienceLevel) {
         if (mutableLevel.value == level) return
         preferences.edit { putString(KEY_LEVEL, level.name) }
         mutableLevel.value = level
-        // 退出高级模式时强制关闭宿主工作区，避免标准模式残留能力
-        if (level == ExperienceLevel.STANDARD && mutableHostWorkspaceEnabled.value) {
+        if (level == ExperienceLevel.STANDARD) {
             setHostWorkspaceEnabled(false)
+            clearLabFlags()
+        } else if (level != ExperienceLevel.DEVELOPER) {
+            clearLabFlags()
         }
     }
 
@@ -44,10 +63,46 @@ class ExperienceSettingsRepository(context: Context) {
 
     fun setHostWorkspaceEnabled(enabled: Boolean) {
         if (mutableHostWorkspaceEnabled.value == enabled) return
-        // 标准模式不允许开启
         val effective = enabled && mutableLevel.value.advancedEnabled
         preferences.edit { putBoolean(KEY_HOST_WORKSPACE_ENABLED, effective) }
         mutableHostWorkspaceEnabled.value = effective
+    }
+
+    fun setLabRiskAccepted(accepted: Boolean) {
+        if (!BuildConfig.HOST_LAB) return
+        val effective = accepted && mutableLevel.value == ExperienceLevel.DEVELOPER
+        preferences.edit { putBoolean(KEY_LAB_RISK, effective) }
+        mutableLabRiskAccepted.value = effective
+        if (!effective) {
+            setLabIntentEnabled(false)
+            setLabUiEnabled(false)
+            setLabPrivEnabled(false)
+        }
+    }
+
+    fun setLabIntentEnabled(enabled: Boolean) {
+        if (!BuildConfig.HOST_LAB) return
+        val effective = enabled && mutableLabRiskAccepted.value
+        preferences.edit { putBoolean(KEY_LAB_INTENT, effective) }
+        mutableLabIntentEnabled.value = effective
+    }
+
+    fun setLabUiEnabled(enabled: Boolean) {
+        if (!BuildConfig.HOST_LAB) return
+        val effective = enabled && mutableLabRiskAccepted.value
+        preferences.edit { putBoolean(KEY_LAB_UI, effective) }
+        mutableLabUiEnabled.value = effective
+    }
+
+    fun setLabPrivEnabled(enabled: Boolean) {
+        if (!BuildConfig.HOST_LAB) return
+        val effective = enabled && mutableLabRiskAccepted.value
+        preferences.edit { putBoolean(KEY_LAB_PRIV, effective) }
+        mutableLabPrivEnabled.value = effective
+    }
+
+    private fun clearLabFlags() {
+        if (mutableLabRiskAccepted.value) setLabRiskAccepted(false)
     }
 
     companion object {
@@ -55,5 +110,9 @@ class ExperienceSettingsRepository(context: Context) {
         private const val KEY_LEVEL = "level"
         private const val KEY_CODEX_PERMISSION_LEVEL = "codex_permission_level"
         private const val KEY_HOST_WORKSPACE_ENABLED = "host_workspace_enabled"
+        private const val KEY_LAB_RISK = "lab_risk_accepted"
+        private const val KEY_LAB_INTENT = "lab_intent_enabled"
+        private const val KEY_LAB_UI = "lab_ui_enabled"
+        private const val KEY_LAB_PRIV = "lab_priv_enabled"
     }
 }

@@ -46,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.agentdeck.app.BuildConfig
 import com.agentdeck.app.domain.model.CodexPermissionLevel
+import com.agentdeck.app.domain.settings.ExperienceLevel
 import com.agentdeck.app.ui.permissions.codexPermissionPresentation
 import com.agentdeck.app.ui.theme.AppSpacing
 
@@ -120,8 +121,21 @@ fun SettingsScreen(
             item { SectionLabel("关于") }
             item {
                 ListItem(
-                    headlineContent = { Text("AgentDeck") },
-                    supportingContent = { Text("版本 ${BuildConfig.VERSION_NAME}") },
+                    headlineContent = {
+                        Text(if (BuildConfig.HOST_LAB) "AgentDeck Lab" else "AgentDeck")
+                    },
+                    supportingContent = {
+                        Text(
+                            buildString {
+                                append("版本 ${BuildConfig.VERSION_NAME}")
+                                if (BuildConfig.HOST_LAB) {
+                                    append(" · 高权限实验通道")
+                                } else {
+                                    append(" · 安全通道（L1）")
+                                }
+                            },
+                        )
+                    },
                     leadingContent = { Icon(Icons.Filled.Info, contentDescription = null) },
                 )
             }
@@ -139,6 +153,10 @@ fun ConversationDefaultsScreen(
     val selectedPermission by vm.codexPermissionLevel.collectAsStateWithLifecycle()
     val hostWorkspaceEnabled by vm.hostWorkspaceEnabled.collectAsStateWithLifecycle()
     val workspaceGrants by vm.workspaceGrants.collectAsStateWithLifecycle()
+    val labRisk by vm.labRiskAccepted.collectAsStateWithLifecycle()
+    val labIntent by vm.labIntentEnabled.collectAsStateWithLifecycle()
+    val labUi by vm.labUiEnabled.collectAsStateWithLifecycle()
+    val labPriv by vm.labPrivEnabled.collectAsStateWithLifecycle()
     val openTree = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
     ) { uri: Uri? ->
@@ -257,6 +275,76 @@ fun ConversationDefaultsScreen(
                             },
                         )
                     }
+                }
+            }
+            if (vm.isLabBuild && experienceLevel.advancedEnabled) {
+                item { HorizontalDivider() }
+                item { SectionLabel("Lab 高权限（实验）") }
+                item {
+                    ListItem(
+                        headlineContent = { Text("开发者模式") },
+                        supportingContent = { Text("L2–L4 需要开发者模式") },
+                        trailingContent = {
+                            Switch(
+                                checked = experienceLevel == ExperienceLevel.DEVELOPER,
+                                onCheckedChange = vm::setDeveloperEnabled,
+                            )
+                        },
+                    )
+                }
+                item {
+                    ListItem(
+                        headlineContent = { Text("我理解 Lab 风险") },
+                        supportingContent = {
+                            Text("可能打开链接、读取界面并执行受限命令。仅用于测试机。")
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = labRisk,
+                                onCheckedChange = vm::setLabRiskAccepted,
+                                enabled = experienceLevel == ExperienceLevel.DEVELOPER,
+                            )
+                        },
+                    )
+                }
+                item {
+                    ListItem(
+                        headlineContent = { Text("L2 Intent 协作") },
+                        supportingContent = { Text("打开 https 链接 / 系统分享文本") },
+                        trailingContent = {
+                            Switch(
+                                checked = labIntent,
+                                onCheckedChange = vm::setLabIntentEnabled,
+                                enabled = labRisk,
+                            )
+                        },
+                    )
+                }
+                item {
+                    ListItem(
+                        headlineContent = { Text("L3 屏幕代理") },
+                        supportingContent = { Text("还需在系统无障碍中开启 AgentDeck Lab") },
+                        trailingContent = {
+                            Switch(
+                                checked = labUi,
+                                onCheckedChange = vm::setLabUiEnabled,
+                                enabled = labRisk,
+                            )
+                        },
+                    )
+                }
+                item {
+                    ListItem(
+                        headlineContent = { Text("L4 特权壳（白名单）") },
+                        supportingContent = { Text("App UID 下 id/uname/getprop/pm list 等") },
+                        trailingContent = {
+                            Switch(
+                                checked = labPriv,
+                                onCheckedChange = vm::setLabPrivEnabled,
+                                enabled = labRisk,
+                            )
+                        },
+                    )
                 }
             }
         }

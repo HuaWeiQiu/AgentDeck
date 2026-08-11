@@ -11,6 +11,10 @@ data class HostToolPolicy(
     val workspaceEnabled: Boolean,
     val hasWorkspaceGrant: Boolean,
     val maxHostLevel: Int = 1,
+    val intentEnabled: Boolean = false,
+    val uiAutomationEnabled: Boolean = false,
+    val privilegedEnabled: Boolean = false,
+    val labRiskAccepted: Boolean = false,
 ) {
     fun evaluate(tool: HostToolName): HostToolResult.Denied? {
         if (tool.capability.level > maxHostLevel) {
@@ -23,12 +27,26 @@ data class HostToolPolicy(
                 },
             )
         }
-        // L1 需要高级体验；标准模式一律拒绝宿主工具
         if (!experienceLevel.advancedEnabled) {
             return HostToolResult.Denied(
                 code = "host_standard_mode",
                 userMessage = "宿主能力仅在高级设置中提供",
             )
+        }
+        // L2+ 在 Lab 需要开发者层级 + 风险确认
+        if (tool.capability.level >= 2) {
+            if (experienceLevel != ExperienceLevel.DEVELOPER) {
+                return HostToolResult.Denied(
+                    code = "host_lab_developer_required",
+                    userMessage = "Lab 高权限能力需要开启开发者模式",
+                )
+            }
+            if (!labRiskAccepted) {
+                return HostToolResult.Denied(
+                    code = "host_lab_risk_not_accepted",
+                    userMessage = "请先在设置中确认 Lab 高权限风险",
+                )
+            }
         }
         when (tool.capability) {
             HostCapability.WORKSPACE_FS -> {
@@ -45,15 +63,29 @@ data class HostToolPolicy(
                     )
                 }
             }
-            HostCapability.SHARE_INTENT,
-            HostCapability.UI_AUTOMATION,
-            HostCapability.PRIVILEGED_SHELL,
-            -> {
-                // Lab 通道才可能到此；执行器未接线时仍拒绝
-                return HostToolResult.Denied(
-                    code = "host_capability_not_implemented",
-                    userMessage = "该 Lab 宿主能力尚未接线",
-                )
+            HostCapability.SHARE_INTENT -> {
+                if (!intentEnabled) {
+                    return HostToolResult.Denied(
+                        code = "host_intent_disabled",
+                        userMessage = "Lab Intent 协作未开启",
+                    )
+                }
+            }
+            HostCapability.UI_AUTOMATION -> {
+                if (!uiAutomationEnabled) {
+                    return HostToolResult.Denied(
+                        code = "host_ui_disabled",
+                        userMessage = "Lab 屏幕代理未开启",
+                    )
+                }
+            }
+            HostCapability.PRIVILEGED_SHELL -> {
+                if (!privilegedEnabled) {
+                    return HostToolResult.Denied(
+                        code = "host_priv_disabled",
+                        userMessage = "Lab 特权壳未开启",
+                    )
+                }
             }
         }
         return null
@@ -64,6 +96,21 @@ data class HostToolPolicy(
         return buildSet {
             if (maxHostLevel >= 1 && workspaceEnabled && hasWorkspaceGrant) {
                 add(HostCapability.WORKSPACE_FS)
+            }
+            if (maxHostLevel >= 2 && experienceLevel == ExperienceLevel.DEVELOPER &&
+                labRiskAccepted && intentEnabled
+            ) {
+                add(HostCapability.SHARE_INTENT)
+            }
+            if (maxHostLevel >= 3 && experienceLevel == ExperienceLevel.DEVELOPER &&
+                labRiskAccepted && uiAutomationEnabled
+            ) {
+                add(HostCapability.UI_AUTOMATION)
+            }
+            if (maxHostLevel >= 4 && experienceLevel == ExperienceLevel.DEVELOPER &&
+                labRiskAccepted && privilegedEnabled
+            ) {
+                add(HostCapability.PRIVILEGED_SHELL)
             }
         }
     }

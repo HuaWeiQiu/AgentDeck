@@ -11,6 +11,9 @@ All notable changes to AgentDeck are documented in this file.
   Host access stays independent of Codex sandbox permission level.
 - Product channels (ADR-0012): `secure` (default, HOST_MAX_LEVEL=1) and `lab` (HOST_MAX_LEVEL=4,
   applicationId `.lab`) Gradle flavors for separate daily vs experimental APKs.
+- Lab channel tools: L2 `intent.open_url` / `intent.share_text`, L3 accessibility snapshot/click,
+  L4 allowlisted app-UID shell; settings require developer mode + risk acceptance. Secure builds
+  keep NoOp executors and channel caps.
 
 ## 0.2.0-beta.5 - 2026-08-11
 

@@ -71,6 +71,10 @@ object ServiceLocator {
                     workspaceEnabled = experienceSettings.hostWorkspaceEnabled.value,
                     hasGrant = workspaceGrants.primaryGrant() != null,
                     maxHostLevel = BuildConfig.HOST_MAX_LEVEL,
+                    intentEnabled = experienceSettings.labIntentEnabled.value,
+                    uiAutomationEnabled = experienceSettings.labUiEnabled.value,
+                    privilegedEnabled = experienceSettings.labPrivEnabled.value,
+                    labRiskAccepted = experienceSettings.labRiskAccepted.value,
                 )
             },
             workspace = {
@@ -79,6 +83,9 @@ object ServiceLocator {
                 SafWorkspaceDocumentStore(app, uri)
             },
             approval = hostApprovalGateway,
+            intentExecutor = com.agentdeck.app.data.host.LabHostLoader.intentExecutor(app),
+            uiExecutor = com.agentdeck.app.data.host.LabHostLoader.uiExecutor(),
+            privExecutor = com.agentdeck.app.data.host.LabHostLoader.privExecutor(),
         )
     }
     val hostToolRelay: HostToolRelay by lazy {

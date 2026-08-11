@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AgentDeck Lab</string>
+    <string name="lab_a11y_label">AgentDeck Lab 屏幕代理</string>
+    <string name="lab_a11y_description">高权限实验功能：允许 Agent 在你确认后读取界面结构并点击可见文本。请仅在测试机上开启。</string>
 </resources>

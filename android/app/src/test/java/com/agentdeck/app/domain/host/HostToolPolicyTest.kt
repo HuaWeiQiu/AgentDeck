@@ -35,16 +35,21 @@ class HostToolPolicyTest {
     }
 
     @Test
-    fun `unimplemented capabilities stay denied`() {
-        // Even developer + flags cannot enable L3/L4 until implemented
+    fun `lab flags gate L2 plus`() {
         val policy = HostToolPolicy(
-            ExperienceLevel.DEVELOPER,
+            experienceLevel = ExperienceLevel.DEVELOPER,
             workspaceEnabled = true,
             hasWorkspaceGrant = true,
             maxHostLevel = 4,
+            intentEnabled = true,
+            labRiskAccepted = true,
         )
-        // No tool maps to UI_AUTOMATION yet; capability list must not include L3/L4
-        assertEquals(setOf(HostCapability.WORKSPACE_FS), policy.listEnabledCapabilities())
+        assertEquals(null, policy.evaluate(HostToolName.INTENT_OPEN_URL))
+        assertEquals("host_ui_disabled", policy.evaluate(HostToolName.UI_SNAPSHOT)!!.code)
+        assertEquals(
+            setOf(HostCapability.WORKSPACE_FS, HostCapability.SHARE_INTENT),
+            policy.listEnabledCapabilities(),
+        )
     }
 
     @Test

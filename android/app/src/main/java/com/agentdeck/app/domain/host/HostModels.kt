@@ -24,6 +24,19 @@ enum class HostToolName(val wireName: String, val capability: HostCapability, va
     WORKSPACE_MKDIR("workspace.mkdir", HostCapability.WORKSPACE_FS, isWrite = true),
     WORKSPACE_REMOVE("workspace.remove", HostCapability.WORKSPACE_FS, isWrite = true),
     WORKSPACE_STAT("workspace.stat", HostCapability.WORKSPACE_FS, isWrite = false),
+
+    /** L2：打开 http(s) URL（系统浏览器，用户可见） */
+    INTENT_OPEN_URL("intent.open_url", HostCapability.SHARE_INTENT, isWrite = false),
+    /** L2：系统分享文本 */
+    INTENT_SHARE_TEXT("intent.share_text", HostCapability.SHARE_INTENT, isWrite = false),
+
+    /** L3：控件树/文本快照 */
+    UI_SNAPSHOT("ui.snapshot", HostCapability.UI_AUTOMATION, isWrite = false),
+    /** L3：按可见文本点击 */
+    UI_CLICK_TEXT("ui.click_text", HostCapability.UI_AUTOMATION, isWrite = true),
+
+    /** L4：受限特权 shell（需 Lab 风险确认；完整 Shizuku 后续增强） */
+    PRIV_SHELL("priv.shell", HostCapability.PRIVILEGED_SHELL, isWrite = true),
     ;
 
     companion object {

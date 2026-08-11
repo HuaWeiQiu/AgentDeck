@@ -2,6 +2,7 @@ package com.agentdeck.app.ui.settings
 
 import android.net.Uri
 import androidx.lifecycle.ViewModel
+import com.agentdeck.app.BuildConfig
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.host.WorkspaceGrant
 import com.agentdeck.app.domain.settings.ExperienceLevel
@@ -19,10 +20,27 @@ class SettingsViewModel : ViewModel() {
     val hostWorkspaceEnabled: StateFlow<Boolean> =
         ServiceLocator.experienceSettings.hostWorkspaceEnabled
     val workspaceGrants: StateFlow<List<WorkspaceGrant>> = ServiceLocator.workspaceGrants.grants
+    val isLabBuild: Boolean = BuildConfig.HOST_LAB
+    val labRiskAccepted: StateFlow<Boolean> = ServiceLocator.experienceSettings.labRiskAccepted
+    val labIntentEnabled: StateFlow<Boolean> = ServiceLocator.experienceSettings.labIntentEnabled
+    val labUiEnabled: StateFlow<Boolean> = ServiceLocator.experienceSettings.labUiEnabled
+    val labPrivEnabled: StateFlow<Boolean> = ServiceLocator.experienceSettings.labPrivEnabled
 
     fun setAdvancedEnabled(enabled: Boolean) {
         ServiceLocator.experienceSettings.setLevel(
             if (enabled) ExperienceLevel.ADVANCED else ExperienceLevel.STANDARD,
+        )
+    }
+
+    /** 连续开启高级后，Lab 需要开发者模式才能开 L2+。 */
+    fun setDeveloperEnabled(enabled: Boolean) {
+        ServiceLocator.experienceSettings.setLevel(
+            when {
+                enabled -> ExperienceLevel.DEVELOPER
+                ServiceLocator.experienceSettings.level.value == ExperienceLevel.STANDARD ->
+                    ExperienceLevel.STANDARD
+                else -> ExperienceLevel.ADVANCED
+            },
         )
     }
 
@@ -34,9 +52,24 @@ class SettingsViewModel : ViewModel() {
         ServiceLocator.experienceSettings.setHostWorkspaceEnabled(enabled)
     }
 
+    fun setLabRiskAccepted(accepted: Boolean) {
+        ServiceLocator.experienceSettings.setLabRiskAccepted(accepted)
+    }
+
+    fun setLabIntentEnabled(enabled: Boolean) {
+        ServiceLocator.experienceSettings.setLabIntentEnabled(enabled)
+    }
+
+    fun setLabUiEnabled(enabled: Boolean) {
+        ServiceLocator.experienceSettings.setLabUiEnabled(enabled)
+    }
+
+    fun setLabPrivEnabled(enabled: Boolean) {
+        ServiceLocator.experienceSettings.setLabPrivEnabled(enabled)
+    }
+
     fun addWorkspaceGrant(treeUri: Uri, displayName: String) {
         ServiceLocator.workspaceGrants.addGrant(treeUri, displayName)
-        // 选中文件夹后自动打开 L1 开关（仍要求高级模式）
         ServiceLocator.experienceSettings.setHostWorkspaceEnabled(true)
     }
 

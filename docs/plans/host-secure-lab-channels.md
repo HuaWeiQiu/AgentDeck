@@ -15,16 +15,16 @@
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| C0 | ADR-0012 + 0011 修订 | 本文档同期 |
-| C1 | Gradle flavors + 策略门控 + 单测 | 执行中 |
-| C2 | Lab：L2 Intent 工具 + 设置入口 | 执行中 |
-| C3 | Lab：L3 无障碍骨架（Service + 开关 + 工具 Denied/基础） | 执行中 |
-| C4 | Lab：L4 Shizuku 骨架（无则 Denied 说明） | 执行中 |
-| C5 | 构建 secure-beta 安装日常机 | 执行中 |
+| C0 | ADR-0012 + 0011 修订 | 完成 |
+| C1 | Gradle flavors + 策略门控 + 单测 | 完成 |
+| C2 | Lab：L2 Intent 工具 + 设置入口 | 完成 |
+| C3 | Lab：L3 无障碍 Service + snapshot/click | 完成 |
+| C4 | Lab：L4 白名单 shell（非完整 Shizuku） | 完成 |
+| C5 | 构建 secure/lab beta | 完成 |
 
 ## 验收
 
-- [ ] `assembleSecureBeta` 包名无 `.lab`，无 a11y Service  
-- [ ] `assembleLabBeta` 包名含 `.lab`，关于页标明实验  
-- [ ] Secure 上 `SHARE_INTENT` 等工具策略 Denied  
-- [ ] 单测：max level 门控  
+- [x] `assembleSecureBeta` 包名无 `.lab`，无 a11y Service  
+- [x] `assembleLabBeta` 包名含 `.lab`，关于页标明实验  
+- [x] Secure 上 L2+ 通道 cap Denied  
+- [x] 单测：max level / Lab flags 门控  
