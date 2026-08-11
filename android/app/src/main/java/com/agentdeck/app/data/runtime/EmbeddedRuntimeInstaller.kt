@@ -313,16 +313,50 @@ internal suspend fun downloadArtifact(
     if (part.isFile && part.length() > artifact.sizeBytes) {
         check(part.delete()) { "无法清理 ${artifact.fileName} 的残留下载" }
     }
-    withNetworkRetries { downloadOnce(client, artifact, part, onBytes) }
+    downloadWithUrlFallback(client, artifact, part, onBytes)
     verifyArtifact(part, artifact)
     target.delete()
     check(part.renameTo(target)) { "无法保存已验证的运行组件" }
     return target
 }
 
+/**
+ * Try each mirror/URL in order. Network failures are retried per URL; on hard
+ * failure switch to the next URL and discard any partial from the previous host
+ * so we never mix bytes from different sources.
+ */
+private suspend fun downloadWithUrlFallback(
+    client: OkHttpClient,
+    artifact: VerifiedArtifact,
+    part: File,
+    onBytes: (bytesDone: Long) -> Unit,
+) {
+    var lastError: Exception? = null
+    for ((index, url) in artifact.urls.withIndex()) {
+        try {
+            withNetworkRetries {
+                downloadOnce(client, url, artifact, part, onBytes)
+            }
+            return
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            lastError = error
+            // Do not resume a partial across different mirrors.
+            if (part.isFile) {
+                check(part.delete()) { "无法清理 ${artifact.fileName} 的残留下载" }
+            }
+            onBytes(0L)
+            if (index == artifact.urls.lastIndex) break
+        }
+    }
+    throw lastError ?: IllegalStateException("下载 ${artifact.fileName} 失败：无可用源")
+}
+
 /** 单次下载尝试；`.part` 已存在时用 Range 续传，服务端忽略 Range（200）则全量重下。 */
 private fun downloadOnce(
     client: OkHttpClient,
+    url: String,
     artifact: VerifiedArtifact,
     part: File,
     onBytes: (bytesDone: Long) -> Unit,
@@ -332,11 +366,13 @@ private fun downloadOnce(
         onBytes(resumedBytes)
         return
     }
-    val request = Request.Builder().url(artifact.url).get().apply {
+    val request = Request.Builder().url(url).get().apply {
         if (resumedBytes > 0) header("Range", "bytes=$resumedBytes-")
     }.build()
     client.newCall(request).execute().use { response ->
-        check(response.isSuccessful) { "下载 ${artifact.fileName} 失败（HTTP ${response.code}）" }
+        check(response.isSuccessful) {
+            "下载 ${artifact.fileName} 失败（HTTP ${response.code}，源: $url）"
+        }
         val resuming = resumedBytes > 0 && response.code == HTTP_PARTIAL
         if (resumedBytes > 0 && !resuming) {
             check(part.delete()) { "无法清理 ${artifact.fileName} 的残留下载" }

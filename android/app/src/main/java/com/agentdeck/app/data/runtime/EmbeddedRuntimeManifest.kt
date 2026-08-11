@@ -4,16 +4,21 @@ import android.os.Build
 
 internal data class VerifiedArtifact(
     val fileName: String,
-    val url: String,
+    /** Try in order: domestic mirrors first, official last. */
+    val urls: List<String>,
     val sizeBytes: Long,
     val sha256: String,
 ) {
     init {
         require(fileName.matches(Regex("[A-Za-z0-9._-]{1,160}"))) { "运行组件文件名无效" }
-        require(url.startsWith("https://")) { "运行组件只能使用 HTTPS" }
+        require(urls.isNotEmpty()) { "运行组件至少需要一个下载地址" }
+        require(urls.all { it.startsWith("https://") }) { "运行组件只能使用 HTTPS" }
         require(sizeBytes in 1..MAX_ARTIFACT_BYTES) { "运行组件大小无效" }
         require(sha256.matches(Regex("[a-f0-9]{64}"))) { "运行组件校验值无效" }
     }
+
+    /** Primary / official URL (last entry by convention). */
+    val url: String get() = urls.last()
 
     companion object {
         private const val MAX_ARTIFACT_BYTES = 512L * 1024 * 1024
@@ -76,6 +81,10 @@ internal object EmbeddedRuntimeManifest {
         val codexVersion = "0.147.0"
         val rootfsName = "ubuntu-base-$ubuntuVersion-base-$ubuntuArchiveArch.tar.gz"
         val codexName = "codex-$codexTarget.tar.gz"
+        val officialRootfs =
+            "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/$rootfsName"
+        val officialCodex =
+            "https://github.com/openai/codex/releases/download/rust-v$codexVersion/$codexName"
         return EmbeddedRuntimeTarget(
             releaseId = STABLE_RELEASE_ID,
             ubuntuVersion = ubuntuVersion,
@@ -84,13 +93,23 @@ internal object EmbeddedRuntimeManifest {
             codexBinaryName = "codex-$codexTarget",
             rootfs = VerifiedArtifact(
                 fileName = rootfsName,
-                url = "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/$rootfsName",
+                // Domestic cdimage mirrors first (same file, same sha256), official last.
+                urls = listOf(
+                    "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu-base/releases/24.04/release/$rootfsName",
+                    "https://mirrors.aliyun.com/ubuntu-cdimage/ubuntu-base/releases/24.04/release/$rootfsName",
+                    "https://mirrors.ustc.edu.cn/ubuntu-cdimage/ubuntu-base/releases/24.04/release/$rootfsName",
+                    officialRootfs,
+                ),
                 sizeBytes = ubuntuSizeBytes,
                 sha256 = ubuntuSha256,
             ),
             codex = VerifiedArtifact(
                 fileName = codexName,
-                url = "https://github.com/openai/codex/releases/download/rust-v$codexVersion/$codexName",
+                // GitHub is often slow in CN; try a public accelerator first, then official.
+                urls = listOf(
+                    "https://ghfast.top/https://github.com/openai/codex/releases/download/rust-v$codexVersion/$codexName",
+                    officialCodex,
+                ),
                 sizeBytes = codexSizeBytes,
                 sha256 = codexSha256,
             ),

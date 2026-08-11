@@ -163,12 +163,36 @@ class EmbeddedRuntimeDownloadTest {
         assertEquals(1, server.requestCount)
     }
 
+    @Test
+    fun `falls back to next mirror url after first source fails`() = runBlocking {
+        val content = randomBytes(700)
+        val sha = MessageDigest.getInstance("SHA-256").digest(content)
+            .joinToString("") { byte -> "%02x".format(byte) }
+        val bad = server.url("/bad").toString()
+        val good = server.url("/good").toString()
+        val artifact = VerifiedArtifact(
+            fileName = "mirror-${content.size}.bin",
+            urls = listOf(bad, good),
+            sizeBytes = content.size.toLong(),
+            sha256 = sha,
+        )
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.enqueue(MockResponse().setBody(Buffer().write(content)))
+
+        val file = downloadArtifact(cacheDir, artifact, client)
+
+        assertArrayEquals(content, file.readBytes())
+        assertEquals(2, server.requestCount)
+        assertEquals("/bad", server.takeRequest().path)
+        assertEquals("/good", server.takeRequest().path)
+    }
+
     private fun artifact(content: ByteArray): VerifiedArtifact {
         val sha = MessageDigest.getInstance("SHA-256").digest(content)
             .joinToString("") { byte -> "%02x".format(byte) }
         return VerifiedArtifact(
             fileName = "artifact-${content.size}.bin",
-            url = server.url("/download/${content.size}").toString(),
+            urls = listOf(server.url("/download/${content.size}").toString()),
             sizeBytes = content.size.toLong(),
             sha256 = sha,
         )
