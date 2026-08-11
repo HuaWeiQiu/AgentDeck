@@ -72,8 +72,30 @@ done
 verify_abi_split "$secure_arm64" "$secure_x86"
 verify_abi_split "$lab_arm64" "$lab_x86"
 
-# Channel isolation: secure must not ship Lab a11y; lab must include it.
-! unzip -p "$secure_arm64" AndroidManifest.xml | strings | grep -Fq 'LabAccessibilityService'
-unzip -p "$lab_arm64" AndroidManifest.xml | strings | grep -Fq 'LabAccessibilityService'
+# Channel isolation: secure must not ship Lab a11y class; lab must include it.
+# Binary XML/strings are unreliable; search dex/manifest bytes instead.
+python3 - "$secure_arm64" "$lab_arm64" <<'PY'
+import sys
+import zipfile
+
+needle = b"LabAccessibilityService"
+
+
+def contains(apk: str) -> bool:
+    with zipfile.ZipFile(apk) as archive:
+        for name in archive.namelist():
+            if name.endswith(".dex") or name.endswith("AndroidManifest.xml"):
+                if needle in archive.read(name):
+                    return True
+    return False
+
+
+secure_apk, lab_apk = sys.argv[1], sys.argv[2]
+if contains(secure_apk):
+    raise SystemExit("secure APK unexpectedly contains LabAccessibilityService")
+if not contains(lab_apk):
+    raise SystemExit("lab APK missing LabAccessibilityService")
+print("channel isolation ok")
+PY
 
 echo "AgentDeck release verification passed (secure + lab)."
