@@ -1,5 +1,8 @@
 package com.agentdeck.app.ui.settings
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +20,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
@@ -31,6 +35,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -132,6 +137,16 @@ fun ConversationDefaultsScreen(
 ) {
     val experienceLevel by vm.experienceLevel.collectAsStateWithLifecycle()
     val selectedPermission by vm.codexPermissionLevel.collectAsStateWithLifecycle()
+    val hostWorkspaceEnabled by vm.hostWorkspaceEnabled.collectAsStateWithLifecycle()
+    val workspaceGrants by vm.workspaceGrants.collectAsStateWithLifecycle()
+    val openTree = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val name = uri.lastPathSegment?.substringAfterLast(':') ?: "工作区"
+            vm.addWorkspaceGrant(uri, name)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -197,6 +212,50 @@ fun ConversationDefaultsScreen(
                                 )
                             }
                         }
+                    }
+                }
+            }
+            if (experienceLevel.advancedEnabled) {
+                item { HorizontalDivider() }
+                item { SectionLabel("本机工作区（L1）") }
+                item {
+                    ListItem(
+                        headlineContent = { Text("允许访问所选文件夹") },
+                        supportingContent = {
+                            Text(
+                                "仅你选中的目录；与 Codex「完全访问」无关。默认关闭，可随时撤销。",
+                            )
+                        },
+                        leadingContent = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                        trailingContent = {
+                            Switch(
+                                checked = hostWorkspaceEnabled,
+                                onCheckedChange = vm::setHostWorkspaceEnabled,
+                            )
+                        },
+                    )
+                }
+                item {
+                    TextButton(
+                        onClick = {
+                            openTree.launch(null)
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                    ) {
+                        Text(if (workspaceGrants.isEmpty()) "选择工作区文件夹" else "更换工作区文件夹")
+                    }
+                }
+                workspaceGrants.forEach { grant ->
+                    item(key = grant.id) {
+                        ListItem(
+                            headlineContent = { Text(grant.displayName) },
+                            supportingContent = { Text("已授权 · 可撤销") },
+                            trailingContent = {
+                                TextButton(onClick = { vm.revokeWorkspaceGrant(grant.id) }) {
+                                    Text("撤销")
+                                }
+                            },
+                        )
                     }
                 }
             }

@@ -64,6 +64,7 @@ AgentDeck
 - 不强制 Root
 - 不在标准模式暴露完整 Linux 桌面、包管理器或任意 shell 配置
 - 不因开发者模式而关闭密钥保护、路径校验或危险操作审批
+- 不在标准模式提供 Android 宿主操控（点屏幕、全局文件、Shizuku）；宿主能力见规划中的 [ADR-0011](ADR-0011-ANDROID-HOST-TOOLKIT.md)，默认关闭且与 Runtime 分轨
 
 ---
 

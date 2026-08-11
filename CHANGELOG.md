@@ -4,6 +4,12 @@ All notable changes to AgentDeck are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Host Toolkit foundation (ADR-0011): L1 workspace policy, fail-closed broker, SAF grant store,
+  advanced-settings workspace picker, and unit tests. Write approvals remain deny-by-default until
+  chat approval UI is wired; Codex permission level never enables host capabilities.
+
 ## 0.2.0-beta.5 - 2026-08-11
 
 ### Fixed

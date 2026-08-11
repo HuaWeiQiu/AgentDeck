@@ -14,12 +14,18 @@ import com.agentdeck.app.data.repo.InitialDataSeeder
 import com.agentdeck.app.data.repo.OnboardingRepository
 import com.agentdeck.app.data.repo.ProfileRepository
 import com.agentdeck.app.data.repo.RecipeRepository
+import android.net.Uri
+import com.agentdeck.app.data.host.DefaultHostToolBroker
+import com.agentdeck.app.data.host.SafWorkspaceDocumentStore
+import com.agentdeck.app.data.host.WorkspaceGrantRepository
 import com.agentdeck.app.data.runtime.EmbeddedProotRuntime
 import com.agentdeck.app.data.runtime.EmbeddedRuntimeInstaller
 import com.agentdeck.app.data.secure.AndroidProviderCredentialVault
 import com.agentdeck.app.data.secure.ProviderCredentialVault
 import com.agentdeck.app.domain.env.EmbeddedEnvironmentProbe
 import com.agentdeck.app.domain.env.EnvironmentScanner
+import com.agentdeck.app.domain.host.DenyAllHostApprovalGateway
+import com.agentdeck.app.domain.host.HostToolBroker
 import com.agentdeck.app.domain.install.RecipeInstallation
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
 import com.agentdeck.app.domain.setup.SetupCoordinator
@@ -53,6 +59,25 @@ object ServiceLocator {
     val recipes: RecipeRepository by lazy { RecipeRepository(app.assets) }
     val onboarding: OnboardingRepository by lazy { OnboardingRepository(app) }
     val experienceSettings: ExperienceSettingsRepository by lazy { ExperienceSettingsRepository(app) }
+    val workspaceGrants: WorkspaceGrantRepository by lazy { WorkspaceGrantRepository(app) }
+    val hostTools: HostToolBroker by lazy {
+        DefaultHostToolBroker(
+            policyProvider = {
+                DefaultHostToolBroker.policyFrom(
+                    experienceLevel = experienceSettings.level.value,
+                    workspaceEnabled = experienceSettings.hostWorkspaceEnabled.value,
+                    hasGrant = workspaceGrants.primaryGrant() != null,
+                )
+            },
+            workspace = {
+                val grant = workspaceGrants.primaryGrant() ?: return@DefaultHostToolBroker null
+                val uri = runCatching { Uri.parse(grant.treeUri) }.getOrNull() ?: return@DefaultHostToolBroker null
+                SafWorkspaceDocumentStore(app, uri)
+            },
+            // 写操作审批 UI 接入前默认拒绝，保证 fail closed
+            approval = DenyAllHostApprovalGateway,
+        )
+    }
     val envProbe: EnvironmentScanner by lazy { EmbeddedEnvironmentProbe(embeddedRuntime) }
     val installer: RecipeInstallation by lazy { EmbeddedRuntimeInstaller(app) }
     val setup: SetupCoordinator by lazy {
