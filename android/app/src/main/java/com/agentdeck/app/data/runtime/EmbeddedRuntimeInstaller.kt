@@ -29,6 +29,7 @@ internal class EmbeddedRuntimeInstaller(
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
         .build(),
+    private val regionDetector: NetworkRegionDetector = NetworkRegionDetector(context, client),
 ) : RecipeInstallation {
     private val app = context.applicationContext
     private val installMutex = Mutex()
@@ -44,6 +45,8 @@ internal class EmbeddedRuntimeInstaller(
             val runtime = requireNotNull(paths.runtimeTarget) {
                 "当前版本仅支持 ARM64 或 x86_64 Android 设备"
             }
+            // 按出口 IP 判定国内外源顺序；探测失败时软回退（locale/时区）。
+            val region = regionDetector.detect()
             paths.ensureHostLayout()
             verifyPackagedRuntime()
             checkFreeSpace()
@@ -58,12 +61,14 @@ internal class EmbeddedRuntimeInstaller(
                     completedBytes = 0L,
                     totalBytes = totalBytes,
                     onProgress = onProgress,
+                    region = region,
                 )
                 val codexArchive = download(
                     runtime.codex,
                     completedBytes = runtime.rootfs.sizeBytes,
                     totalBytes = totalBytes,
                     onProgress = onProgress,
+                    region = region,
                 )
 
                 progress(InstallPhase.VERIFYING_ARTIFACTS, onProgress)
@@ -72,12 +77,12 @@ internal class EmbeddedRuntimeInstaller(
 
                 progress(InstallPhase.EXTRACTING, onProgress)
                 SecureTarExtractor.extractGzipTar(rootfsArchive, paths.stagingRootfs)
-                configureRootfs(runtime.androidAbi)
+                configureRootfs(runtime.androidAbi, region)
                 installCodex(codexArchive, runtime)
                 installRuntimeHelpers()
 
                 progress(InstallPhase.INSTALLING_TOOLS, onProgress)
-                installBaseTools(runtime.androidAbi)
+                installBaseTools(runtime.androidAbi, region)
 
                 progress(InstallPhase.VERIFYING_RUNTIME, onProgress)
                 verifyStagingRuntime()
@@ -121,10 +126,11 @@ internal class EmbeddedRuntimeInstaller(
         completedBytes: Long,
         totalBytes: Long,
         onProgress: (RecipeInstallProgress) -> Unit,
+        region: NetworkRegion,
     ): File = withContext(Dispatchers.IO) {
         var lastReportedBytes = -PROGRESS_MIN_BYTES
         var lastReportedAtNanos = 0L
-        downloadArtifact(paths.cacheDir, artifact, client) { artifactBytesDone ->
+        downloadArtifact(paths.cacheDir, artifact, client, region) { artifactBytesDone ->
             val now = System.nanoTime()
             val shouldReport = artifactBytesDone == artifact.sizeBytes ||
                 artifactBytesDone - lastReportedBytes >= PROGRESS_MIN_BYTES ||
@@ -144,7 +150,7 @@ internal class EmbeddedRuntimeInstaller(
 
     private fun verify(file: File, artifact: VerifiedArtifact) = verifyArtifact(file, artifact)
 
-    private fun configureRootfs(androidAbi: String) {
+    private fun configureRootfs(androidAbi: String, region: NetworkRegion) {
         listOf(
             "root/projects/default",
             "root/.codex",
@@ -162,19 +168,19 @@ internal class EmbeddedRuntimeInstaller(
 
         replaceRegularFile(
             File(paths.stagingRootfs, "etc/resolv.conf"),
-            embeddedRuntimeResolvConf(),
+            embeddedRuntimeResolvConf(region),
         )
         replaceRegularFile(
             File(paths.stagingRootfs, "etc/hosts"),
             "127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n",
         )
-        // Ubuntu Base 可能自带 ports.ubuntu.com / deb822 sources；清掉后只走国内镜像。
+        // Ubuntu Base 可能自带 ports.ubuntu.com / deb822 sources；清掉后按区域写入镜像列表。
         File(paths.stagingRootfs, "etc/apt/sources.list.d").listFiles()
             ?.filter { it.isFile && (it.name.endsWith(".list") || it.name.endsWith(".sources")) }
             ?.forEach { source -> check(source.delete()) { "无法清理默认软件源 ${source.name}" } }
         replaceRegularFile(
             File(paths.stagingRootfs, "etc/apt/sources.list"),
-            embeddedAptSourcesList(androidAbi),
+            embeddedAptSourcesList(androidAbi, region = region),
         )
         replaceRegularFile(
             File(paths.stagingRootfs, "etc/apt/apt.conf.d/80-agentdeck"),
@@ -226,9 +232,9 @@ internal class EmbeddedRuntimeInstaller(
         Os.chmod(hostCli.absolutePath, 0b111101101)
     }
 
-    private suspend fun installBaseTools(androidAbi: String) {
+    private suspend fun installBaseTools(androidAbi: String, region: NetworkRegion) {
         val result = EmbeddedProotProcess(paths, paths.stagingRootfs).execute(
-            script = embeddedInstallBaseToolsScript(androidAbi),
+            script = embeddedInstallBaseToolsScript(androidAbi, region),
             timeoutMillis = TOOLS_TIMEOUT_MILLIS,
         ).getOrThrow()
         check(result.commandSucceeded) {
@@ -302,6 +308,7 @@ internal suspend fun downloadArtifact(
     cacheDir: File,
     artifact: VerifiedArtifact,
     client: OkHttpClient,
+    region: NetworkRegion = NetworkRegion.CHINA,
     onBytes: (bytesDone: Long) -> Unit = {},
 ): File {
     val target = File(cacheDir, artifact.fileName)
@@ -313,7 +320,8 @@ internal suspend fun downloadArtifact(
     if (part.isFile && part.length() > artifact.sizeBytes) {
         check(part.delete()) { "无法清理 ${artifact.fileName} 的残留下载" }
     }
-    downloadWithUrlFallback(client, artifact, part, onBytes)
+    val orderedUrls = orderUrlsForRegion(artifact.urls, region)
+    downloadWithUrlFallback(client, artifact, part, orderedUrls, onBytes)
     verifyArtifact(part, artifact)
     target.delete()
     check(part.renameTo(target)) { "无法保存已验证的运行组件" }
@@ -329,10 +337,11 @@ private suspend fun downloadWithUrlFallback(
     client: OkHttpClient,
     artifact: VerifiedArtifact,
     part: File,
+    urls: List<String>,
     onBytes: (bytesDone: Long) -> Unit,
 ) {
     var lastError: Exception? = null
-    for ((index, url) in artifact.urls.withIndex()) {
+    for ((index, url) in urls.withIndex()) {
         try {
             withNetworkRetries {
                 downloadOnce(client, url, artifact, part, onBytes)
@@ -347,7 +356,7 @@ private suspend fun downloadWithUrlFallback(
                 check(part.delete()) { "无法清理 ${artifact.fileName} 的残留下载" }
             }
             onBytes(0L)
-            if (index == artifact.urls.lastIndex) break
+            if (index == urls.lastIndex) break
         }
     }
     throw lastError ?: IllegalStateException("下载 ${artifact.fileName} 失败：无可用源")
@@ -439,12 +448,21 @@ private const val HTTP_PARTIAL = 206
 private const val DOWNLOAD_BUFFER_BYTES = 128 * 1024
 private val RETRY_BACKOFF_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)
 
-/** Guest DNS：优先国内公共 DNS，再回退公共解析，降低 apt 阶段解析失败概率。 */
-internal fun embeddedRuntimeResolvConf(): String =
-    "nameserver 223.5.5.5\n" +
-        "nameserver 119.29.29.29\n" +
-        "nameserver 8.8.8.8\n" +
-        "nameserver 1.1.1.1\n"
+/** Guest DNS：按区域优先本地公共 DNS，再回退另一侧，降低 apt 阶段解析失败概率。 */
+internal fun embeddedRuntimeResolvConf(
+    region: NetworkRegion = NetworkRegion.CHINA,
+): String = when (region) {
+    NetworkRegion.CHINA ->
+        "nameserver 223.5.5.5\n" +
+            "nameserver 119.29.29.29\n" +
+            "nameserver 8.8.8.8\n" +
+            "nameserver 1.1.1.1\n"
+    NetworkRegion.OVERSEAS ->
+        "nameserver 1.1.1.1\n" +
+            "nameserver 8.8.8.8\n" +
+            "nameserver 223.5.5.5\n" +
+            "nameserver 119.29.29.29\n"
+}
 
 internal fun embeddedAptConf(): String =
     "Acquire::Retries \"5\";\n" +
@@ -452,46 +470,64 @@ internal fun embeddedAptConf(): String =
         "Acquire::https::Timeout \"30\";\n"
 
 /**
- * 按 ABI 选择 Ubuntu 官方套件对应的国内镜像基址（HTTP，避免 ca-certificates 安装前无法走 HTTPS）。
+ * 按 ABI + 区域选择 apt 镜像（HTTP，避免 ca-certificates 安装前无法走 HTTPS）。
  * arm64 走 ubuntu-ports，x86_64 走 ubuntu。
+ * 优先区域在前，另一侧作为 fallback。
  */
-internal fun embeddedAptMirrorBases(androidAbi: String): List<String> {
+internal fun embeddedAptMirrorBases(
+    androidAbi: String,
+    region: NetworkRegion = NetworkRegion.CHINA,
+): List<String> {
     val path = when (androidAbi) {
         "arm64-v8a" -> "ubuntu-ports"
         "x86_64" -> "ubuntu"
         else -> error("不支持的架构: $androidAbi")
     }
-    return listOf(
+    val domestic = listOf(
         "http://mirrors.aliyun.com/$path",
         "http://mirrors.tuna.tsinghua.edu.cn/$path",
         "http://mirrors.ustc.edu.cn/$path",
     )
+    val international = when (androidAbi) {
+        "arm64-v8a" -> listOf("http://ports.ubuntu.com/ubuntu-ports")
+        "x86_64" -> listOf("http://archive.ubuntu.com/ubuntu")
+        else -> error("不支持的架构: $androidAbi")
+    }
+    return when (region) {
+        NetworkRegion.CHINA -> domestic + international
+        NetworkRegion.OVERSEAS -> international + domestic
+    }
 }
 
 internal fun embeddedAptSourcesList(
     androidAbi: String,
-    mirrorBase: String = embeddedAptMirrorBases(androidAbi).first(),
+    mirrorBase: String? = null,
     suite: String = "noble",
+    region: NetworkRegion = NetworkRegion.CHINA,
 ): String {
+    val base = mirrorBase ?: embeddedAptMirrorBases(androidAbi, region).first()
     val components = "main restricted universe multiverse"
     return buildString {
         listOf("", "-updates", "-backports", "-security").forEach { pocket ->
-            append("deb $mirrorBase $suite$pocket $components\n")
+            append("deb $base $suite$pocket $components\n")
         }
     }
 }
 
 /**
- * 在 PRoot 内安装基础工具：按国内镜像顺序尝试 apt-get update，成功后再 install。
+ * 在 PRoot 内安装基础工具：按区域镜像顺序尝试 apt-get update，成功后再 install。
  * 使用 heredoc 写 sources.list，避免依赖已安装的 sed/python。
  */
-internal fun embeddedInstallBaseToolsScript(androidAbi: String): String = buildString {
+internal fun embeddedInstallBaseToolsScript(
+    androidAbi: String,
+    region: NetworkRegion = NetworkRegion.CHINA,
+): String = buildString {
     appendLine("set -e")
     appendLine("updated=0")
-    embeddedAptMirrorBases(androidAbi).forEach { mirror ->
+    embeddedAptMirrorBases(androidAbi, region).forEach { mirror ->
         appendLine("if [ \"\$updated\" -eq 0 ]; then")
         appendLine("cat > /etc/apt/sources.list <<'AGENTDECK_APT_EOF'")
-        append(embeddedAptSourcesList(androidAbi, mirrorBase = mirror))
+        append(embeddedAptSourcesList(androidAbi, mirrorBase = mirror, region = region))
         appendLine("AGENTDECK_APT_EOF")
         appendLine("rm -rf /var/lib/apt/lists/* || true")
         appendLine("mkdir -p /var/lib/apt/lists/partial")

@@ -187,6 +187,37 @@ class EmbeddedRuntimeDownloadTest {
         assertEquals("/good", server.takeRequest().path)
     }
 
+    @Test
+    fun `overseas region tries official host before domestic mirror`() = runBlocking {
+        val content = randomBytes(640)
+        val sha = MessageDigest.getInstance("SHA-256").digest(content)
+            .joinToString("") { byte -> "%02x".format(byte) }
+        // Hostnames are not real mirrors; orderUrlsForRegion classifies by host patterns.
+        // Use localhost paths only — region reordering only kicks in when both sides present.
+        // Here both URLs share the mock host so order is preserved; assert API still succeeds.
+        val only = server.url("/official").toString()
+        val artifact = VerifiedArtifact(
+            fileName = "region-${content.size}.bin",
+            urls = listOf(only),
+            sizeBytes = content.size.toLong(),
+            sha256 = sha,
+        )
+        server.enqueue(MockResponse().setBody(Buffer().write(content)))
+
+        val file = downloadArtifact(cacheDir, artifact, client, NetworkRegion.OVERSEAS)
+
+        assertArrayEquals(content, file.readBytes())
+        assertEquals(listOf("https://cdimage.ubuntu.com/a", "https://mirrors.tuna.tsinghua.edu.cn/a"),
+            orderUrlsForRegion(
+                listOf(
+                    "https://mirrors.tuna.tsinghua.edu.cn/a",
+                    "https://cdimage.ubuntu.com/a",
+                ),
+                NetworkRegion.OVERSEAS,
+            ),
+        )
+    }
+
     private fun artifact(content: ByteArray): VerifiedArtifact {
         val sha = MessageDigest.getInstance("SHA-256").digest(content)
             .joinToString("") { byte -> "%02x".format(byte) }

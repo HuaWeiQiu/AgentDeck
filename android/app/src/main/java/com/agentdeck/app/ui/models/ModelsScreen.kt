@@ -84,6 +84,8 @@ import com.agentdeck.app.domain.model.ProviderAdapterId
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
 import com.agentdeck.app.domain.model.ProviderModel
 import com.agentdeck.app.domain.model.ProviderProfile
+import com.agentdeck.app.ui.common.DEFAULT_MAX_VISIBLE_MODELS
+import com.agentdeck.app.ui.common.filterSelectableModels
 import com.agentdeck.app.ui.theme.AppSpacing
 import kotlinx.coroutines.launch
 
@@ -747,11 +749,17 @@ private fun ModelDropdown(
     onSelect: (ProviderModel) -> Unit,
 ) {
     var query by remember(models) { mutableStateOf(selected) }
-    val filtered = remember(models, query) {
-        models.filter { model ->
-            query.isBlank() || model.id.contains(query, ignoreCase = true) ||
-                model.displayName.contains(query, ignoreCase = true)
-        }
+    // 验证后 selected 会变，但 models 引用也可能不变；关闭态时与 selected 对齐。
+    LaunchedEffect(selected, expanded) {
+        if (!expanded) query = selected
+    }
+    val filtered = remember(models, query, selected) {
+        filterSelectableModels(
+            models = models,
+            query = query,
+            selectedId = selected.takeIf { it.isNotBlank() },
+            maxVisible = DEFAULT_MAX_VISIBLE_MODELS,
+        )
     }
     ExposedDropdownMenuBox(
         expanded = expanded,
@@ -777,7 +785,7 @@ private fun ModelDropdown(
             expanded = expanded,
             onDismissRequest = { onExpandedChange(false) },
         ) {
-            filtered.take(MAX_VISIBLE_MODELS).forEach { model ->
+            filtered.forEach { model ->
                 DropdownMenuItem(
                     text = {
                         Column {
@@ -806,5 +814,3 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is ContextWrapper -> baseContext.findActivity()
     else -> null
 }
-
-private const val MAX_VISIBLE_MODELS = 100

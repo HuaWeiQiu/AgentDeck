@@ -19,12 +19,22 @@ class EmbeddedRuntimeManifestTest {
         assertEquals(29_989_394, x86.rootfs.sizeBytes)
         assertEquals(98_970_270, x86.codex.sizeBytes)
         assertEquals("codex-x86_64-unknown-linux-musl", x86.codexBinaryName)
-        // Domestic mirrors first; official remains last/primary fallback.
-        assertTrue(arm64.rootfs.urls.first().contains("mirrors.tuna.tsinghua.edu.cn"))
+        // Catalog keeps both domestic + official; install-time orderUrlsForRegion reorders by IP region.
+        assertTrue(arm64.rootfs.urls.any { it.contains("mirrors.tuna.tsinghua.edu.cn") })
+        assertTrue(arm64.rootfs.urls.any { it.startsWith("https://cdimage.ubuntu.com/") })
         assertTrue(x86.rootfs.urls.last().startsWith("https://cdimage.ubuntu.com/"))
         assertTrue(x86.codex.urls.any { it.contains("ghfast.top") })
         assertTrue(x86.codex.urls.last().startsWith("https://github.com/openai/codex/"))
         assertTrue(arm64.rootfs.urls.all { it.startsWith("https://") })
+        assertEquals(
+            "https://cdimage.ubuntu.com/",
+            orderUrlsForRegion(arm64.rootfs.urls, NetworkRegion.OVERSEAS).first().take(27),
+        )
+        assertTrue(
+            orderUrlsForRegion(arm64.rootfs.urls, NetworkRegion.CHINA)
+                .first()
+                .contains("mirrors."),
+        )
         assertTrue(EmbeddedRuntimeManifest.deviceSupported(arrayOf("arm64-v8a")))
         assertTrue(EmbeddedRuntimeManifest.deviceSupported(arrayOf("x86_64")))
         assertFalse(EmbeddedRuntimeManifest.deviceSupported(arrayOf("armeabi-v7a")))

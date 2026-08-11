@@ -76,6 +76,8 @@ import com.agentdeck.app.domain.model.ConversationIdentity
 import com.agentdeck.app.domain.model.ProviderModel
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
+import com.agentdeck.app.ui.common.DEFAULT_MAX_VISIBLE_MODELS
+import com.agentdeck.app.ui.common.filterSelectableModels
 import com.agentdeck.app.domain.setup.SetupState
 import com.agentdeck.app.ui.setup.customerSetupPresentation
 import com.agentdeck.app.ui.permissions.codexPermissionPresentation
@@ -827,11 +829,13 @@ private fun CardEditorDialog(
             }
         }
     }.orEmpty()
-    val filteredModels = remember(availableModels, modelQuery) {
-        availableModels.filter { model ->
-            modelQuery.isBlank() || model.id.contains(modelQuery, ignoreCase = true) ||
-                model.displayName.contains(modelQuery, ignoreCase = true)
-        }.take(MAX_VISIBLE_SESSION_MODELS)
+    val filteredModels = remember(availableModels, modelQuery, draft.modelId) {
+        filterSelectableModels(
+            models = availableModels,
+            query = modelQuery,
+            selectedId = draft.modelId,
+            maxVisible = DEFAULT_MAX_VISIBLE_MODELS,
+        )
     }
     val effectivePermission = CodexPermissionLevel.effective(
         draft.permissionLevel,
@@ -1169,5 +1173,3 @@ private fun CardEditorDialog(
         },
     )
 }
-
-private const val MAX_VISIBLE_SESSION_MODELS = 100
