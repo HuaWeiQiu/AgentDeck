@@ -29,6 +29,8 @@ import com.agentdeck.app.domain.chat.CodexProtocol
 import com.agentdeck.app.domain.chat.ConversationIdentityPolicy
 import com.agentdeck.app.domain.chat.HostWriteApproval
 import com.agentdeck.app.domain.chat.QueuedChatMessage
+import com.agentdeck.app.domain.extensions.ExtensionSessionHandle
+import com.agentdeck.app.domain.extensions.ExtensionSessionPlan
 import com.agentdeck.app.domain.host.HostApprovalGateway
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
@@ -40,6 +42,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -101,6 +105,7 @@ class ChatViewModel(
     private var threadId: String? = null
     private var activeTurnId: String? = null
     private var credentialBroker: ProviderCredentialBroker? = null
+    private var extensionSession: ExtensionSessionHandle? = null
     private var permissionLevel: CodexPermissionLevel = CodexPermissionLevel.DEFAULT
     private var reasoningEffort: String? = null
     private var developerInstructions: String? = null
@@ -268,7 +273,7 @@ class ChatViewModel(
                 )
                 // Card/profile validation and bridge launch do file and process work;
                 // keep them off the main thread.
-                val (managedRuntime, endpoint, modelOptions, providerLabel) = withContext(Dispatchers.IO) {
+                val (managedRuntime, endpoint, modelOptions, providerLabel, extensionPlan) = withContext(Dispatchers.IO) {
                     permissionLevel = CodexPermissionLevel.effective(
                         card.permissionLevel,
                         ServiceLocator.experienceSettings.codexPermissionLevel.value,
@@ -296,7 +301,14 @@ class ChatViewModel(
                             ManagedProviderRuntime.from(managedProfile, selectedModel, broker.port)
                         }
                     }
-                    val endpoint = ServiceLocator.codexBridge.launch(card, managedRuntime).getOrThrow()
+                    val session = ServiceLocator.extensions.openSession(card.id).also {
+                        extensionSession = it
+                    }
+                    val endpoint = ServiceLocator.codexBridge.launch(
+                        card,
+                        managedRuntime,
+                        session.plan,
+                    ).getOrThrow()
                     // Take ownership immediately: authorization/model lookup can still suspend or
                     // fail, and cancellation must be able to stop the process we just launched.
                     this@ChatViewModel.endpoint = endpoint
@@ -308,7 +320,7 @@ class ChatViewModel(
                             CodexModelOption(model.id, model.displayName)
                         }
                     }.orEmpty()
-                    ConnectPrep(managedRuntime, endpoint, modelOptions, profile?.name)
+                    ConnectPrep(managedRuntime, endpoint, modelOptions, profile?.name, session.plan)
                 }
                 val runtimeKey = managedRuntime?.conversationKey
                     ?: ConversationLinkRepository.CURRENT_RUNTIME_KEY
@@ -319,14 +331,21 @@ class ChatViewModel(
                 rpc.initialize(BuildConfig.VERSION_NAME)
                 val shouldDiscoverModels = managedRuntime == null &&
                     !endpoint.profileConfig.usesCustomProvider
-                val appServerModels = if (shouldDiscoverModels) {
-                    discoverModels(rpc)
-                } else {
-                    emptyList()
+                val (appServerModels, inheritedMcpServers) = coroutineScope {
+                    val models = async {
+                        if (shouldDiscoverModels) discoverModels(rpc) else emptyList()
+                    }
+                    val mcpServers = async { readEffectiveMcpServers(rpc, card.workspacePath) }
+                    models.await() to mcpServers.await()
                 }
-                val profileConfig = ConversationIdentityPolicy.mergeIntoConfig(
+                val baseProfileConfig = ConversationIdentityPolicy.mergeIntoConfig(
                     endpoint.profileConfig.sessionConfig(managedRuntime != null),
                     card.identity,
+                )
+                val profileConfig = ServiceLocator.extensions.mergeSessionConfig(
+                    baseProfileConfig,
+                    extensionPlan,
+                    inheritedMcpServers,
                 )
                 reasoningEffort = profileConfig.optString("model_reasoning_effort")
                     .trim()
@@ -901,6 +920,19 @@ class ChatViewModel(
      */
     private suspend fun reattach(held: ChatSessionRegistry.HeldSession) {
         disconnectServer()
+        // ChatSessionRegistry.take() removes the only background owner. Adopt every
+        // resource before the first suspend/failure point so disconnectServer() can
+        // always release the bridge, brokers, proxy, and Skill snapshot together.
+        permissionLevel = held.permissionLevel
+        client = held.client
+        endpoint = held.endpoint
+        credentialBroker = held.broker
+        extensionSession = held.extensionSession
+        reasoningEffort = held.reasoningEffort
+        developerInstructions = held.developerInstructions
+        threadId = held.threadId
+        activeTurnId = held.activeTurnId
+        ActiveCodexConnections.register(cardId, held.client)
         mutableState.update {
             it.copy(
                 isConnecting = true,
@@ -921,16 +953,7 @@ class ChatViewModel(
             transcriptRepository.showPreview(
                 ChatTranscriptPreviewCache.get(cardId, card.profileId, card.modelId),
             )
-            permissionLevel = held.permissionLevel
-            client = held.client
-            endpoint = held.endpoint
-            credentialBroker = held.broker
-            reasoningEffort = held.reasoningEffort
-            developerInstructions = held.developerInstructions
-            threadId = held.threadId
-            activeTurnId = held.activeTurnId
             bindHostWorkspaceSession(held.endpoint.instanceKey)
-            ActiveCodexConnections.register(cardId, held.client)
 
             // The registry intentionally does not retain a second copy of transcript
             // history. Rebuild the recent page from the still-live app-server before
@@ -983,6 +1006,7 @@ class ChatViewModel(
                 startTurn(held.queued.text, held.queued.attachments, held.client, held.threadId)
             }
         } catch (error: CancellationException) {
+            disconnectServer()
             throw error
         } catch (error: Exception) {
             disconnectServer()
@@ -1013,6 +1037,30 @@ class ChatViewModel(
             modelProviderOverride = managedRuntime?.providerId,
         ),
     )
+
+    private suspend fun readEffectiveMcpServers(rpc: CodexRpcClient, cwd: String): Set<String> {
+        val configRead = runCatching {
+            rpc.request(
+                "config/read",
+                JSONObject().put("cwd", cwd).put("includeLayers", false),
+            )
+        }.getOrElse { error ->
+            if (ServiceLocator.extensions.requiresManagedMcp) {
+                throw IllegalStateException(
+                    "无法验证 Codex 的 MCP 配置，安全版已停止连接：${error.message ?: "未知错误"}",
+                    error,
+                )
+            }
+            JSONObject()
+        }
+        val effectiveConfig = configRead.optJSONObject("config") ?: JSONObject()
+        return (effectiveConfig.optJSONObject("mcp_servers")
+            ?: effectiveConfig.optJSONObject("mcpServers"))
+            ?.keys()
+            ?.asSequence()
+            ?.toSet()
+            .orEmpty()
+    }
 
     private suspend fun handleInbound(inbound: CodexInbound) {
         when (inbound) {
@@ -1390,11 +1438,13 @@ class ChatViewModel(
                 pendingUserInput = state.value.userInputRequest,
                 queued = state.value.queued,
                 broker = credentialBroker,
+                extensionSession = extensionSession,
             )
         ) {
             client = null
             endpoint = null
             credentialBroker = null
+            extensionSession = null
             ActiveCodexConnections.unregister(cardId, rpc)
             return
         }
@@ -1413,6 +1463,8 @@ class ChatViewModel(
         client = null
         val broker = credentialBroker
         credentialBroker = null
+        val extensions = extensionSession
+        extensionSession = null
         val endpoint = endpoint
         this.endpoint = null
         if (rpc != null) {
@@ -1420,6 +1472,7 @@ class ChatViewModel(
         }
         rpc?.close()
         broker?.close()
+        extensions?.close()
         if (endpoint != null) {
             val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             teardownScope.launch {
@@ -1555,6 +1608,7 @@ private data class ConnectPrep(
     val endpoint: CodexBridgeEndpoint,
     val models: List<CodexModelOption>,
     val providerLabel: String?,
+    val extensionPlan: ExtensionSessionPlan,
 )
 
 private suspend fun discoverModels(rpc: CodexRpcClient): List<CodexModelOption> {

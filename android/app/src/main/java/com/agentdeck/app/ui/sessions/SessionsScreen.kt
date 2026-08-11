@@ -12,11 +12,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -25,15 +27,18 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -69,6 +75,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.agentdeck.app.domain.cards.CardDraft
 import com.agentdeck.app.domain.chat.ConversationIdentityPolicy
+import com.agentdeck.app.domain.extensions.ExtensionKind
+import com.agentdeck.app.domain.extensions.ExtensionStatus
+import com.agentdeck.app.domain.extensions.ManagedExtension
 import com.agentdeck.app.domain.launch.CliAdapterDescriptor
 import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.CodexPermissionLevel
@@ -99,6 +108,8 @@ fun SessionsScreen(
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val profiles by vm.profiles.collectAsStateWithLifecycle()
     val models by vm.models.collectAsStateWithLifecycle()
+    val allExtensions by vm.extensions.collectAsStateWithLifecycle()
+    val selectableExtensions by vm.selectableExtensions.collectAsStateWithLifecycle()
     val setupState by vm.setupState.collectAsStateWithLifecycle()
     val experienceLevel by vm.experienceLevel.collectAsStateWithLifecycle()
     val defaultPermissionLevel by vm.defaultPermissionLevel.collectAsStateWithLifecycle()
@@ -232,7 +243,7 @@ fun SessionsScreen(
                             tryOpenChat(item.card.id)
                         }
                     },
-                    onEdit = { editor = vm.editDraft(item.card) },
+                    onEdit = { editor = vm.editDraft(item) },
                     onRename = { renaming = item },
                     onTogglePinned = {
                         scope.launch {
@@ -283,7 +294,7 @@ fun SessionsScreen(
                                 tryOpenChat(item.card.id)
                             }
                         },
-                        onEdit = { editor = vm.editDraft(item.card) },
+                        onEdit = { editor = vm.editDraft(item) },
                         onRename = { renaming = item },
                         onTogglePinned = {
                             scope.launch {
@@ -324,6 +335,12 @@ fun SessionsScreen(
             adapters = vm.availableAdapters,
             profiles = profiles,
             models = models,
+            extensions = extensionPickerOptions(
+                selectableExtensions,
+                allExtensions,
+                draft.selectedExtensionIds,
+            ),
+            selectableExtensionIds = selectableExtensions.mapTo(hashSetOf(), ManagedExtension::id),
             defaultPermissionLevel = defaultPermissionLevel,
             showAdvanced = experienceLevel.advancedEnabled,
             onDismiss = { editor = null },
@@ -794,6 +811,8 @@ private fun CardEditorDialog(
     adapters: List<CliAdapterDescriptor>,
     profiles: List<ProviderProfile>,
     models: List<ProviderModel>,
+    extensions: List<ManagedExtension>,
+    selectableExtensionIds: Set<String>,
     defaultPermissionLevel: CodexPermissionLevel,
     showAdvanced: Boolean,
     onDismiss: () -> Unit,
@@ -804,6 +823,7 @@ private fun CardEditorDialog(
     var providerExpanded by remember { mutableStateOf(false) }
     var modelExpanded by remember { mutableStateOf(false) }
     var permissionExpanded by remember { mutableStateOf(false) }
+    var extensionPickerVisible by remember { mutableStateOf(false) }
     val selectedAdapter = adapters.firstOrNull { it.recipeId == draft.recipeId }
     val compatibleProfiles = profiles.filter {
         it.type == selectedAdapter?.providerType &&
@@ -843,6 +863,20 @@ private fun CardEditorDialog(
         defaultPermissionLevel,
     )
     val permissionPresentation = codexPermissionPresentation(effectivePermission)
+
+    if (extensionPickerVisible) {
+        ExtensionPickerDialog(
+            extensions = extensions,
+            selectedIds = draft.selectedExtensionIds,
+            selectableIds = selectableExtensionIds,
+            onDismiss = { extensionPickerVisible = false },
+            onConfirm = { selectedIds ->
+                draft = draft.copy(selectedExtensionIds = selectedIds)
+                extensionPickerVisible = false
+            },
+        )
+        return
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -976,6 +1010,23 @@ private fun CardEditorDialog(
                         }
                     }
                 }
+                ListItem(
+                    headlineContent = { Text("扩展") },
+                    supportingContent = {
+                        Text(extensionSelectionLabel(draft.selectedExtensionIds, extensions))
+                    },
+                    leadingContent = {
+                        Icon(Icons.Filled.Extension, contentDescription = null)
+                    },
+                    trailingContent = {
+                        if (extensions.isNotEmpty()) {
+                            Icon(Icons.Filled.ChevronRight, contentDescription = null)
+                        }
+                    },
+                    modifier = Modifier.clickable(enabled = extensions.isNotEmpty()) {
+                        extensionPickerVisible = true
+                    },
+                )
                 if (showAdvanced) {
                     ExposedDropdownMenuBox(
                         expanded = permissionExpanded,
@@ -1163,4 +1214,131 @@ private fun CardEditorDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         },
     )
+
+}
+
+@Composable
+private fun ExtensionPickerDialog(
+    extensions: List<ManagedExtension>,
+    selectedIds: Set<String>,
+    selectableIds: Set<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (Set<String>) -> Unit,
+) {
+    val availableIds = remember(extensions) { extensions.mapTo(hashSetOf()) { it.id } }
+    var pending by remember(selectedIds, availableIds) {
+        mutableStateOf(selectedIds.intersect(availableIds))
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择扩展") },
+        text = {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
+                ExtensionKind.entries.forEach { kind ->
+                    val group = extensions.filter { it.kind == kind }
+                    if (group.isNotEmpty()) {
+                        item(key = "extension-kind-${kind.name}") {
+                            Text(
+                                extensionKindLabel(kind),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
+                        items(group, key = ManagedExtension::id) { extension ->
+                            val canToggle = extension.id in selectableIds || extension.id in pending
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = canToggle) {
+                                        pending = if (extension.id in pending) {
+                                            pending - extension.id
+                                        } else {
+                                            pending + extension.id
+                                        }
+                                    }
+                                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = extension.id in pending,
+                                    enabled = canToggle,
+                                    onCheckedChange = { checked ->
+                                        pending = if (checked) {
+                                            pending + extension.id
+                                        } else {
+                                            pending - extension.id
+                                        }
+                                    },
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(extension.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    val availability = extensionUnavailableLabel(extension, selectableIds)
+                                    val supporting = listOfNotNull(
+                                        extension.description.takeIf(String::isNotBlank),
+                                        availability,
+                                    ).joinToString(" · ")
+                                    if (supporting.isNotBlank()) {
+                                        Text(
+                                            supporting,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(pending) }) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
+internal fun extensionPickerOptions(
+    selectable: List<ManagedExtension>,
+    all: List<ManagedExtension>,
+    selectedIds: Set<String>,
+): List<ManagedExtension> {
+    val selectableIds = selectable.mapTo(hashSetOf(), ManagedExtension::id)
+    return (selectable + all.filter { it.id in selectedIds && it.id !in selectableIds })
+        .distinctBy(ManagedExtension::id)
+        .sortedWith(compareBy<ManagedExtension>({ it.kind.ordinal }, { it.name.lowercase() }))
+}
+
+private fun extensionUnavailableLabel(
+    extension: ManagedExtension,
+    selectableIds: Set<String>,
+): String? = when {
+    extension.id in selectableIds -> null
+    !extension.enabled -> "已停用，取消勾选后不可重新选择"
+    extension.status != ExtensionStatus.READY -> "当前不可用，取消勾选后不可重新选择"
+    else -> "当前版本不可用，取消勾选后不可重新选择"
+}
+
+internal fun extensionSelectionLabel(
+    selectedIds: Set<String>,
+    extensions: List<ManagedExtension>,
+): String {
+    if (extensions.isEmpty()) return "尚未添加扩展"
+    val selected = extensions.filter { it.id in selectedIds }
+    return when (selected.size) {
+        0 -> "未启用"
+        1 -> selected.single().name
+        else -> "已选 ${selected.size} 个"
+    }
+}
+
+internal fun extensionKindLabel(kind: ExtensionKind): String = when (kind) {
+    ExtensionKind.SKILL -> "Skills"
+    ExtensionKind.REMOTE_MCP -> "远程 MCP"
+    ExtensionKind.LOCAL_MCP -> "本地 MCP"
 }

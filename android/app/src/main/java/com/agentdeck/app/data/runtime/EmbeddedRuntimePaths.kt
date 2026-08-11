@@ -23,6 +23,8 @@ internal class EmbeddedRuntimePaths(
     val tempDir = File(root, "tmp")
     val codexHome = File(root, "codex-home")
     val projectsHome = File(root, "projects")
+    val extensionPackages = File(root, "extensions/packages")
+    val extensionSessionSnapshots = File(root, "extensions/sessions")
     val cacheDir = File(app.cacheDir, "agentdeck-runtime-downloads")
     val marker = File(activeRootfs, ".agentdeck-runtime")
     val stagingMarker = File(stagingRootfs, ".agentdeck-runtime")
@@ -34,10 +36,30 @@ internal class EmbeddedRuntimePaths(
     val runtimeTalloc = File(root, "libtalloc.so.2")
 
     fun ensureHostLayout() = synchronized(HOST_LAYOUT_LOCK) {
-        listOf(root, stateDir, tempDir, codexHome, projectsHome, cacheDir).forEach { directory ->
+        listOf(
+            root,
+            stateDir,
+            tempDir,
+            codexHome,
+            projectsHome,
+            extensionPackages,
+            extensionSessionSnapshots,
+            cacheDir,
+        ).forEach { directory ->
             check(directory.mkdirs() || directory.isDirectory) {
                 "无法创建内嵌运行环境目录"
             }
+        }
+        // Beta builds briefly stored Skill snapshots under stateDir, which is bound
+        // wholesale into every PRoot. New snapshots never use this shared location.
+        stateDir.listFiles { file -> file.name.matches(Regex("skills\\.[a-f0-9]{1,16}")) }
+            .orEmpty()
+            .forEach { stale -> deleteTreeWithoutFollowingLinks(stale.toPath()) }
+        if (!sessionSnapshotsReconciled) {
+            extensionSessionSnapshots.listFiles { file ->
+                file.name.matches(Regex("skills\\.[a-f0-9]{1,16}"))
+            }.orEmpty().forEach { stale -> deleteTreeWithoutFollowingLinks(stale.toPath()) }
+            sessionSnapshotsReconciled = true
         }
         val runtimeRoots = versionedRuntimeRoots()
         migrateLegacyDirectories(
@@ -51,7 +73,7 @@ internal class EmbeddedRuntimePaths(
             marker = File(root, ".agentdeck-projects-migrated-v1"),
         )
         if (activeRootfs.isDirectory) {
-            listOf("root/.codex", "root/projects").forEach { relative ->
+            listOf("root/.codex", "root/.codex/skills", "root/.agents/skills", "root/projects").forEach { relative ->
                 val guestDirectory = File(activeRootfs, relative)
                 check(guestDirectory.mkdirs() || guestDirectory.isDirectory) {
                     "无法准备内嵌持久目录"
@@ -155,6 +177,7 @@ internal class EmbeddedRuntimePaths(
     companion object {
         private const val FILE_MODE_MASK = 0b111111111
         private val HOST_LAYOUT_LOCK = Any()
+        private var sessionSnapshotsReconciled = false
     }
 }
 

@@ -34,6 +34,7 @@ class EmbeddedProotRuntimeTest {
                 "--model", "gpt-5.4",
                 "--credential-ref", "cred_test",
                 "--credential-broker-port", "45678",
+                "--skill-snapshot-key", "abc123",
             ),
         )
 
@@ -41,6 +42,7 @@ class EmbeddedProotRuntimeTest {
         assertEquals("abc123", options.instanceKey)
         assertEquals("gpt-5.4", options.provider?.model)
         assertEquals(45_678, options.provider?.credentialBrokerPort)
+        assertEquals("abc123", options.skillSnapshotKey)
     }
 
     @Test
@@ -56,6 +58,17 @@ class EmbeddedProotRuntimeTest {
             runCatching {
                 EmbeddedProotRuntime.AppServerOptions.parse(
                     listOf("--cwd", "/root\nnope", "--instance-key", "abc"),
+                )
+            }.isFailure,
+        )
+        assertTrue(
+            runCatching {
+                EmbeddedProotRuntime.AppServerOptions.parse(
+                    listOf(
+                        "--cwd", "/root",
+                        "--instance-key", "abc",
+                        "--skill-snapshot-key", "different",
+                    ),
                 )
             }.isFailure,
         )

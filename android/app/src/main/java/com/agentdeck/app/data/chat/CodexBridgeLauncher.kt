@@ -7,6 +7,7 @@ import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.ProviderAdapterId
 import com.agentdeck.app.domain.model.ProviderType
+import com.agentdeck.app.domain.extensions.ExtensionSessionPlan
 import com.agentdeck.app.domain.profiles.ProviderEndpointNormalizer
 import com.agentdeck.app.domain.runtime.AgentRuntime
 import com.agentdeck.app.domain.runtime.RuntimeCommand
@@ -68,6 +69,7 @@ interface CodexBridgeLaunch {
     suspend fun launch(
         card: AgentCard,
         runtime: ManagedProviderRuntime? = null,
+        extensionPlan: ExtensionSessionPlan = ExtensionSessionPlan(),
     ): Result<CodexBridgeEndpoint>
     fun stop(endpoint: CodexBridgeEndpoint): Result<Unit>
 }
@@ -80,14 +82,26 @@ class CodexBridgeLauncher(
     override suspend fun launch(
         card: AgentCard,
         runtime: ManagedProviderRuntime?,
-    ): Result<CodexBridgeEndpoint> = launchInternal(card, runtime, synchronizeProfile = true)
+        extensionPlan: ExtensionSessionPlan,
+    ): Result<CodexBridgeEndpoint> = launchInternal(
+        card,
+        runtime,
+        extensionPlan,
+        synchronizeProfile = true,
+    )
 
     suspend fun launchForAccount(card: AgentCard): Result<CodexBridgeEndpoint> =
-        launchInternal(card, runtime = null, synchronizeProfile = false)
+        launchInternal(
+            card,
+            runtime = null,
+            extensionPlan = ExtensionSessionPlan(),
+            synchronizeProfile = false,
+        )
 
     private suspend fun launchInternal(
         card: AgentCard,
         runtime: ManagedProviderRuntime?,
+        extensionPlan: ExtensionSessionPlan,
         synchronizeProfile: Boolean,
     ): Result<CodexBridgeEndpoint> = runCatching {
         require(card.recipeId == "recipe_codex") { "该对话不支持 Codex 原生聊天" }
@@ -118,6 +132,10 @@ class CodexBridgeLauncher(
                 "--credential-broker-port",
                 managed.credentialBrokerPort.toString(),
             )
+        }
+        extensionPlan.skillSnapshotKey?.let { key ->
+            require(key == instanceKey) { "Skill 快照与会话不匹配" }
+            args += listOf("--skill-snapshot-key", key)
         }
         val command = RuntimeCommand(
             instanceId = "agentdeck-chat-$instanceKey",

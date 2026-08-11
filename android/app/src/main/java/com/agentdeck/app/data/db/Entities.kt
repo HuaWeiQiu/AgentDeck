@@ -14,6 +14,16 @@ import com.agentdeck.app.domain.model.ProviderAdapterId
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
 import com.agentdeck.app.domain.model.ProviderModel
 import com.agentdeck.app.domain.model.ProviderType
+import com.agentdeck.app.domain.extensions.ExtensionAuthType
+import com.agentdeck.app.domain.extensions.ExtensionKind
+import com.agentdeck.app.domain.extensions.ExtensionLevel
+import com.agentdeck.app.domain.extensions.ExtensionStatus
+import com.agentdeck.app.domain.extensions.ExtensionTool
+import com.agentdeck.app.domain.extensions.ExtensionToolAccess
+import com.agentdeck.app.domain.extensions.ManagedExtension
+import com.agentdeck.app.domain.extensions.McpExtensionConfig
+import com.agentdeck.app.domain.extensions.SkillExtensionConfig
+import org.json.JSONArray
 
 @Entity(tableName = "app_metadata")
 data class AppMetadataEntity(
@@ -200,3 +210,158 @@ data class AgentCardEntity(
         )
     }
 }
+
+@Entity(tableName = "extensions")
+data class ExtensionEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val description: String,
+    val kind: String,
+    val requiredLevel: Int,
+    val enabled: Boolean,
+    val status: String,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+)
+
+@Entity(
+    tableName = "mcp_extension_configs",
+    foreignKeys = [
+        ForeignKey(
+            entity = ExtensionEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["extensionId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("extensionId", unique = true)],
+)
+data class McpExtensionConfigEntity(
+    @PrimaryKey val extensionId: String,
+    val transport: String,
+    val url: String?,
+    val command: String?,
+    val argsJson: String,
+    val authType: String,
+    val credentialRef: String?,
+) {
+    fun toDomain() = McpExtensionConfig(
+        transport = transport,
+        url = url,
+        command = command,
+        args = JSONArray(argsJson).let { values ->
+            buildList { for (index in 0 until values.length()) add(values.getString(index)) }
+        },
+        authType = ExtensionAuthType.valueOf(authType),
+        credentialRef = credentialRef,
+    )
+}
+
+@Entity(
+    tableName = "skill_extension_configs",
+    foreignKeys = [
+        ForeignKey(
+            entity = ExtensionEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["extensionId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("extensionId", unique = true)],
+)
+data class SkillExtensionConfigEntity(
+    @PrimaryKey val extensionId: String,
+    val installedPath: String,
+    val version: String?,
+    val manifestHash: String,
+) {
+    fun toDomain() = SkillExtensionConfig(installedPath, version, manifestHash)
+}
+
+@Entity(
+    tableName = "extension_tools",
+    primaryKeys = ["extensionId", "toolName"],
+    foreignKeys = [
+        ForeignKey(
+            entity = ExtensionEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["extensionId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("extensionId")],
+)
+data class ExtensionToolEntity(
+    val extensionId: String,
+    val toolName: String,
+    val title: String,
+    val description: String,
+    val accessLevel: String,
+    val enabled: Boolean,
+    val discoveredAtEpochMs: Long,
+) {
+    fun toDomain() = ExtensionTool(
+        extensionId = extensionId,
+        name = toolName,
+        title = title,
+        description = description,
+        access = ExtensionToolAccess.valueOf(accessLevel),
+        enabled = enabled,
+        discoveredAtEpochMs = discoveredAtEpochMs,
+    )
+
+    companion object {
+        fun from(tool: ExtensionTool) = ExtensionToolEntity(
+            extensionId = tool.extensionId,
+            toolName = tool.name,
+            title = tool.title,
+            description = tool.description,
+            accessLevel = tool.access.name,
+            enabled = tool.enabled,
+            discoveredAtEpochMs = tool.discoveredAtEpochMs,
+        )
+    }
+}
+
+@Entity(
+    tableName = "agent_card_extensions",
+    primaryKeys = ["cardId", "extensionId"],
+    foreignKeys = [
+        ForeignKey(
+            entity = AgentCardEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["cardId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = ExtensionEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["extensionId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("cardId"), Index("extensionId")],
+)
+data class AgentCardExtensionEntity(
+    val cardId: String,
+    val extensionId: String,
+)
+
+internal fun ExtensionEntity.toDomain(
+    mcp: McpExtensionConfigEntity?,
+    skill: SkillExtensionConfigEntity?,
+    tools: List<ExtensionToolEntity>,
+) = ManagedExtension(
+    id = id,
+    name = name,
+    description = description,
+    kind = ExtensionKind.valueOf(kind),
+    requiredLevel = ExtensionLevel.entries.first { it.value == requiredLevel },
+    enabled = enabled,
+    status = ExtensionStatus.valueOf(status),
+    mcp = mcp?.toDomain(),
+    skill = skill?.toDomain(),
+    tools = tools.map(ExtensionToolEntity::toDomain),
+    createdAtEpochMs = createdAtEpochMs,
+    updatedAtEpochMs = updatedAtEpochMs,
+)

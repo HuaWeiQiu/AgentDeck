@@ -31,8 +31,11 @@ internal class EmbeddedProotProcess(
         workingDirectory: String = "/root",
         redirectOutput: File? = null,
         guestEnvironment: Map<String, String> = emptyMap(),
+        skillSnapshotKey: String? = null,
     ): Process {
-        val builder = ProcessBuilder(buildArguments(command, workingDirectory, guestEnvironment))
+        val builder = ProcessBuilder(
+            buildArguments(command, workingDirectory, guestEnvironment, skillSnapshotKey),
+        )
             .directory(paths.root)
         builder.environment().apply {
             clear()
@@ -110,6 +113,7 @@ internal class EmbeddedProotProcess(
         command: List<String>,
         workingDirectory: String,
         guestEnvironment: Map<String, String>,
+        skillSnapshotKey: String? = null,
     ): List<String> {
         require(rootfs.isDirectory) { "内嵌 Linux 运行环境尚未安装" }
         require(workingDirectory.startsWith('/') && '\u0000' !in workingDirectory) {
@@ -119,6 +123,9 @@ internal class EmbeddedProotProcess(
         require(guestEnvironment.all { (key, value) ->
             key.matches(Regex("[A-Z][A-Z0-9_]{0,63}")) && '\u0000' !in value
         }) { "运行环境变量无效" }
+        require(skillSnapshotKey == null || skillSnapshotKey.matches(Regex("[a-f0-9]{1,16}"))) {
+            "Skill 快照标识无效"
+        }
         return buildList {
             add(paths.proot.absolutePath)
             add("-L")
@@ -134,6 +141,14 @@ internal class EmbeddedProotProcess(
             add("--bind=${paths.tempDir.absolutePath}:/tmp")
             add("--bind=${paths.codexHome.absolutePath}:/root/.codex")
             add("--bind=${paths.projectsHome.absolutePath}:/root/projects")
+            skillSnapshotKey?.let { key ->
+                val snapshot = File(paths.extensionSessionSnapshots, "skills.$key")
+                require(snapshot.isDirectory && snapshot.parentFile == paths.extensionSessionSnapshots) {
+                    "Skill 快照不存在"
+                }
+                add("--bind=${snapshot.absolutePath}:/root/.agents/skills")
+                add("--bind=${snapshot.absolutePath}:/root/.codex/skills")
+            }
             add("-w")
             add(workingDirectory)
             add("/usr/bin/env")

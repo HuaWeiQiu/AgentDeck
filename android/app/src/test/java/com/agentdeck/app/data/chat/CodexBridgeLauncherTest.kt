@@ -10,6 +10,7 @@ import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.PathNamespace
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.ProviderType
+import com.agentdeck.app.domain.extensions.ExtensionSessionPlan
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -212,6 +213,45 @@ class CodexBridgeLauncherTest {
         assertEquals("gpt-5", args[args.indexOf("--model") + 1])
         assertEquals("cred_test", args[args.indexOf("--credential-ref") + 1])
         assertFalse(args.any { it.contains("sk-") })
+    }
+
+    @Test
+    fun `skill snapshot is bound only to its matching bridge instance`() = runBlocking {
+        var captured: TermuxCommand? = null
+        val gateway = object : TermuxGateway {
+            override fun isTermuxInstalled() = true
+            override fun hasRunCommandPermission() = true
+            override fun openTermux() = true
+            override fun openTermuxInstallPage() = true
+            override fun openTermuxAppSettings() = true
+            override fun runCommand(command: TermuxCommand) = Result.success(Unit)
+            override suspend fun runCommandForResult(command: TermuxCommand, timeoutMillis: Long): Result<TermuxCommandResult> {
+                captured = command
+                return Result.success(
+                    TermuxCommandResult(
+                        stdout = """{"port":48123,"token":"${"a".repeat(43)}"}""",
+                        stderr = "",
+                        exitCode = 0,
+                        stdoutOriginalLength = null,
+                        stderrOriginalLength = null,
+                    ),
+                )
+            }
+        }
+        val card = testCard()
+        val key = CodexBridgeLauncher.instanceKey(card.id)
+        val launcher = CodexBridgeLauncher(TermuxRuntime(gateway))
+
+        launcher.launch(card, extensionPlan = ExtensionSessionPlan(skillSnapshotKey = key)).getOrThrow()
+
+        val args = requireNotNull(captured).args
+        assertEquals(key, args[args.indexOf("--skill-snapshot-key") + 1])
+        assertTrue(
+            launcher.launch(
+                card,
+                extensionPlan = ExtensionSessionPlan(skillSnapshotKey = "deadbeef"),
+            ).isFailure,
+        )
     }
 
     private fun testCard() = AgentCard(

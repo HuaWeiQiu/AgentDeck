@@ -29,6 +29,8 @@ import com.agentdeck.app.ui.sessions.SessionsScreen
 import com.agentdeck.app.ui.settings.SettingsScreen
 import com.agentdeck.app.ui.settings.ConversationDefaultsScreen
 import com.agentdeck.app.ui.models.ModelsScreen
+import com.agentdeck.app.ui.extensions.ExtensionDetailScreen
+import com.agentdeck.app.ui.extensions.ExtensionsScreen
 import com.agentdeck.app.ui.store.SetupScreen
 
 private data class Tab(
@@ -127,6 +129,7 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
                 SettingsScreen(
                     onOpenSetup = { navController.navigate("setup") { launchSingleTop = true } },
                     onOpenModels = { navController.navigate("models") },
+                    onOpenExtensions = { navController.navigate("extensions") },
                     onOpenCodexConfig = { navController.navigate("codex-config") },
                     onOpenConversationDefaults = {
                         navController.navigate("conversation-defaults")
@@ -138,6 +141,21 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
             }
             composable("models") {
                 ModelsScreen(onBack = navController::navigateUp)
+            }
+            composable("extensions") {
+                ExtensionsScreen(
+                    onBack = navController::navigateUp,
+                    onOpenExtension = { extensionId ->
+                        navController.navigate("extensions/detail/$extensionId")
+                    },
+                )
+            }
+            composable("extensions/detail/{extensionId}") { entry ->
+                val extensionId = entry.arguments?.getString("extensionId").orEmpty()
+                ExtensionDetailScreen(
+                    extensionId = extensionId,
+                    onBack = navController::navigateUp,
+                )
             }
             composable("codex-config") {
                 CodexConfigScreen(onBack = navController::navigateUp)

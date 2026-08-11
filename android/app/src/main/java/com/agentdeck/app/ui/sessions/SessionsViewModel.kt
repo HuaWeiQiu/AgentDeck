@@ -3,6 +3,7 @@ package com.agentdeck.app.ui.sessions
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.agentdeck.app.BuildConfig
 import com.agentdeck.app.data.chat.ActiveCodexConnections
 import com.agentdeck.app.data.chat.ChatSessionRegistry
 import com.agentdeck.app.di.ServiceLocator
@@ -10,6 +11,8 @@ import com.agentdeck.app.domain.cards.CardDraft
 import com.agentdeck.app.domain.cards.CardEditor
 import com.agentdeck.app.domain.launch.CliAdapterDescriptor
 import com.agentdeck.app.domain.launch.CliAdapterRegistry
+import com.agentdeck.app.domain.extensions.ExtensionStatus
+import com.agentdeck.app.domain.extensions.ManagedExtension
 import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.RecipeSummary
@@ -25,6 +28,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -49,6 +53,7 @@ data class SessionCardUi(
     val displayTitle: String,
     val summary: String,
     val lastActiveLabel: String,
+    val selectedExtensionIds: Set<String> = emptySet(),
 )
 
 /**
@@ -112,8 +117,20 @@ class SessionsViewModel : ViewModel() {
     val models: StateFlow<List<ProviderModel>> = ServiceLocator.profiles.observeAllModels()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    val extensions: StateFlow<List<ManagedExtension>> = ServiceLocator.extensions.observeExtensions()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val cardExtensionSelections: StateFlow<Map<String, Set<String>>> =
+        ServiceLocator.extensions.observeCardSelections()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    val selectableExtensions: StateFlow<List<ManagedExtension>> = extensions
+        .map { values -> selectableExtensions(values, BuildConfig.EXTENSION_MAX_LEVEL) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     val cardItems: StateFlow<List<SessionCardUi>> =
-        combine(cards, profiles, models) { cardList, profileList, modelList ->
+        combine(cards, profiles, models, cardExtensionSelections) {
+                cardList, profileList, modelList, extensionSelections ->
             cardList.map { card ->
                 val profile = card.profileId?.let { profileId ->
                     profileList.firstOrNull { it.id == profileId }
@@ -141,6 +158,7 @@ class SessionsViewModel : ViewModel() {
                     displayTitle = displayTitle,
                     summary = conversationSummary(displayTitle, adapterDisplayName(card.recipeId), runtimeName),
                     lastActiveLabel = formatLastActivity(card.lastActiveAtEpochMs),
+                    selectedExtensionIds = extensionSelections[card.id].orEmpty(),
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -168,19 +186,21 @@ class SessionsViewModel : ViewModel() {
             identity = null,
             workspacePath = descriptor.defaultWorkspacePath,
             enabled = true,
+            selectedExtensionIds = emptySet(),
         )
     }
 
-    fun editDraft(card: AgentCard): CardDraft = CardDraft(
-        id = card.id,
-        name = card.name,
-        recipeId = card.recipeId,
-        profileId = card.profileId,
-        modelId = card.modelId,
-        permissionLevel = card.permissionLevel,
-        identity = card.identity,
-        workspacePath = card.workspacePath,
-        enabled = card.enabled,
+    fun editDraft(item: SessionCardUi): CardDraft = CardDraft(
+        id = item.card.id,
+        name = item.card.name,
+        recipeId = item.card.recipeId,
+        profileId = item.card.profileId,
+        modelId = item.card.modelId,
+        permissionLevel = item.card.permissionLevel,
+        identity = item.card.identity,
+        workspacePath = item.card.workspacePath,
+        enabled = item.card.enabled,
+        selectedExtensionIds = item.selectedExtensionIds,
     )
 
     fun isRecipeAvailable(recipeId: String): Boolean =
@@ -234,7 +254,10 @@ class SessionsViewModel : ViewModel() {
             archived = existing?.archived ?: false,
             lastActiveAtEpochMs = existing?.lastActiveAtEpochMs ?: 0L,
         )
-        cardsRepo.saveCard(persisted)
+        ServiceLocator.extensions.saveCardWithSelections(
+            persisted,
+            draft.selectedExtensionIds,
+        )
         persisted
     }
 
@@ -300,6 +323,13 @@ class SessionsViewModel : ViewModel() {
         private const val SYNC_TIMEOUT_MILLIS = 10_000L
     }
 }
+
+internal fun selectableExtensions(
+    extensions: List<ManagedExtension>,
+    maxLevel: Int,
+): List<ManagedExtension> = extensions.filter {
+    it.enabled && it.status == ExtensionStatus.READY && it.requiredLevel.value <= maxLevel
+}.sortedWith(compareBy<ManagedExtension>({ it.kind.ordinal }, { it.name.lowercase() }))
 
 internal fun formatLastActivity(
     timestamp: Long,

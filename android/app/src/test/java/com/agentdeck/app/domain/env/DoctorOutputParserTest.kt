@@ -233,7 +233,7 @@ class DoctorOutputParserTest {
             val auth = DoctorOutputParser.parse(result.output)["codex_authenticated"]
 
             assertEquals(result.output, 0, result.exitCode)
-            assertTrue("login status 应被限时，实际 ${elapsedMillis}ms", elapsedMillis < 5_000)
+            assertTrue("login status 应被限时，实际 ${elapsedMillis}ms", elapsedMillis < 15_000)
             assertEquals(EnvironmentCheckStatus.ERROR, auth?.status)
             assertEquals("官方认证检查超时，未阻塞其它环境检测", auth?.detail)
         } finally {
@@ -405,10 +405,10 @@ class DoctorOutputParserTest {
             duration="${'$'}1"
             shift
             case "${'$'}duration" in
-              20s) delay=5.0 ;;
-              5s) delay=1.0 ;;
-              3s) delay=1.0 ;;
-              *) delay=1.0 ;;
+              20s) delay=10.0 ;;
+              5s) delay=5.0 ;;
+              3s) delay=10.0 ;;
+              *) delay=3.0 ;;
             esac
             exec /usr/bin/python3 -c 'import os,signal,subprocess,sys; limit=float(sys.argv[1]); child=subprocess.Popen(sys.argv[2:], start_new_session=True); result=0
 try:

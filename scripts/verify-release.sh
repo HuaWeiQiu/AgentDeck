@@ -72,16 +72,16 @@ done
 verify_abi_split "$secure_arm64" "$secure_x86"
 verify_abi_split "$lab_arm64" "$lab_x86"
 
-# Channel isolation: secure must not ship Lab a11y class; lab must include it.
+# Channel isolation: Secure must not ship either Lab-only executor; Lab must include both.
 # Binary XML/strings are unreliable; search dex/manifest bytes instead.
-python3 - "$secure_arm64" "$lab_arm64" <<'PY'
+python3 - "$secure_arm64" "$secure_x86" "$lab_arm64" "$lab_x86" <<'PY'
 import sys
 import zipfile
 
-needle = b"LabAccessibilityService"
+needles = (b"LabAccessibilityService", b"LabLocalMcpRuntimeAdapter")
 
 
-def contains(apk: str) -> bool:
+def contains(apk: str, needle: bytes) -> bool:
     with zipfile.ZipFile(apk) as archive:
         for name in archive.namelist():
             if name.endswith(".dex") or name.endswith("AndroidManifest.xml"):
@@ -90,11 +90,16 @@ def contains(apk: str) -> bool:
     return False
 
 
-secure_apk, lab_apk = sys.argv[1], sys.argv[2]
-if contains(secure_apk):
-    raise SystemExit("secure APK unexpectedly contains LabAccessibilityService")
-if not contains(lab_apk):
-    raise SystemExit("lab APK missing LabAccessibilityService")
+secure_apks = sys.argv[1:3]
+lab_apks = sys.argv[3:5]
+for needle in needles:
+    label = needle.decode()
+    for apk in secure_apks:
+        if contains(apk, needle):
+            raise SystemExit(f"secure APK unexpectedly contains {label}: {apk}")
+    for apk in lab_apks:
+        if not contains(apk, needle):
+            raise SystemExit(f"lab APK missing {label}: {apk}")
 print("channel isolation ok")
 PY
 

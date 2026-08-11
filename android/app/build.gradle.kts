@@ -13,12 +13,14 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.2.0-beta.7"
+        versionCode = 13
+        versionName = "0.2.0-beta.8"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Secure channel defaults (ADR-0012); lab flavor overrides.
         buildConfigField("boolean", "HOST_LAB", "false")
         buildConfigField("int", "HOST_MAX_LEVEL", "1")
+        buildConfigField("boolean", "EXTENSION_LAB", "false")
+        buildConfigField("int", "EXTENSION_MAX_LEVEL", "2")
     }
 
     flavorDimensions += "channel"
@@ -28,6 +30,8 @@ android {
             isDefault = true
             buildConfigField("boolean", "HOST_LAB", "false")
             buildConfigField("int", "HOST_MAX_LEVEL", "1")
+            buildConfigField("boolean", "EXTENSION_LAB", "false")
+            buildConfigField("int", "EXTENSION_MAX_LEVEL", "2")
         }
         create("lab") {
             dimension = "channel"
@@ -35,6 +39,8 @@ android {
             versionNameSuffix = "-lab"
             buildConfigField("boolean", "HOST_LAB", "true")
             buildConfigField("int", "HOST_MAX_LEVEL", "4")
+            buildConfigField("boolean", "EXTENSION_LAB", "true")
+            buildConfigField("int", "EXTENSION_MAX_LEVEL", "4")
         }
     }
 

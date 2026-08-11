@@ -20,7 +20,7 @@
 
 ## 后果
 
-- 用户可以在 App 内持久修改 Codex 的模型、推理强度、MCP、feature 等非敏感参数，不需要进入外部终端。
+- 用户可以在 App 内持久修改 Codex 的模型、推理强度、feature 等非敏感参数，不需要进入外部终端。Secure 的 MCP 必须从受管“扩展”进入；Lab 才允许原始 TOML MCP，见 ADR-0013。
 - 内嵌 Runtime 更新或 rootfs 替换后，Codex 认证、配置和 thread 数据仍然保留。
 - 非法或含明文凭据的 profile 会在保存或启动前明确失败，旧的有效文件不会被半写入覆盖。
 - AgentDeck 继续尊重用户全局 Codex 配置；受管 Provider 会从会话快照中移除 `model`、`model_provider` 和 `model_providers`，并以明确的 thread 参数锁定已验证的对话绑定，避免被 profile 静默改写。

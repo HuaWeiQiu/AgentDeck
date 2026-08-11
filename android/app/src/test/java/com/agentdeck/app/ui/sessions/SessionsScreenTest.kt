@@ -1,6 +1,10 @@
 package com.agentdeck.app.ui.sessions
 
 import com.agentdeck.app.domain.model.EnvironmentCheckStatus
+import com.agentdeck.app.domain.extensions.ExtensionKind
+import com.agentdeck.app.domain.extensions.ExtensionLevel
+import com.agentdeck.app.domain.extensions.ExtensionStatus
+import com.agentdeck.app.domain.extensions.ManagedExtension
 import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.EnvironmentReport
@@ -190,6 +194,48 @@ class SessionsScreenTest {
         )
     }
 
+    @Test
+    fun `secure extension selection only includes ready enabled supported items`() {
+        val skill = extension("skill", ExtensionKind.SKILL, ExtensionLevel.SKILL)
+        val remote = extension("remote", ExtensionKind.REMOTE_MCP, ExtensionLevel.REMOTE_WRITE)
+        val local = extension("local", ExtensionKind.LOCAL_MCP, ExtensionLevel.LOCAL_PROCESS)
+        val disabled = extension("disabled", ExtensionKind.SKILL, ExtensionLevel.SKILL, enabled = false)
+        val broken = extension(
+            "broken",
+            ExtensionKind.REMOTE_MCP,
+            ExtensionLevel.REMOTE_READ,
+            status = ExtensionStatus.ERROR,
+        )
+
+        assertEquals(
+            listOf("skill", "remote"),
+            selectableExtensions(listOf(local, remote, broken, skill, disabled), maxLevel = 2).map { it.id },
+        )
+    }
+
+    @Test
+    fun `extension selection summary stays compact`() {
+        val skill = extension("skill", ExtensionKind.SKILL, ExtensionLevel.SKILL, name = "Review")
+        val remote = extension("remote", ExtensionKind.REMOTE_MCP, ExtensionLevel.REMOTE_READ)
+
+        assertEquals("尚未添加扩展", extensionSelectionLabel(emptySet(), emptyList()))
+        assertEquals("未启用", extensionSelectionLabel(emptySet(), listOf(skill, remote)))
+        assertEquals("Review", extensionSelectionLabel(setOf("skill"), listOf(skill, remote)))
+        assertEquals("已选 2 个", extensionSelectionLabel(setOf("skill", "remote"), listOf(skill, remote)))
+    }
+
+    @Test
+    fun `disabled selected extension remains visible so it can be removed`() {
+        val selectable = extension("remote", ExtensionKind.REMOTE_MCP, ExtensionLevel.REMOTE_READ)
+        val disabled = extension("disabled", ExtensionKind.SKILL, ExtensionLevel.SKILL, enabled = false)
+
+        assertEquals(
+            listOf("disabled", "remote"),
+            extensionPickerOptions(listOf(selectable), listOf(selectable, disabled), setOf("disabled"))
+                .map { it.id },
+        )
+    }
+
     private fun reportWithoutAuthentication(): EnvironmentReport = EnvironmentReport(
         readyReport().checks.map { check ->
             if (check.id == "codex_authenticated") {
@@ -208,5 +254,24 @@ class SessionsScreenTest {
         defaultModel = "model",
         credentialRef = "credential",
         connectionStatus = ProviderConnectionStatus.READY,
+    )
+
+    private fun extension(
+        id: String,
+        kind: ExtensionKind,
+        level: ExtensionLevel,
+        enabled: Boolean = true,
+        status: ExtensionStatus = ExtensionStatus.READY,
+        name: String = id,
+    ) = ManagedExtension(
+        id = id,
+        name = name,
+        description = "",
+        kind = kind,
+        requiredLevel = level,
+        enabled = enabled,
+        status = status,
+        createdAtEpochMs = 1,
+        updatedAtEpochMs = 1,
     )
 }

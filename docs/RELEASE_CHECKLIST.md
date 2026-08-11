@@ -83,6 +83,17 @@
 - [ ] Verify encrypted/corrupt documents, unsupported binaries, path traversal, excessive ZIP entries, excessive expanded size/compression ratio, parser timeout, and oversized sidecar fail before a turn starts.
 - [ ] Confirm macros, formulas, embedded objects, links, and attachment content are never executed; original and sidecar paths remain private and are removed/restored together across remove, failure, queue, and lifecycle flows.
 
+## Managed extensions
+
+- [ ] Upgrade Room 7→8 and confirm existing Providers, cards, thread links and role identities remain; bad extension references fail and card/extension deletion cascades selections.
+- [ ] Import a valid `SKILL.md`; reject malformed UTF-8, duplicate/unknown YAML fields, invalid names, missing body, NUL and files above 256 KiB.
+- [ ] Run two conversations with different Skills and confirm neither app-server can list or use the other conversation's snapshot; stop/reconnect/background teardown removes only its own snapshot.
+- [ ] Add a public HTTPS MCP with None and Bearer authentication, discover tools, disable one tool, and confirm only enabled tools reach Codex with `default_tools_approval_mode=prompt`.
+- [ ] Confirm Secure rejects HTTP, userinfo, fragments, redirects, loopback/private/link-local/metadata destinations, DNS rebinding, oversized frames and wrong loopback capability paths.
+- [ ] Put a raw stdio MCP in global/project/AgentDeck TOML and confirm Secure rejects or disables it; failure of `config/read` must prevent thread start.
+- [ ] Inspect `adb shell run-as` state, app-server cmdline/environ/config and logcat: no MCP Bearer may appear. Deleting the extension must delete its Keystore-backed ciphertext.
+- [ ] Confirm Secure APK has no Lab local MCP adapter/Accessibility component; Lab includes the adapter, compiles both ABIs, and is not installed during the Secure-only acceptance pass.
+
 ## Stability matrix
 
 - [ ] Run `./scripts/verify-stability-matrix.sh` and retain its machine-readable report with release artifacts.

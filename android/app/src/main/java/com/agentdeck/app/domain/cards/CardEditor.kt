@@ -17,6 +17,7 @@ data class CardDraft(
     val identity: ConversationIdentity? = null,
     val workspacePath: String,
     val enabled: Boolean,
+    val selectedExtensionIds: Set<String> = emptySet(),
 )
 
 object CardEditor {

@@ -6,6 +6,7 @@ import com.agentdeck.app.data.chat.CodexBridgeLauncher
 import com.agentdeck.app.data.chat.ChatAttachmentStore
 import com.agentdeck.app.data.chat.ConversationLinkRepository
 import com.agentdeck.app.data.db.AppDatabase
+import com.agentdeck.app.data.extensions.ExtensionRepository
 import com.agentdeck.app.data.provider.OkHttpProviderModelDiscovery
 import com.agentdeck.app.data.provider.ProviderModelDiscovery
 import com.agentdeck.app.data.repo.CardRepository
@@ -23,10 +24,14 @@ import com.agentdeck.app.BuildConfig
 import com.agentdeck.app.data.host.WorkspaceGrantRepository
 import com.agentdeck.app.data.runtime.EmbeddedProotRuntime
 import com.agentdeck.app.data.runtime.EmbeddedRuntimeInstaller
+import com.agentdeck.app.data.runtime.EmbeddedRuntimePaths
+import com.agentdeck.app.data.secure.AndroidExtensionCredentialVault
 import com.agentdeck.app.data.secure.AndroidProviderCredentialVault
+import com.agentdeck.app.data.secure.ExtensionCredentialVault
 import com.agentdeck.app.data.secure.ProviderCredentialVault
 import com.agentdeck.app.domain.env.EmbeddedEnvironmentProbe
 import com.agentdeck.app.domain.env.EnvironmentScanner
+import com.agentdeck.app.domain.extensions.ExtensionPolicy
 import com.agentdeck.app.domain.host.HostToolBroker
 import com.agentdeck.app.domain.install.RecipeInstallation
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
@@ -55,6 +60,15 @@ object ServiceLocator {
     val runtime: AgentRuntime by lazy { embeddedRuntime }
     val profiles: ProfileRepository by lazy { ProfileRepository(db) }
     val credentials: ProviderCredentialVault by lazy { AndroidProviderCredentialVault(app) }
+    val extensionCredentials: ExtensionCredentialVault by lazy { AndroidExtensionCredentialVault(app) }
+    internal val extensions: ExtensionRepository by lazy {
+        ExtensionRepository(
+            db = db,
+            policy = ExtensionPolicy(BuildConfig.EXTENSION_MAX_LEVEL),
+            credentials = extensionCredentials,
+            paths = EmbeddedRuntimePaths(app),
+        )
+    }
     val modelDiscovery: ProviderModelDiscovery by lazy { OkHttpProviderModelDiscovery() }
     val cards: CardRepository by lazy { CardRepository(db) }
     val seeder: InitialDataSeeder by lazy { InitialDataSeeder(db, profiles, cards) }
@@ -118,7 +132,12 @@ object ServiceLocator {
         )
     }
     val conversationLinks: ConversationLinkRepository by lazy { ConversationLinkRepository(app) }
-    val codexProfile: CodexProfileRepository by lazy { CodexProfileRepository(app) }
+    val codexProfile: CodexProfileRepository by lazy {
+        CodexProfileRepository(
+            context = app,
+            allowUnmanagedMcp = BuildConfig.EXTENSION_LAB,
+        )
+    }
     val codexBridge: CodexBridgeLauncher by lazy { CodexBridgeLauncher(runtime, codexProfile) }
     val chatAttachments: ChatAttachmentStore by lazy { ChatAttachmentStore(app, runtime) }
 
@@ -145,5 +164,6 @@ object ServiceLocator {
         check(initialized) { "ServiceLocator 尚未初始化" }
         setup
         credentials
+        extensions
     }
 }

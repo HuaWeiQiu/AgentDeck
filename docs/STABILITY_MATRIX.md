@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | RPC | 连接/请求超时、流中断、畸形/超大/突发消息、迟到响应、重复与乱序通知、审批断线 | JVM 测试 XML |
 | Runtime | 无空间、断点续传、摘要错误、取消、staging 清理、精确进程回收、重复启停 | JVM/主机测试 XML 与脚本 JSON |
+| Extensions | MCP JSON/SSE、断网/超时/重定向/SSRF/超限、capability、Keystore、Skill 完整性与会话隔离、资源释放 | JVM/Room 测试与 Secure 真机记录 |
 | Android | API 26/target API x86_64 安装和会话恢复；ARM64 真机前后台、熄屏、低内存、进程重建、长流 | `device-matrix-*.json` |
 
 ## 安全约束

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
@@ -56,6 +57,7 @@ import com.agentdeck.app.ui.theme.AppSpacing
 fun SettingsScreen(
     onOpenSetup: () -> Unit = {},
     onOpenModels: () -> Unit = {},
+    onOpenExtensions: () -> Unit = {},
     onOpenCodexConfig: () -> Unit = {},
     onOpenConversationDefaults: () -> Unit = {},
     vm: SettingsViewModel = viewModel(),
@@ -100,6 +102,15 @@ fun SettingsScreen(
                     summary = "登录 ChatGPT 或填写 API 密钥",
                     icon = { Icon(Icons.Filled.Hub, contentDescription = null) },
                     onClick = onOpenModels,
+                )
+            }
+            item { HorizontalDivider() }
+            item {
+                SettingsDestination(
+                    title = "扩展",
+                    summary = "Skills 与 MCP 服务",
+                    icon = { Icon(Icons.Filled.Extension, contentDescription = null) },
+                    onClick = onOpenExtensions,
                 )
             }
             item { HorizontalDivider() }

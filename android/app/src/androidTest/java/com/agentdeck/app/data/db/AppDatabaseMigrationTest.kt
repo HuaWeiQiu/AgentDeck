@@ -26,7 +26,7 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migration3To7PreservesDataAndAddsConversationMetadata() {
+    fun migration3To8PreservesDataAndAddsExtensionRelations() {
         context.openOrCreateDatabase(DATABASE_NAME, Context.MODE_PRIVATE, null).use { db ->
             db.execSQL(
                 """
@@ -87,6 +87,7 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
                 AppDatabase.MIGRATION_6_7,
+                AppDatabase.MIGRATION_7_8,
             )
             .build()
         try {
@@ -130,6 +131,41 @@ class AppDatabaseMigrationTest {
                 assertTrue(cursor.moveToFirst())
                 assertEquals(0L, cursor.getLong(0))
                 for (index in 1..5) assertTrue(cursor.isNull(index))
+            }
+            database.query("PRAGMA index_list(agent_card_extensions)").use { cursor ->
+                val names = buildSet {
+                    while (cursor.moveToNext()) add(cursor.getString(cursor.getColumnIndexOrThrow("name")))
+                }
+                assertTrue("index_agent_card_extensions_extensionId" in names)
+            }
+
+            database.execSQL(
+                "INSERT INTO extensions VALUES ('ext_test', 'Docs', '', 'REMOTE_MCP', 1, 1, 'READY', 1, 1)",
+            )
+            assertTrue(
+                runCatching {
+                    database.execSQL(
+                        "INSERT INTO agent_card_extensions VALUES ('card_old', 'missing_extension')",
+                    )
+                }.isFailure,
+            )
+            database.execSQL(
+                "INSERT INTO mcp_extension_configs VALUES " +
+                    "('ext_test', 'streamable_http', 'https://example.com/mcp', NULL, '[]', 'NONE', NULL)",
+            )
+            database.execSQL(
+                "INSERT INTO extension_tools VALUES " +
+                    "('ext_test', 'search', 'Search', '', 'READ', 1, 1)",
+            )
+            database.execSQL(
+                "INSERT INTO agent_card_extensions VALUES ('card_old', 'ext_test')",
+            )
+            database.execSQL("DELETE FROM extensions WHERE id = 'ext_test'")
+            listOf("mcp_extension_configs", "extension_tools", "agent_card_extensions").forEach { table ->
+                database.query("SELECT COUNT(*) FROM $table").use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertEquals(0, cursor.getInt(0))
+                }
             }
         } finally {
             room.close()

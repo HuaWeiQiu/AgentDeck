@@ -159,8 +159,25 @@ class CodexProfileRepositoryTest {
                 [mcp_servers.private]
                 bearer_token_env_var = "SERVICE_TOKEN"
                 """.trimIndent(),
+                allowUnmanagedMcp = true,
             ).contains("bearer_token_env_var"),
         )
+    }
+
+    @Test
+    fun `secure profile rejects unmanaged mcp while lab may keep credential-free config`() {
+        val mcp = """
+            [mcp_servers.docs]
+            url = "https://mcp.example.com/mcp"
+            enabled = true
+        """.trimIndent()
+
+        val secure = runCatching { CodexProfilePolicy.validate(mcp) }
+        assertTrue(secure.isFailure)
+        assertTrue(secure.exceptionOrNull()?.message.orEmpty().contains("设置 > 扩展"))
+
+        val lab = CodexProfilePolicy.validate(mcp, allowUnmanagedMcp = true)
+        assertTrue(lab.contains("mcp_servers.docs"))
     }
 
 }

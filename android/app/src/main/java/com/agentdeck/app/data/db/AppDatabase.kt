@@ -13,8 +13,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ProviderProfileEntity::class,
         ProviderModelEntity::class,
         AgentCardEntity::class,
+        ExtensionEntity::class,
+        McpExtensionConfigEntity::class,
+        SkillExtensionConfigEntity::class,
+        ExtensionToolEntity::class,
+        AgentCardExtensionEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -22,6 +27,11 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun providerProfileDao(): ProviderProfileDao
     abstract fun providerModelDao(): ProviderModelDao
     abstract fun agentCardDao(): AgentCardDao
+    abstract fun extensionDao(): ExtensionDao
+    abstract fun mcpExtensionConfigDao(): McpExtensionConfigDao
+    abstract fun skillExtensionConfigDao(): SkillExtensionConfigDao
+    abstract fun extensionToolDao(): ExtensionToolDao
+    abstract fun agentCardExtensionDao(): AgentCardExtensionDao
 
     companion object {
         @Volatile
@@ -40,6 +50,7 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_4_5,
                     MIGRATION_5_6,
                     MIGRATION_6_7,
+                    MIGRATION_7_8,
                 )
                     .build()
                     .also { instance = it }
@@ -213,6 +224,99 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE agent_cards ADD COLUMN roleObjective TEXT")
                 db.execSQL("ALTER TABLE agent_cards ADD COLUMN roleCommunicationStyle TEXT")
                 db.execSQL("ALTER TABLE agent_cards ADD COLUMN roleBoundaries TEXT")
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE extensions (
+                        id TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        requiredLevel INTEGER NOT NULL,
+                        enabled INTEGER NOT NULL,
+                        status TEXT NOT NULL,
+                        createdAtEpochMs INTEGER NOT NULL,
+                        updatedAtEpochMs INTEGER NOT NULL,
+                        PRIMARY KEY(id)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE mcp_extension_configs (
+                        extensionId TEXT NOT NULL,
+                        transport TEXT NOT NULL,
+                        url TEXT,
+                        command TEXT,
+                        argsJson TEXT NOT NULL,
+                        authType TEXT NOT NULL,
+                        credentialRef TEXT,
+                        PRIMARY KEY(extensionId),
+                        FOREIGN KEY(extensionId) REFERENCES extensions(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX index_mcp_extension_configs_extensionId " +
+                        "ON mcp_extension_configs(extensionId)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE skill_extension_configs (
+                        extensionId TEXT NOT NULL,
+                        installedPath TEXT NOT NULL,
+                        version TEXT,
+                        manifestHash TEXT NOT NULL,
+                        PRIMARY KEY(extensionId),
+                        FOREIGN KEY(extensionId) REFERENCES extensions(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX index_skill_extension_configs_extensionId " +
+                        "ON skill_extension_configs(extensionId)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE extension_tools (
+                        extensionId TEXT NOT NULL,
+                        toolName TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        accessLevel TEXT NOT NULL,
+                        enabled INTEGER NOT NULL,
+                        discoveredAtEpochMs INTEGER NOT NULL,
+                        PRIMARY KEY(extensionId, toolName),
+                        FOREIGN KEY(extensionId) REFERENCES extensions(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX index_extension_tools_extensionId ON extension_tools(extensionId)")
+                db.execSQL(
+                    """
+                    CREATE TABLE agent_card_extensions (
+                        cardId TEXT NOT NULL,
+                        extensionId TEXT NOT NULL,
+                        PRIMARY KEY(cardId, extensionId),
+                        FOREIGN KEY(cardId) REFERENCES agent_cards(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(extensionId) REFERENCES extensions(id)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX index_agent_card_extensions_cardId ON agent_card_extensions(cardId)")
+                db.execSQL(
+                    "CREATE INDEX index_agent_card_extensions_extensionId " +
+                        "ON agent_card_extensions(extensionId)",
+                )
             }
         }
     }

@@ -66,6 +66,7 @@ fun interface CodexProfileSynchronizer {
 
 class CodexProfileRepository(
     context: Context,
+    private val allowUnmanagedMcp: Boolean = false,
 ) : CodexProfileSynchronizer {
     private val paths = EmbeddedRuntimePaths(context)
     private val mutex = Mutex()
@@ -82,7 +83,7 @@ class CodexProfileRepository(
 
     suspend fun save(content: String): Result<CodexProfileSnapshot> = withContext(Dispatchers.IO) {
         runCatching {
-            val normalized = CodexProfilePolicy.validate(content)
+            val normalized = CodexProfilePolicy.validate(content, allowUnmanagedMcp)
             mutex.withLock {
                 paths.ensureHostLayout()
                 writeAtomically(normalized)
@@ -102,6 +103,7 @@ class CodexProfileRepository(
                 paths.ensureHostLayout()
                 val content = CodexProfilePolicy.validate(
                     readOrCreateProfile(),
+                    allowUnmanagedMcp,
                 )
                 Os.chmod(profileFile.absolutePath, 0b110000000)
                 CodexProfileRuntimeConfig.fromValidatedToml(content)
@@ -202,7 +204,8 @@ class CodexProfileRepository(
             # network_access = true
             # writable_roots = ["/root/projects/shared"]
 
-            # --- HTTP MCP 示例 ---
+            # --- HTTP MCP 示例（仅 AgentDeck Lab）---
+            # 安全版请从“设置 > 扩展”添加，凭据会进入 Android Keystore。
             # [mcp_servers.example]
             # url = "https://mcp.example.com/mcp"
             # enabled = true
@@ -267,7 +270,7 @@ internal object CodexProfilePolicy {
         "token",
     )
 
-    fun validate(content: String): String {
+    fun validate(content: String, allowUnmanagedMcp: Boolean = false): String {
         require('\u0000' !in content) { "Codex 配置包含无效字符" }
         val normalized = content.replace("\r\n", "\n").replace('\r', '\n')
         require(normalized.toByteArray(StandardCharsets.UTF_8).size <= MAX_PROFILE_BYTES) {
@@ -278,6 +281,9 @@ internal object CodexProfilePolicy {
             parsed.errors().firstOrNull()?.toString()?.take(240) ?: "Codex TOML 格式无效"
         }
         rejectInlineSecrets(parsed, emptyList())
+        require(allowUnmanagedMcp || parsed.getTable("mcp_servers")?.isEmpty != false) {
+            "安全版不允许在 Codex 配置中直接声明 MCP；请从“设置 > 扩展”添加"
+        }
         return if (normalized.isEmpty() || normalized.endsWith('\n')) normalized else "$normalized\n"
     }
 

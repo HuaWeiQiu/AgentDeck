@@ -15,6 +15,7 @@ import com.agentdeck.app.domain.chat.ChatApproval
 import com.agentdeck.app.domain.chat.ChatUserInputRequest
 import com.agentdeck.app.domain.chat.CodexModelOption
 import com.agentdeck.app.domain.chat.QueuedChatMessage
+import com.agentdeck.app.domain.extensions.ExtensionSessionHandle
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +59,8 @@ object ChatSessionRegistry {
         val queued: QueuedChatMessage?,
         /** Managed-provider credential broker; must stay alive with the session. */
         val broker: ProviderCredentialBroker?,
+        /** MCP proxies and isolated Skill files owned by this live session. */
+        val extensionSession: ExtensionSessionHandle?,
         /** Raw `item` payloads completed while detached, replayed on reattach. */
         val bufferedItems: MutableList<JSONObject>,
         /** Raw turn payloads from turn/completed|failed|cancelled while detached. */
@@ -96,6 +99,7 @@ object ChatSessionRegistry {
         pendingUserInput: ChatUserInputRequest?,
         queued: QueuedChatMessage?,
         broker: ProviderCredentialBroker?,
+        extensionSession: ExtensionSessionHandle?,
     ): Boolean {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val session = HeldSession(
@@ -117,6 +121,7 @@ object ChatSessionRegistry {
             pendingUserInput = pendingUserInput,
             queued = queued,
             broker = broker,
+            extensionSession = extensionSession,
             bufferedItems = CopyOnWriteArrayList(),
             bufferedTurns = CopyOnWriteArrayList(),
             pendingRequests = CopyOnWriteArrayList(),
@@ -280,6 +285,7 @@ object ChatSessionRegistry {
     private fun stopBridge(session: HeldSession) {
         session.client.close()
         session.broker?.close()
+        session.extensionSession?.close()
         // The session scope may already be cancelled; bridge teardown runs on a
         // short-lived IO scope that cancels itself when done.
         val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

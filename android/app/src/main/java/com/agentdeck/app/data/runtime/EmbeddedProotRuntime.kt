@@ -141,6 +141,7 @@ internal class EmbeddedProotRuntime(
                     workingDirectory = options.cwd,
                     redirectOutput = log,
                     guestEnvironment = mapOf("AGENTDECK_INSTANCE" to marker(options.instanceKey)),
+                    skillSnapshotKey = options.skillSnapshotKey,
                 )
             } catch (error: Exception) {
                 EmbeddedRuntimeService.release(app)
@@ -362,6 +363,7 @@ internal class EmbeddedProotRuntime(
         val instanceKey: String,
         val stop: Boolean,
         val provider: ProviderOptions?,
+        val skillSnapshotKey: String?,
     ) {
         companion object {
             fun parse(args: List<String>): AppServerOptions {
@@ -369,6 +371,7 @@ internal class EmbeddedProotRuntime(
                 var cwd = "/root/projects/default"
                 var instanceKey = ""
                 var stop = false
+                var skillSnapshotKey: String? = null
                 val managed = linkedMapOf<String, String>()
                 var index = 0
                 while (index < args.size) {
@@ -390,6 +393,7 @@ internal class EmbeddedProotRuntime(
                         "--credential-ref",
                         "--credential-broker-port",
                         -> managed[option] = value
+                        "--skill-snapshot-key" -> skillSnapshotKey = value
                         else -> error("不支持的 app-server 参数: $option")
                     }
                     index += 2
@@ -399,8 +403,11 @@ internal class EmbeddedProotRuntime(
                     "Codex 工作目录无效"
                 }
                 require(INSTANCE_KEY_PATTERN.matches(instanceKey)) { "Codex 实例标识无效" }
+                require(skillSnapshotKey == null || skillSnapshotKey == instanceKey) {
+                    "Skill 快照与 app-server 实例不匹配"
+                }
                 val provider = if (managed.isEmpty()) null else ProviderOptions.from(managed)
-                return AppServerOptions(cwd, instanceKey, stop, provider)
+                return AppServerOptions(cwd, instanceKey, stop, provider, skillSnapshotKey)
             }
         }
     }

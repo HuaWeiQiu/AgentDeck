@@ -2,7 +2,7 @@
 
 AgentDeck 是 Android 上聊天优先的本地 Codex 客户端。`0.2` 测试版可以在 App 私有目录中准备经过校验的 Ubuntu/Codex Runtime，不要求新用户安装 Termux；App 内呈现真实消息、工具活动、审批和停止。AgentDeck 不重写 Codex 的 Agent 循环，也不解析终端屏幕伪造消息。
 
-最新测试预发布为 [`v0.2.0-beta.5`](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.5)，按 ARM64/x86_64 拆分 APK。ARM64 已完成 Android 16 真机首次 Runtime 准备（含国内 apt 源）验收；x86_64 已完成构建和包内容校验，但实际 Runtime 启动仍待 x86_64 Android 虚拟设备验证。Beta APK 使用测试签名，不是正式签名的稳定版；构建本身启用 R8、资源压缩和依赖 Baseline Profile。`v0.1.0` 是早期骨架。
+当前源码候选为 `0.2.0-beta.8`；最新已发布测试版为 [`v0.2.0-beta.7`](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.7)，均按 ARM64/x86_64 拆分 APK。ARM64 已完成 Android 16 真机首次 Runtime 准备（含国内 apt 源）验收；x86_64 已完成构建和包内容校验，但实际 Runtime 启动仍待 x86_64 Android 虚拟设备验证。Beta APK 使用测试签名，不是正式签名的稳定版；构建本身启用 R8、资源压缩和依赖 Baseline Profile。`v0.1.0` 是早期骨架。
 
 ## 当前能力
 
@@ -16,6 +16,8 @@ AgentDeck 是 Android 上聊天优先的本地 Codex 客户端。`0.2` 测试版
 - 会话卡片支持新建、编辑、启停和删除；原生聊天可以继承 Codex CLI 配置，也可以绑定受管 Sub2API/OpenAI Responses 兼容服务。
 - 模型服务支持验证 API Key、获取上游 `/v1/models` 并为对话选择模型；验证或导入成功后“模型连接”会自动刷新为就绪，不再要求重复进入终端操作。
 - 高级设置可直接编辑经过 TOML 校验的 `agentdeck.config.toml`；它在每次原生会话启动前自动同步到当前 Runtime，内嵌 Runtime 升级不会丢失这份配置。
+- 设置中的“扩展”按需管理 Skill 与远程 HTTPS MCP；对话只选择自己需要的扩展。MCP 工具默认逐次审批，工具开关形成 allowlist，Bearer 进入独立 Android Keystore，不进入 Runtime 环境变量。
+- Secure 只提供 Skill 和远程 MCP，并禁用 Codex 全局/项目中未受管的 MCP；Lab 额外提供本地 stdio MCP，命令注入器只编译进 Lab source set。
 - 使用当前 Codex 配置的对话会从 app-server `model/list` 获取真实模型目录；聊天标题栏保留对话名，并用唯一的显式模型按钮打开模型/权限面板，输入区不再常驻一整行设置控件。
 - 导入或主动添加的第三方 API Key 使用 Android Keystore 加密，不写入 Room、Codex 配置、Intent、argv 或日志。
 
@@ -29,7 +31,7 @@ Claude Code 目前只是 P1 规划项，不提供安装或启动入口。受管 
 - 思考和工具过程默认显示简洁摘要；原始命令、协议事件和日志进入高级或开发者设置。
 - 高级设置提供 Provider、Endpoint、模型、工作区、权限和内嵌 Runtime 状态；开发者模式提供脱敏诊断与测试工具，但不能绕过安全边界。
 
-完整决策见 [三级体验](docs/ADR-0008-CUSTOMER-EXPERIENCE-MODES.md) 和 [内嵌本地 Runtime](docs/ADR-0009-EMBEDDED-LOCAL-RUNTIME.md)。`0.2.0-beta.5` 已通过一台 Android 16 ARM64 真机的空白数据首次 Runtime 准备（国内软件源）验收，稳定版仍需更多 OEM、异常恢复、审批和正式签名覆盖。
+完整决策见 [三级体验](docs/ADR-0008-CUSTOMER-EXPERIENCE-MODES.md)、[内嵌本地 Runtime](docs/ADR-0009-EMBEDDED-LOCAL-RUNTIME.md) 和 [受管扩展](docs/ADR-0013-MANAGED-EXTENSIONS.md)。`0.2.0-beta.7` 已通过一台 Android 16 ARM64 真机的空白数据首次 Runtime 准备验收；`beta.8` 的 Secure 扩展闭环仍需本轮最终真机验收。
 
 ## 运行边界
 
@@ -42,13 +44,13 @@ AgentDeck
      -> codex app-server --listen ws://127.0.0.1:0
 ```
 
-AgentDeck 在 App 私有 `noBackupFilesDir` 中持久保存 Codex home 和项目目录，并分别绑定到内嵌 Ubuntu 的 `/root/.codex` 与 `/root/projects`，Runtime 修复或替换不会把它们留在旧 rootfs 中。官方登录产生的认证状态由 Codex 自己维护；AgentDeck 另存不含凭据的 `agentdeck.config.toml`，在每次会话启动前重新校验并作为 `thread/start` / `thread/resume` 的配置层应用。配置编辑器内置必填/可选说明与注释示例，拒绝 TOML 语法错误和明文凭据；第三方 API Key 只进入 Android Keystore 与实例级鉴权 broker。详细决策见 [Codex 配置层](docs/ADR-0010-AGENTDECK-CODEX-PROFILE.md)、[受管模型服务](docs/ADR-0007-MANAGED-MODEL-PROVIDERS.md) 和 [原生聊天桥](docs/ADR-0005-NATIVE-CHAT-BRIDGE.md)。
+AgentDeck 在 App 私有 `noBackupFilesDir` 中持久保存 Codex home 和项目目录，并分别绑定到内嵌 Ubuntu 的 `/root/.codex` 与 `/root/projects`，Runtime 修复或替换不会把它们留在旧 rootfs 中。官方登录产生的认证状态由 Codex 自己维护；AgentDeck 另存不含凭据的 `agentdeck.config.toml`，在每次会话启动前重新校验并作为 `thread/start` / `thread/resume` 的配置层应用。配置编辑器内置必填/可选说明与注释示例，拒绝 TOML 语法错误和明文凭据；Secure 也拒绝直接声明 MCP，MCP 必须进入受管扩展。第三方 API Key 与 MCP Bearer 只进入各自隔离的 Android Keystore 存储。详细决策见 [Codex 配置层](docs/ADR-0010-AGENTDECK-CODEX-PROFILE.md)、[受管模型服务](docs/ADR-0007-MANAGED-MODEL-PROVIDERS.md)、[受管扩展](docs/ADR-0013-MANAGED-EXTENSIONS.md) 和 [原生聊天桥](docs/ADR-0005-NATIVE-CHAT-BRIDGE.md)。
 
 ## 0.2 测试版真机使用
 
 1. 在 ARM64 或 x86_64 Android 8.0 或更高版本安装与设备 ABI 对应的测试 APK。
 2. 首次启动点击“安装或修复”；准备过程会下载约 122 MB，安装后私有 Runtime 约占 800 MB，并会预留安装所需临时空间。
-3. 在“设置 → 模型连接”选择 ChatGPT 登录、OpenAI API Key 或第三方 Responses 服务；Sub2API 是带推荐默认值的专用预设，通用 Responses 允许自定义 Endpoint 和模型。
+3. 在“设置 → 模型服务”选择 ChatGPT 登录、OpenAI API Key 或第三方 Responses 服务；Sub2API 是带推荐默认值的专用预设，通用 Responses 允许自定义 Endpoint 和模型。
 4. 回到“对话”，点整行进入原生聊天。标准模式不需要打开终端或理解 Linux 配置。
 5. 新建或编辑对话时可设置角色名称、自我定义、目标、表达方式和边界；这些内容以会话级开发者指令注入，不作为普通用户消息伪装角色。
 
@@ -93,8 +95,9 @@ AgentDeck/
 ## 发布状态
 
 - 早期骨架：[v0.1.0](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.0)
-- 当前测试预发布：[v0.2.0-beta.5](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.5)（国内 apt 源与真实安装错误；x86_64 运行门禁待完成）
-- 历史测试预发布：[v0.2.0-beta.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.4)、[v0.2.0-beta.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.3)、[v0.2.0-beta.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.2)、[v0.2.0-beta.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.1)、[v0.1.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.4)、[v0.1.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.3)、[v0.1.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.2)
+- 当前源码候选：`v0.2.0-beta.8`（尚未发布，等待 Secure 真机验收）
+- 当前测试预发布：[v0.2.0-beta.7](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.7)
+- 历史测试预发布：[v0.2.0-beta.6](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.6)、[v0.2.0-beta.5](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.5)、[v0.2.0-beta.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.4)、[v0.2.0-beta.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.3)、[v0.2.0-beta.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.2)、[v0.2.0-beta.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.1)、[v0.1.4](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.4)、[v0.1.3](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.3)、[v0.1.2](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.2)
 - 已知损坏版本：[v0.1.1](https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.1.1)（新安装首次启动会崩溃）
 - 转为稳定版前的阻塞项：更多 OEM/Android 版本、首次完整安装、审批、异常恢复和历史数据升级验收；正式签名配置。
 
@@ -108,9 +111,6 @@ Copyright 2026 HuaWeiQiu。按 [Apache License 2.0](LICENSE) 开源。
 
 ## 上游参考
 
-- [Termux RUN_COMMAND Intent](https://github.com/termux/termux-app/wiki/RUN_COMMAND-Intent)
-- [Termux:Widget](https://github.com/termux/termux-widget)
-- [Termux:Tasker](https://github.com/termux/termux-tasker)
 - [proot-distro](https://github.com/termux/proot-distro)
 - [Kai](https://github.com/SimonSchubert/Kai)
 - [UserLAnd](https://github.com/CypherpunkArmory/UserLAnd)

@@ -4,6 +4,37 @@ All notable changes to AgentDeck are documented in this file.
 
 ## Unreleased
 
+## 0.2.0-beta.8 - 2026-08-12
+
+### Added
+
+- Managed extensions (ADR-0013): strict `SKILL.md` import, HTTPS Streamable HTTP MCP,
+  None/Bearer authentication, discovered tool allowlists, per-conversation selection,
+  extension list/detail/edit UI, and explicit per-call MCP approval through Codex 0.147.
+- Room 7→8 normalized extension/config/tool/conversation relations with transactional
+  selection saves and cascading cleanup.
+- Separate Secure/Lab extension capabilities. Lab adds local stdio MCP; its command
+  injector is compiled only from `src/lab`.
+
+### Security
+
+- MCP Bearer values use an extension-specific Android Keystore alias and an authenticated
+  loopback proxy, never Codex TOML, Runtime environment variables, argv, or Room.
+- Secure rejects raw TOML MCP, disables effective global/project MCP servers before thread
+  start, randomizes managed server IDs, validates public HTTPS/DNS destinations, and fails
+  closed when effective config cannot be read.
+- Each app-server gets an integrity-checked Skill snapshot containing only the current
+  conversation's selected Skills; background session ownership now includes all extension
+  resources.
+
+### Verified
+
+- Secure and Lab JVM suites: 295 tests each.
+- Secure and Lab Android Lint, R8 Beta builds, ARM64/x86_64 ABI APK splits.
+- Secure APK does not contain the Lab local MCP adapter; both Lab APKs do.
+- Secure ARM64 device acceptance remains required before publishing beta.8. Lab device
+  testing is intentionally outside this release pass.
+
 ## 0.2.0-beta.7 - 2026-08-11
 
 ### Fixed
