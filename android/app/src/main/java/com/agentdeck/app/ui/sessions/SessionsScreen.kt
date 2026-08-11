@@ -397,11 +397,9 @@ fun SessionsScreen(
     if (runtimeMissingDialog) {
         AlertDialog(
             onDismissRequest = { runtimeMissingDialog = false },
-            title = { Text("需要先准备运行环境") },
+            title = { Text("需要运行环境") },
             text = {
-                Text(
-                    "本机还没有装好对话所需的运行环境。可以现在去安装，也可以稍后在「设置 → 运行环境」里完成。",
-                )
+                Text("还没装好运行环境，现在去安装？")
             },
             confirmButton = {
                 Button(
@@ -505,7 +503,7 @@ private fun EmptySessionsChecklist(
         Text("开始使用", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(AppSpacing.sm))
         Text(
-            "按顺序完成下面三步即可聊天",
+            "完成三步即可聊天",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -994,7 +992,7 @@ private fun CardEditorDialog(
                             readOnly = true,
                             label = { Text("Codex 权限") },
                             supportingText = {
-                                Text(permissionPresentation.technicalSummary)
+                                Text(permissionPresentation.description)
                             },
                             trailingIcon = {
                                 ExposedDropdownMenuDefaults.TrailingIcon(permissionExpanded)
@@ -1049,7 +1047,7 @@ private fun CardEditorDialog(
                         Column(Modifier.weight(1f)) {
                             Text("角色身份", style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                "作为此对话中持续生效的身份",
+                                "本会话的固定人设",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

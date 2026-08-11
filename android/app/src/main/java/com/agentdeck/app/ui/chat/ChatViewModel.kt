@@ -818,8 +818,7 @@ class ChatViewModel(
         val grantName = ServiceLocator.workspaceGrants.primaryGrant()?.displayName ?: "已授权文件夹"
         mutableState.update {
             it.copy(
-                hostWorkspaceBanner =
-                    "真实目录「$grantName」· 未挂载 · 用 agentdeck-host 或 pull/push 到 host-mirror",
+                hostWorkspaceBanner = "本机文件夹 · $grantName",
             )
         }
     }

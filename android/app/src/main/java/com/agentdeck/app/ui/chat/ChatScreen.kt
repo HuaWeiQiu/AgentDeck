@@ -662,11 +662,11 @@ internal fun chatRuntimeLabel(provider: String?, model: String?): String? = list
 internal fun customerFacingChatError(error: ChatError, showTechnicalDetails: Boolean): String {
     if (showTechnicalDetails) return error.raw
     return when (error) {
-        is ChatError.Auth -> "还没登录模型服务。请到「设置 → 模型服务」完成登录或填写密钥。"
-        is ChatError.Model -> "模型暂时连不上。请检查网络和「设置 → 模型服务」，然后点重试。"
-        is ChatError.Network -> "和本机 Codex 的连接断了。可点重试；若多次失败，到「设置 → 运行环境」检查是否可用。"
+        is ChatError.Auth -> "未登录模型服务，请到设置完成登录"
+        is ChatError.Model -> "模型连不上，请检查设置后重试"
+        is ChatError.Network -> "连接已断开，请重试"
         is ChatError.Attachment -> error.raw
-        is ChatError.Unknown -> "这次回复没能完成。请点重试；仍不行可返回会话列表再进入。"
+        is ChatError.Unknown -> "回复失败，请重试"
     }
 }
 
@@ -1759,10 +1759,10 @@ private fun HostWriteApprovalSheetContent(
             .fillMaxWidth()
             .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
     ) {
-        Text("允许写入本机工作区？", style = MaterialTheme.typography.titleMedium)
+        Text("允许写入文件？", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Agent 请求修改你授权的文件夹。与 Codex 沙箱权限无关；拒绝不会影响对话本身。",
+            "将修改你授权的本机文件夹。拒绝不影响继续聊天。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

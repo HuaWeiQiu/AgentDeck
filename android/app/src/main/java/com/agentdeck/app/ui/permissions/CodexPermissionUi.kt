@@ -12,20 +12,20 @@ fun codexPermissionPresentation(level: CodexPermissionLevel): CodexPermissionPre
     when (level) {
         CodexPermissionLevel.READ_ONLY -> CodexPermissionPresentation(
             title = "只读",
-            description = "可以查看和分析文件，但不会运行修改操作。",
-            technicalSummary = "untrusted 审批；自动拒绝命令、文件修改和额外权限请求",
+            description = "只看文件，不改、不跑命令",
+            technicalSummary = "自动拒绝改文件与命令",
         )
 
         CodexPermissionLevel.ASK_FIRST -> CodexPermissionPresentation(
             title = "推荐",
-            description = "读取可直接进行，修改文件或运行其他操作前会询问你。",
-            technicalSummary = "untrusted 审批；PRoot 作为 external sandbox，命令网络可用",
+            description = "读文件直接做，改文件或跑命令前会问你",
+            technicalSummary = "改动前询问",
         )
 
         CodexPermissionLevel.FULL_ACCESS -> CodexPermissionPresentation(
             title = "完全访问",
-            description = "Codex 可以直接运行命令和修改文件，不再逐次询问。",
-            technicalSummary = "never 审批；PRoot 作为 external sandbox，完整磁盘与网络访问",
+            description = "可直接改文件和跑命令",
+            technicalSummary = "不再逐次询问",
         )
     }
 

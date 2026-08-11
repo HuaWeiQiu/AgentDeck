@@ -107,8 +107,8 @@ fun SettingsScreen(
             item {
                 SettingsDestination(
                     title = "会话高级设置",
-                    summary = "权限默认「${permissionPresentation.title}」· " +
-                        if (experienceLevel.advancedEnabled) "已开启高级选项" else "标准模式",
+                    summary = "默认权限：${permissionPresentation.title}" +
+                        if (experienceLevel.advancedEnabled) " · 高级已开" else "",
                     icon = { Icon(Icons.Filled.Tune, contentDescription = null) },
                     onClick = onOpenConversationDefaults,
                 )
@@ -194,7 +194,7 @@ fun ConversationDefaultsScreen(
                 ListItem(
                     headlineContent = { Text("开启高级选项") },
                     supportingContent = {
-                        Text("本机工作区、项目路径等；新手可保持关闭")
+                        Text("工作区等可选功能")
                     },
                     leadingContent = { Icon(Icons.Filled.Memory, contentDescription = null) },
                     trailingContent = {
@@ -232,28 +232,18 @@ fun ConversationDefaultsScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            if (experienceLevel.advancedEnabled) {
-                                Text(
-                                    presentation.technicalSummary,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
                         }
                     }
                 }
             }
             if (experienceLevel.advancedEnabled) {
                 item { HorizontalDivider() }
-                item { SectionLabel("本机工作区（L1）") }
+                item { SectionLabel("本机工作区") }
                 item {
                     ListItem(
                         headlineContent = { Text("允许访问所选文件夹") },
                         supportingContent = {
-                            Text(
-                                "不会挂载进 Codex 的 Linux 目录。真实文件夹通过 agentdeck-host 访问；" +
-                                    "也可用 pull/push 同步到 /root/projects/host-mirror。默认关闭，可随时撤销。",
-                            )
+                            Text("读写你选的手机文件夹，可随时关闭")
                         },
                         leadingContent = { Icon(Icons.Filled.Folder, contentDescription = null) },
                         trailingContent = {
@@ -271,13 +261,13 @@ fun ConversationDefaultsScreen(
                         },
                         modifier = Modifier.padding(horizontal = 12.dp),
                     ) {
-                        Text(if (workspaceGrants.isEmpty()) "选择工作区文件夹" else "更换工作区文件夹")
+                        Text(if (workspaceGrants.isEmpty()) "选择文件夹" else "更换文件夹")
                     }
                 }
                 if (hostWorkspaceEnabled) {
                     item {
                         Text(
-                            "写入真实目录时",
+                            "写入时",
                             style = MaterialTheme.typography.titleSmall,
                             modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
                         )
@@ -302,7 +292,7 @@ fun ConversationDefaultsScreen(
                             Column {
                                 Text("每次询问", style = MaterialTheme.typography.bodyLarge)
                                 Text(
-                                    "写/删/push 都弹窗确认（默认）",
+                                    "改文件前先确认",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -329,7 +319,7 @@ fun ConversationDefaultsScreen(
                             Column {
                                 Text("不再询问", style = MaterialTheme.typography.bodyLarge)
                                 Text(
-                                    "已授权文件夹内直接写入；可随时改回。撤销文件夹后仍无法访问。",
+                                    "直接写入所选文件夹",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -341,7 +331,7 @@ fun ConversationDefaultsScreen(
                     item(key = grant.id) {
                         ListItem(
                             headlineContent = { Text(grant.displayName) },
-                            supportingContent = { Text("已授权 · 可撤销") },
+                            supportingContent = { Text("已授权") },
                             trailingContent = {
                                 TextButton(onClick = { vm.revokeWorkspaceGrant(grant.id) }) {
                                     Text("撤销")
