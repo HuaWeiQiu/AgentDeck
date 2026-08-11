@@ -1437,7 +1437,9 @@ private fun VoiceInputButton(
 
     fun publish(committed: String, partial: String = "") {
         // Always push into the chat composer; this is the wire to the input box.
-        onComposerChangeState.value(joinVoice(baseBeforeListen.value, committed, partial))
+        val text = joinVoice(baseBeforeListen.value, committed, partial)
+        android.util.Log.i("AgentDeckVoice", "publish composer='$text'")
+        onComposerChangeState.value(text)
     }
 
     fun finishSession(extra: String, sid: Int) {

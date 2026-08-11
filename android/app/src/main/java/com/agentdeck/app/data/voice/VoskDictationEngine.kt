@@ -1,21 +1,24 @@
 package com.agentdeck.app.data.voice
 
 import android.content.Context
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
-import org.vosk.android.RecognitionListener
-import org.vosk.android.SpeechService
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Offline Chinese dictation via Vosk. Not a system SpeechRecognizer wrapper.
+ * Offline Chinese dictation via Vosk using an explicit AudioRecord loop.
+ * Avoids SpeechService callback quirks on some OEM ROMs.
  */
 class VoskDictationEngine(
     context: Context,
@@ -28,7 +31,13 @@ class VoskDictationEngine(
     private var model: Model? = null
 
     @Volatile
-    private var speechService: SpeechService? = null
+    private var recordThread: Thread? = null
+
+    @Volatile
+    private var audioRecord: AudioRecord? = null
+
+    @Volatile
+    private var recognizer: Recognizer? = null
 
     fun isModelReady(): Boolean = modelStore.isReady()
 
@@ -43,26 +52,25 @@ class VoskDictationEngine(
 
     /**
      * Offline smoke-test path: feed a mono 16-bit PCM WAV (16 kHz preferred) into Vosk.
-     * Used by adb self-test when speaker loopback is unavailable.
      */
     suspend fun transcribeWav(file: File): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             ensureReady().getOrThrow()
             val loaded = model ?: error("语音模型未就绪")
             val pcm = readPcm16Mono(file)
-            val recognizer = Recognizer(loaded, SAMPLE_RATE)
+            val rec = Recognizer(loaded, SAMPLE_RATE.toFloat())
             try {
                 val chunk = 4000
                 var offset = 0
                 while (offset < pcm.size) {
                     val end = minOf(offset + chunk, pcm.size)
                     val slice = pcm.copyOfRange(offset, end)
-                    recognizer.acceptWaveForm(slice, slice.size)
+                    rec.acceptWaveForm(slice, slice.size)
                     offset = end
                 }
-                parseHypothesis(recognizer.finalResult, partial = false)
+                parseHypothesis(rec.finalResult, partial = false)
             } finally {
-                runCatching { recognizer.close() }
+                runCatching { rec.close() }
             }
         }
     }
@@ -74,86 +82,155 @@ class VoskDictationEngine(
         onError: (String) -> Unit,
     ) {
         if (!active.compareAndSet(false, true)) return
-        try {
-            val loaded = model
-            if (loaded == null) {
-                active.set(false)
-                onError("语音模型未就绪")
-                return
-            }
-            val recognizer = Recognizer(loaded, SAMPLE_RATE)
-            val service = SpeechService(recognizer, SAMPLE_RATE)
-            speechService = service
-            service.startListening(
-                object : RecognitionListener {
-                    override fun onPartialResult(hypothesis: String?) {
-                        val text = parseHypothesis(hypothesis, partial = true)
-                        // Always deliver, including blank, so UI can clear stale partials.
-                        mainHandler.post { onPartial(text) }
-                    }
-
-                    override fun onResult(hypothesis: String?) {
-                        // Endpoint / silence: one finished phrase while still listening.
-                        val text = parseHypothesis(hypothesis, partial = false)
-                        if (text.isNotBlank()) mainHandler.post { onUtterance(text) }
-                    }
-
-                    override fun onFinalResult(hypothesis: String?) {
-                        val text = parseHypothesis(hypothesis, partial = false)
-                        mainHandler.post {
-                            // Do not shutdown before delivering final text to UI.
-                            val svc = speechService
-                            speechService = null
-                            active.set(false)
-                            runCatching { svc?.shutdown() }
-                            onFinal(text)
-                        }
-                    }
-
-                    override fun onError(exception: Exception?) {
-                        mainHandler.post {
-                            stopInternal()
-                            onError(exception?.message?.take(120) ?: "离线语音识别失败")
-                        }
-                    }
-
-                    override fun onTimeout() {
-                        // Treat timeout as end-of-session with empty final so UI can keep last partial.
-                        mainHandler.post {
-                            val svc = speechService
-                            speechService = null
-                            active.set(false)
-                            runCatching { svc?.shutdown() }
-                            onFinal("")
-                        }
-                    }
-                },
-            )
-        } catch (error: Exception) {
+        val loaded = model
+        if (loaded == null) {
             active.set(false)
-            stopInternal()
-            onError(error.message?.take(120) ?: "无法启动离线语音识别")
+            onError("语音模型未就绪")
+            return
         }
+
+        val minBuf = AudioRecord.getMinBufferSize(
+            SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+        )
+        if (minBuf <= 0) {
+            active.set(false)
+            onError("无法初始化麦克风")
+            return
+        }
+        val bufferSize = maxOf(minBuf, SAMPLE_RATE / 5 * 2) // ~200ms of 16-bit mono
+
+        val recorder = openRecorder(bufferSize)
+        if (recorder == null) {
+            active.set(false)
+            onError("麦克风初始化失败")
+            return
+        }
+
+        val rec = try {
+            Recognizer(loaded, SAMPLE_RATE.toFloat())
+        } catch (error: Exception) {
+            runCatching { recorder.release() }
+            active.set(false)
+            onError(error.message?.take(120) ?: "无法创建识别器")
+            return
+        }
+
+        audioRecord = recorder
+        recognizer = rec
+
+        val thread = Thread(
+            {
+                var maxAbs = 0
+                var frames = 0
+                try {
+                    recorder.startRecording()
+                    Log.i(TAG, "AudioRecord started status=${recorder.recordingState} sourceOk=true")
+                    val buf = ByteArray(bufferSize)
+                    while (active.get()) {
+                        val n = recorder.read(buf, 0, buf.size)
+                        if (n <= 0) continue
+                        frames++
+                        // Track peak amplitude so we know whether the mic is actually open.
+                        var i = 0
+                        while (i + 1 < n) {
+                            val sample = ((buf[i].toInt() and 0xff) or (buf[i + 1].toInt() shl 8)).toShort().toInt()
+                            val a = kotlin.math.abs(sample)
+                            if (a > maxAbs) maxAbs = a
+                            i += 2
+                        }
+                        if (frames % 10 == 0) {
+                            Log.i(TAG, "audio peak=$maxAbs frames=$frames")
+                        }
+                        val accepted = rec.acceptWaveForm(buf, n)
+                        if (accepted) {
+                            // Endpoint: one finished phrase.
+                            val text = parseHypothesis(rec.result, partial = false)
+                            Log.i(TAG, "utterance='$text'")
+                            if (text.isNotBlank()) {
+                                mainHandler.post { onUtterance(text) }
+                            }
+                        } else {
+                            val partial = parseHypothesis(rec.partialResult, partial = true)
+                            if (partial.isNotBlank()) {
+                                Log.i(TAG, "partial='$partial'")
+                                mainHandler.post { onPartial(partial) }
+                            }
+                        }
+                    }
+                    val finalText = parseHypothesis(rec.finalResult, partial = false)
+                    Log.i(TAG, "final='$finalText' peak=$maxAbs frames=$frames")
+                    if (finalText.isBlank() && maxAbs < 200) {
+                        mainHandler.post { onError("没听到声音，请靠近麦克风再说一次") }
+                    } else {
+                        mainHandler.post { onFinal(finalText) }
+                    }
+                } catch (error: Exception) {
+                    Log.e(TAG, "dictation loop failed", error)
+                    mainHandler.post {
+                        onError(error.message?.take(120) ?: "离线语音识别失败")
+                    }
+                } finally {
+                    cleanupCapture()
+                    active.set(false)
+                }
+            },
+            "vosk-dictation",
+        )
+        recordThread = thread
+        thread.start()
+    }
+
+    private fun openRecorder(bufferSize: Int): AudioRecord? {
+        val sources = intArrayOf(
+            MediaRecorder.AudioSource.MIC,
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            MediaRecorder.AudioSource.DEFAULT,
+        )
+        for (source in sources) {
+            val recorder = try {
+                AudioRecord(
+                    source,
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize,
+                )
+            } catch (_: Exception) {
+                null
+            }
+            if (recorder != null && recorder.state == AudioRecord.STATE_INITIALIZED) {
+                Log.i(TAG, "using AudioSource=$source")
+                return recorder
+            }
+            runCatching { recorder?.release() }
+        }
+        return null
     }
 
     fun stop() {
-        // Asks Vosk for onFinalResult; cleanup is done there.
-        val svc = speechService ?: return
-        runCatching { svc.stop() }
+        // Flip the flag; the capture thread will emit finalResult and exit.
+        if (!active.getAndSet(false)) return
+        runCatching { audioRecord?.stop() }
     }
 
     fun release() {
         active.set(false)
-        stopInternal()
+        runCatching { audioRecord?.stop() }
+        runCatching { recordThread?.join(1000) }
+        cleanupCapture()
         runCatching { model?.close() }
         model = null
     }
 
-    private fun stopInternal() {
-        runCatching { speechService?.stop() }
-        runCatching { speechService?.shutdown() }
-        speechService = null
-        active.set(false)
+    private fun cleanupCapture() {
+        runCatching { audioRecord?.release() }
+        audioRecord = null
+        runCatching { recognizer?.close() }
+        recognizer = null
+        recordThread = null
     }
 
     private fun parseHypothesis(raw: String?, partial: Boolean): String {
@@ -201,6 +278,7 @@ class VoskDictationEngine(
     }
 
     companion object {
-        private const val SAMPLE_RATE = 16_000.0f
+        private const val TAG = "AgentDeckVoice"
+        private const val SAMPLE_RATE = 16_000
     }
 }
