@@ -19,6 +19,7 @@ import com.agentdeck.app.data.host.DefaultHostToolBroker
 import com.agentdeck.app.data.host.HostToolRelay
 import com.agentdeck.app.data.host.MutableHostApprovalGateway
 import com.agentdeck.app.data.host.SafWorkspaceDocumentStore
+import com.agentdeck.app.BuildConfig
 import com.agentdeck.app.data.host.WorkspaceGrantRepository
 import com.agentdeck.app.data.runtime.EmbeddedProotRuntime
 import com.agentdeck.app.data.runtime.EmbeddedRuntimeInstaller
@@ -69,6 +70,7 @@ object ServiceLocator {
                     experienceLevel = experienceSettings.level.value,
                     workspaceEnabled = experienceSettings.hostWorkspaceEnabled.value,
                     hasGrant = workspaceGrants.primaryGrant() != null,
+                    maxHostLevel = BuildConfig.HOST_MAX_LEVEL,
                 )
             },
             workspace = {

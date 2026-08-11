@@ -37,8 +37,29 @@ class HostToolPolicyTest {
     @Test
     fun `unimplemented capabilities stay denied`() {
         // Even developer + flags cannot enable L3/L4 until implemented
-        val policy = HostToolPolicy(ExperienceLevel.DEVELOPER, workspaceEnabled = true, hasWorkspaceGrant = true)
+        val policy = HostToolPolicy(
+            ExperienceLevel.DEVELOPER,
+            workspaceEnabled = true,
+            hasWorkspaceGrant = true,
+            maxHostLevel = 4,
+        )
         // No tool maps to UI_AUTOMATION yet; capability list must not include L3/L4
         assertEquals(setOf(HostCapability.WORKSPACE_FS), policy.listEnabledCapabilities())
+    }
+
+    @Test
+    fun `secure channel max level blocks above L1`() {
+        val secure = HostToolPolicy(
+            experienceLevel = ExperienceLevel.ADVANCED,
+            workspaceEnabled = true,
+            hasWorkspaceGrant = true,
+            maxHostLevel = 1,
+        )
+        // WORKSPACE is L1 — allowed by channel (still needs grant checks which pass)
+        assertEquals(null, secure.evaluate(HostToolName.WORKSPACE_STAT))
+        // No L2+ tools in enum wire yet for share; channel check uses capability.level
+        assertEquals(1, HostCapability.WORKSPACE_FS.level)
+        assertEquals(2, HostCapability.SHARE_INTENT.level)
+        assertTrue(HostCapability.SHARE_INTENT.level > secure.maxHostLevel)
     }
 }

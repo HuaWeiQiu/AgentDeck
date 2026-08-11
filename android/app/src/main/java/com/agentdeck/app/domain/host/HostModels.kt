@@ -3,18 +3,18 @@ package com.agentdeck.app.domain.host
 /**
  * Android 宿主能力分级（ADR-0011）。默认全部关闭；与 Codex sandbox 档位互不替代。
  */
-enum class HostCapability {
+enum class HostCapability(val level: Int) {
     /** L1：用户经 SAF 授权的工作区目录 */
-    WORKSPACE_FS,
+    WORKSPACE_FS(1),
 
-    /** L2：系统可见 Intent 协作（本阶段不实现执行器） */
-    SHARE_INTENT,
+    /** L2：系统可见 Intent 协作（仅 Lab 通道） */
+    SHARE_INTENT(2),
 
-    /** L3：无障碍屏幕代理（本阶段不实现执行器） */
-    UI_AUTOMATION,
+    /** L3：无障碍屏幕代理（仅 Lab 通道） */
+    UI_AUTOMATION(3),
 
-    /** L4：特权 shell（本阶段不实现执行器） */
-    PRIVILEGED_SHELL,
+    /** L4：特权 shell（仅 Lab 通道） */
+    PRIVILEGED_SHELL(4),
 }
 
 enum class HostToolName(val wireName: String, val capability: HostCapability, val isWrite: Boolean) {

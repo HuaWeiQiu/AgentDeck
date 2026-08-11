@@ -9,6 +9,8 @@ All notable changes to AgentDeck are documented in this file.
 - Host Toolkit L1 (ADR-0011): fail-closed broker, SAF workspace grants, advanced-settings picker,
   guest `agentdeck-host` CLI over `/run/agentdeck` IPC, chat write-approval sheet, and unit tests.
   Host access stays independent of Codex sandbox permission level.
+- Product channels (ADR-0012): `secure` (default, HOST_MAX_LEVEL=1) and `lab` (HOST_MAX_LEVEL=4,
+  applicationId `.lab`) Gradle flavors for separate daily vs experimental APKs.
 
 ## 0.2.0-beta.5 - 2026-08-11
 

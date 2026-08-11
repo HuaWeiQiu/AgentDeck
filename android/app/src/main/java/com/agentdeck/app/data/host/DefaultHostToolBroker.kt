@@ -258,10 +258,12 @@ class DefaultHostToolBroker(
             experienceLevel: ExperienceLevel,
             workspaceEnabled: Boolean,
             hasGrant: Boolean,
+            maxHostLevel: Int = 1,
         ): HostToolPolicy = HostToolPolicy(
             experienceLevel = experienceLevel,
             workspaceEnabled = workspaceEnabled,
             hasWorkspaceGrant = hasGrant,
+            maxHostLevel = maxHostLevel,
         )
     }
 }
