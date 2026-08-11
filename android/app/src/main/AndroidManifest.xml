@@ -46,6 +46,11 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- adb self-test: am start -a com.agentdeck.app.ACTION_VOICE_SELFTEST -n …/MainActivity -->
+            <intent-filter>
+                <action android:name="com.agentdeck.app.ACTION_VOICE_SELFTEST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

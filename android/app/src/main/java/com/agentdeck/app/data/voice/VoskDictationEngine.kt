@@ -10,6 +10,8 @@ import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.android.RecognitionListener
 import org.vosk.android.SpeechService
+import java.io.File
+import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -35,6 +37,32 @@ class VoskDictationEngine(
         modelStore.ensureReady(onProgress).mapCatching {
             if (model == null) {
                 model = Model(modelStore.modelPath().absolutePath)
+            }
+        }
+    }
+
+    /**
+     * Offline smoke-test path: feed a mono 16-bit PCM WAV (16 kHz preferred) into Vosk.
+     * Used by adb self-test when speaker loopback is unavailable.
+     */
+    suspend fun transcribeWav(file: File): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            ensureReady().getOrThrow()
+            val loaded = model ?: error("语音模型未就绪")
+            val pcm = readPcm16Mono(file)
+            val recognizer = Recognizer(loaded, SAMPLE_RATE)
+            try {
+                val chunk = 4000
+                var offset = 0
+                while (offset < pcm.size) {
+                    val end = minOf(offset + chunk, pcm.size)
+                    val slice = pcm.copyOfRange(offset, end)
+                    recognizer.acceptWaveForm(slice, slice.size)
+                    offset = end
+                }
+                parseHypothesis(recognizer.finalResult, partial = false)
+            } finally {
+                runCatching { recognizer.close() }
             }
         }
     }
@@ -127,6 +155,39 @@ class VoskDictationEngine(
                 else -> json.optString("text").ifBlank { json.optString("partial") }.trim()
             }
         }.getOrDefault("")
+    }
+
+    private fun readPcm16Mono(file: File): ByteArray {
+        require(file.isFile) { "WAV 不存在: ${file.absolutePath}" }
+        RandomAccessFile(file, "r").use { raf ->
+            val riff = ByteArray(4).also { raf.readFully(it) }
+            check(String(riff) == "RIFF") { "不是 WAV 文件" }
+            raf.skipBytes(4)
+            val wave = ByteArray(4).also { raf.readFully(it) }
+            check(String(wave) == "WAVE") { "不是 WAV 文件" }
+            var dataSize = -1
+            var dataOffset = -1L
+            while (raf.filePointer < raf.length()) {
+                val chunkId = ByteArray(4).also { raf.readFully(it) }
+                val sizeBytes = ByteArray(4).also { raf.readFully(it) }
+                val size = (sizeBytes[0].toInt() and 0xff) or
+                    ((sizeBytes[1].toInt() and 0xff) shl 8) or
+                    ((sizeBytes[2].toInt() and 0xff) shl 16) or
+                    ((sizeBytes[3].toInt() and 0xff) shl 24)
+                val id = String(chunkId)
+                if (id == "data") {
+                    dataSize = size
+                    dataOffset = raf.filePointer
+                    break
+                }
+                raf.skipBytes(size)
+            }
+            check(dataOffset >= 0 && dataSize > 0) { "WAV 缺少 data 块" }
+            raf.seek(dataOffset)
+            val pcm = ByteArray(dataSize)
+            raf.readFully(pcm)
+            return pcm
+        }
     }
 
     companion object {
