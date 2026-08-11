@@ -92,6 +92,7 @@ fun SessionsScreen(
     vm: SessionsViewModel = viewModel(),
 ) {
     val cardItems by vm.cardItems.collectAsStateWithLifecycle()
+    val cardsHydrated by vm.cardsHydrated.collectAsStateWithLifecycle()
     val visibleItems by vm.visibleItems.collectAsStateWithLifecycle()
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val profiles by vm.profiles.collectAsStateWithLifecycle()
@@ -187,7 +188,10 @@ fun SessionsScreen(
                     )
                 }
             }
-            if (cardItems.isEmpty()) {
+            if (!cardsHydrated) {
+                // Room has not emitted yet — keep the list area blank instead of flashing
+                // the first-run checklist on every cold start.
+            } else if (cardItems.isEmpty()) {
                 item {
                     EmptySessionsChecklist(
                         runtimeReady = runtimeReady,

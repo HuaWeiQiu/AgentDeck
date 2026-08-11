@@ -23,7 +23,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -87,8 +89,17 @@ class SessionsViewModel : ViewModel() {
         .filter { it.available }
         .mapNotNull { adapters.forRecipe(it.id)?.descriptor }
 
+    private val mutableCardsHydrated = MutableStateFlow(false)
+
+    /**
+     * False until Room emits the first cards snapshot. Prevents the empty-state
+     * onboarding checklist from flashing on cold start when sessions already exist.
+     */
+    val cardsHydrated: StateFlow<Boolean> = mutableCardsHydrated.asStateFlow()
+
     val cards: StateFlow<List<AgentCard>> = cardsRepo.observeCards()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .onEach { mutableCardsHydrated.value = true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val setupState: StateFlow<SetupState> = ServiceLocator.setup.state
     val experienceLevel: StateFlow<ExperienceLevel> = ServiceLocator.experienceSettings.level
@@ -96,10 +107,10 @@ class SessionsViewModel : ViewModel() {
         ServiceLocator.experienceSettings.codexPermissionLevel
 
     val profiles: StateFlow<List<ProviderProfile>> = ServiceLocator.profiles.observeProfiles()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val models: StateFlow<List<ProviderModel>> = ServiceLocator.profiles.observeAllModels()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val cardItems: StateFlow<List<SessionCardUi>> =
         combine(cards, profiles, models) { cardList, profileList, modelList ->
@@ -132,7 +143,7 @@ class SessionsViewModel : ViewModel() {
                     lastActiveLabel = formatLastActivity(card.lastActiveAtEpochMs),
                 )
             }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val searchQuery: StateFlow<String> = searchQueryInput
 
@@ -144,7 +155,7 @@ class SessionsViewModel : ViewModel() {
     val visibleItems: StateFlow<List<SessionCardUi>> =
         combine(cardItems, searchQueryInput) { items, query ->
             filterAndSortSessions(items, query)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     fun newDraft(): CardDraft? = availableAdapters.firstOrNull()?.let { descriptor ->
         CardDraft(

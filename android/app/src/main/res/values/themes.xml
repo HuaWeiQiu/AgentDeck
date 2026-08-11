@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="window_background">#F8FAFC</color>
+    <!-- Match Sessions screen surface so cold-start does not flash pure white. -->
+    <color name="window_background">#FFF7F8FA</color>
 
     <style name="Theme.AgentDeck" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@color/window_background</item>
+        <item name="android:navigationBarColor">@color/window_background</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>
