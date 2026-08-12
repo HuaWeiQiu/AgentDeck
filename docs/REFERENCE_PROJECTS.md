@@ -27,6 +27,7 @@ AgentDeck 的产品目标是移动端 Agent 对话入口，不只是安装器或
 | [Cherry Studio](https://github.com/CherryHQ/cherry-studio) | Provider 是独立配置实体；用户输入 Key/Endpoint 后主动获取模型，再从服务对应的模型集合中启用或选择模型 | 模型服务与对话分离；验证连接、发现模型、选择默认模型是一个连续流程；Provider adapter 隔离服务差异 | 不照搬其桌面端多栏设置和直接 SDK 推理链路；AgentDeck 仍由 Codex app-server 执行 Agent turn |
 | [Sub2API](https://github.com/Wei-Shaw/sub2api) | 一个 API Key 经统一 `/v1` 入口访问多种上游，`/v1/models` 返回该 Key/分组可用的模型集合 | 提供 Sub2API 预设 adapter，按已验证 Key 获取真实可用模型，不维护容易过期的静态清单 | 不假定任意 OpenAI 兼容网关都完整支持 Codex Responses；连接验证成功不替代实际 turn 验收 |
 | [Agora](https://github.com/newo-ether/Agora) | Android 原生 BYOK 客户端支持自定义 Base URL、多 Provider 和按会话/消息选择模型 | 移动端把 Provider 与模型选择放在会话创建路径，并让 API Key 输入界面防截屏 | 不把 Key 直接交给通用推理 SDK，也不允许对话在恢复时静默换上游；密钥通过 Keystore 与按需 broker 交给 Codex |
+| [Android Action Kernel](https://github.com/ethanjlimgit/android-action-kernel) | Python 通过 ADB 获取 `uiautomator` XML，把控件树压缩成文本、角色、边界和动作，再执行观察/推理/动作循环 | Lab UI Agent 采用有界语义树、少量节点动作、每次动作后重新观察和无进展检测 | 不嵌入 ADB/Python 或第二套模型循环，不以坐标为首选，不把原始 XML/敏感输入交给模型；完整方案见 [Lab UI Agent 计划](plans/lab-ui-agent.md) |
 | [Termux RUN_COMMAND](https://github.com/termux/termux-app/wiki/RUN_COMMAND-Intent) | 提供 executable、argv、workdir、命名终端会话和任务结果契约 | 保留为安装任务与真实终端兜底；同一对话复用命名 Termux session | RUN_COMMAND 的前台 Intent 不能提供持续双向消息流，不能作为原生聊天 transport |
 | [Termux terminal-view](https://github.com/termux/termux-app/wiki/Termux-Libraries) | 可复用 Termux 的终端渲染与 emulator library | 后续可用于 App 内终端表面评估 | library 本身不会让 AgentDeck 跨沙箱附着到 Termux App 已有进程，不能替代桥接层 |
 | [Termux app](https://github.com/termux/termux-app) | APK 内置分架构 Bootstrap，先解压到 staging、设置权限/链接，再原子提升为 prefix；Terminal Emulator/View 为 Apache-2.0 | 借鉴版本化 Bootstrap、临时安装、原子切换和可选终端组件 | 主 App 为 GPLv3、软件包路径与包名绑定且稳定分支 targetSdk 28；不完整嵌入、不自建 Termux 包仓库 |
@@ -48,6 +49,8 @@ AgentDeck 的产品目标是移动端 Agent 对话入口，不只是安装器或
 7. 标准模式只有对话和设置；准备、修复、终端和日志按上下文或体验层级出现，内部技术名不进入客户主流程。
 8. 运行时经 `AgentRuntime` 隔离；EmbeddedProotRuntime 是目标默认值，TermuxRuntime 是迁移期兼容实现。
 9. 开源实现只有在源码、许可证、可重复构建和目标 Android 版本均可核实时才进入技术选型。
+10. Lab 手机 UI Agent 保留 Codex app-server 作为唯一 Agent loop，通过 Host Broker 调用
+    AccessibilityService；密码、验证码、银行卡、支付和生物认证在 Lab 也必须由用户亲自完成。
 
 ## 落地状态
 

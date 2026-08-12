@@ -17,6 +17,8 @@
 4. 当前优先工作是聊天性能第二阶段。方案已经确定，但代码尚未开始改造。
 5. app-server rollout 是聊天记录的唯一持久化事实源。任何性能优化都不得把消息正文双写到
    Room，也不得以窗口淘汰为由删除、裁剪或改写历史。
+6. Lab 手机 UI Agent 的完整方案已经确定，但尚未开始实现；默认排在聊天性能第二阶段之后，
+   且永久不进入 Secure APK。
 
 ## 当前产品形态
 
@@ -133,6 +135,25 @@ beta.8 Release：<https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-bet
 页面淘汰只释放 Android 内存；20 页往返后要机器校验全部 item 的 ID、顺序、正文和 patch
 哈希一致。
 
+## Lab 手机 UI Agent 计划
+
+完整方案见 [lab-ui-agent.md](plans/lab-ui-agent.md)，状态为“待实施”。它参考 Android Action
+Kernel 的界面树压缩和 observe/action/re-observe 流程，但继续由 Codex app-server 负责 Agent
+loop，通过现有 Host Tool Broker 调用 Lab-only AccessibilityService，不依赖 ADB、Python 或云端
+控制服务。
+
+关键边界：
+
+- Secure 不显示入口、不打包 Service/Executor/内置 Skill，策略层继续拒绝 L3。
+- Lab 默认关闭，任务必须绑定 conversation、instance、允许 App、TTL 和动作预算。
+- 优先使用可验证的节点动作；MVP 不开放任意坐标手势、截图推理或 Shizuku 组合动作。
+- 密码、验证码、银行卡、支付 PIN、助记词、私钥和生物认证即使在 Lab 也不允许自动读取或
+  输入；进入相关页面必须暂停，由用户亲自完成。
+- 每次写动作只使用当前短时 snapshot，执行后强制作废并重新观察；单设备同时只有一个 UI
+  automation owner。
+
+推荐顺序是聊天性能 P0–P4 → UI Agent U0–U4 → Lab ARM64 真机 U5 → 单独决定手势/截图 U6。
+
 ## 下一位接手者的第一批操作
 
 ```bash
@@ -170,6 +191,7 @@ export JAVA_HOME="/path/to/jdk-17"
 | Codex 协议与历史分页 | `android/app/src/main/java/com/agentdeck/app/domain/chat/CodexProtocol.kt` |
 | 扩展配置与会话计划 | `android/app/src/main/java/com/agentdeck/app/data/extensions/ExtensionRepository.kt` |
 | Remote MCP 安全网络层 | `android/app/src/main/java/com/agentdeck/app/data/extensions/SecureMcpNetwork.kt` |
+| Lab 手机 UI Agent 方案 | `docs/plans/lab-ui-agent.md` |
 | Android CI | `.github/workflows/android.yml` |
 | 发布门禁 | `scripts/verify-release.sh`、`scripts/verify-stability-matrix.sh` |
 
@@ -193,3 +215,4 @@ export JAVA_HOME="/path/to/jdk-17"
 - 不在运行中静默热切扩展；扩展变化只对下一连接生效。
 - 不用 `mcp_servers={}` 假设可以清空 Codex 深层合并配置。
 - 不在新 owner 接管事件流时直接取消旧 Channel collector；必须经过有序 handoff fence。
+- 不因 Lab 通道开放密码、验证码、银行卡、支付、生物认证或 AgentDeck 自身审批的自动操作。
