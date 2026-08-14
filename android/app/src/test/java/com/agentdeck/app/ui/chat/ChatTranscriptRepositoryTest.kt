@@ -75,6 +75,8 @@ class ChatTranscriptRepositoryTest {
 
         assertEquals(listOf("old", "overlap"), repository.state.value.items.map { it.id })
         assertEquals("live", repository.state.value.items.last().text)
+        assertEquals(listOf("old"), repository.state.value.pages.first().itemIds)
+        assertEquals(listOf("overlap"), repository.state.value.pages.last().itemIds)
         assertFalse(repository.state.value.isLoadingOlder)
         assertFalse(repository.state.value.hasOlderHistory)
     }

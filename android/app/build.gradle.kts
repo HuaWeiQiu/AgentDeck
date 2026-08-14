@@ -129,6 +129,7 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")
     // Offline on-device STT for devices without usable system Google/Vivo speech services.
     implementation("com.alphacephei:vosk-android:0.3.47")
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260719")

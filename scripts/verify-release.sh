@@ -30,7 +30,8 @@ cd android
   :app:assembleSecureBeta \
   :app:assembleLabBeta \
   :app:lintSecureBeta \
-  :app:lintLabBeta
+  :app:lintLabBeta \
+  :macrobenchmark:assembleSecureBeta
 
 secure_arm64="app/build/outputs/apk/secure/beta/app-secure-arm64-v8a-beta.apk"
 secure_x86="app/build/outputs/apk/secure/beta/app-secure-x86_64-beta.apk"

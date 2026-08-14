@@ -1,8 +1,9 @@
 # 计划：聊天性能第二阶段
 
-- 状态：待实施
+- 状态：P0–P3 已落地并通过 JVM（337×2）；剩余为真机基线采集与 P4 真机回归、发布门禁
 - 适用版本：`0.2.0-beta.9` 及后续版本
 - 范围：聊天历史加载、时间线投影、Markdown 渲染、后台会话资源和性能门禁
+- 通道：聊天性能只认 Secure Beta。Lab 共享同一套 `src/main` 聊天栈，不得另做一套时间线或 Benchmark Activity
 - 既有基线：[聊天性能基线](../CHAT_PERFORMANCE.md)
 
 ## 背景
@@ -43,7 +44,11 @@ Beta 双样本平均 Total PSS 为 122,182 KB，快速滚动卡顿帧为 1.38% /
 
 ### 1. 有界分页窗口
 
-将 `ChatTranscriptRepository` 升级为 `PagedTranscriptStore`：
+P2 已落地：`ChatTranscriptRepository` 直接承担窗口职责（8 页 / 4 MiB），淘汰页保留
+descriptor，接近视口时以原 cursor 重取；淘汰只释放 Android 内存，不触碰 Codex rollout。
+滚动锚点依赖 LazyColumn 的稳定 key（可见页不淘汰，位置由 key 保持）。
+
+原设计要点（均已实现）：
 
 - 初始页继续读取最近 50 个 turn，旧历史继续每页读取 25 个 turn。
 - 每页保存请求 cursor、next cursor、稳定 item IDs、估算字符数和不可变 items。
@@ -59,7 +64,9 @@ Beta 双样本平均 Total PSS 为 122,182 KB，快速滚动卡顿帧为 1.38% /
 
 ### 2. 分页级增量时间线投影
 
-用 `TimelinePageProjection` 代替每次重新生成整条扁平列表：
+P1 已落地：`ChatTranscriptRepository` 持有 `IndexedChatItems` 与历史页描述，ViewModel 热路径不再线性扫描；`TimelinePageProjection` 按页缓存投影，单条消息或 Markdown 变化只重建所在页。实时 tail 单独投影，turn 完成后并入最新页。
+
+继续要求：用 `TimelinePageProjection` 代替每次重新生成整条扁平列表：
 
 - 按 `itemId + contentRevision + markdownRevision` 缓存单个 item 的投影。
 - 页面只在自身 items 或对应 Markdown 文档变化时重建。
@@ -79,6 +86,10 @@ Beta 双样本平均 Total PSS 为 122,182 KB，快速滚动卡顿帧为 1.38% /
 
 ### 4. 可视区 Markdown 调度
 
+P1 已落地：时间线只调度可见 assistant 与上下 4 条预取；AST LRU 按 8 / 12 / 24 MiB 内存档位建缓存。
+
+继续要求：
+
 - UI 上报当前可见 assistant message IDs，并预取上下各约一屏。
 - 单并发解析器只处理可见区、预取区和刚完成的实时回复；离开窗口的等待任务立即取消。
 - AST LRU 保持双上限，并按设备内存等级使用 8 / 12 / 24 MiB 档位。
@@ -87,23 +98,37 @@ Beta 双样本平均 Total PSS 为 122,182 KB，快速滚动卡顿帧为 1.38% /
 
 ### 5. 后台会话资源预算
 
-- 正在回复或等待交互的会话不受 LRU 影响。
-- 空闲 held app-server 默认最多保留 2 个，超限关闭最久未访问项并依靠 thread resume 恢复。
-- 进入系统低内存状态时关闭所有空闲 held session，并清理对应 MCP proxy 和 Skill snapshot。
-- 分别记录 Android、app-server/PRoot 和 MCP proxy 的 PSS、CPU 时间及存活数量，不能只看主进程。
+P3 已落地：`ChatSessionRegistry` 持有 idle LRU（最多 2 个空闲 held session，忙碌/待审批
+会话豁免），`Application.onTrimMemory` 触发 `ChatMemoryTrim` 分发（离屏 AST 按可见集
+保留）并在系统低内存时释放全部空闲 session；展开的处理过程/Diff 已拆成父级 LazyColumn
+的稳定 header + child entries。
 
 ## 实施阶段
 
 | 阶段 | 内容 | 主要风险 | 完成条件 |
 | --- | --- | --- | --- |
-| P0 | Macrobenchmark、固定数据集、Perfetto trace、应用 Baseline Profile | 基准噪声 | 同设备连续 3 轮可复现，报告保留原始值 |
-| P1 | item 索引、分页级增量投影、可视区 Markdown 调度 | key/锚点错位 | 50/300/1000 turn 顺序与滚动测试通过 |
-| P2 | 8 页/4 MiB 有界窗口、淘汰和 cursor 重取 | 历史缺页或重复 | 20 页往返后正文哈希一致且 PSS 平台化 |
-| P3 | Activity/Diff 父级块虚拟化、空闲会话 LRU、trim memory | 交互状态丢失 | 审批/输入/流式会话不被回收，空闲资源按预算释放 |
-| P4 | ARM64 真机回归、文档和 Release gate | OEM 差异 | 固定门槛通过，Secure 真机完成；Lab 仅自动化验证 |
+| P0 | Macrobenchmark、固定数据集、Perfetto/Baseline Profile 工程、Secure 编译门禁 | 基准噪声；误把 Lab 或日常机当官方源 | 合成 50/300/1000 turn JVM 哈希通过；`verify-chat-performance-compile.sh` 通过；同设备连续 3 轮可复现后才写入基线 |
+| P1 | item 索引、分页级增量投影、可视区 Markdown 调度 | key/锚点错位 | JVM 顺序/增量重建测试通过；50/300/1000 turn 覆盖；真机滚动待 P4 回归 |
+| P2 | 8 页/4 MiB 有界窗口、淘汰和 cursor 重取 | 历史缺页或重复 | JVM 39 页往返哈希一致已通过；PSS 平台化待 P4 真机确认 |
+| P3 | Activity/Diff 父级块虚拟化、空闲会话 LRU、trim memory | 交互状态丢失 | JVM LRU/展开拆分测试通过；交互豁免由资格检查保证；真机验证待 P4 |
+| P4 | ARM64 真机回归、文档和 Release gate | OEM 差异 | 固定门槛通过，Secure 真机完成；Lab 仅自动化验证（待真机） |
 
 每个阶段单独提交。进入下一阶段前必须完成单测、完整 Secure/Lab JVM 测试、Lint、R8、
-真机基准和代码审查；发现回归时修复当前阶段，不在发布构建中保留两套运行架构。
+以及当前阶段可在无设备环境下证明的正确性；发现回归时修复当前阶段，不在发布构建中
+保留两套运行架构。
+
+P0 对原方案的收紧：
+
+1. 官方帧率和 PSS 只来自 Secure `com.agentdeck.app.debug` Beta。Lab APK 可以共享同一
+   套合成数据和投影代码，但不得作为发布性能门槛，也不生成第二份 Baseline Profile。
+2. 共享 GitHub runner 只编译 Macrobenchmark，不连接设备、不采集模拟器帧时序。
+3. 真机脚本同时要求 `AGENTDECK_DISPOSABLE_DEVICE=1` 和 `AGENTDECK_SECURE_PERF_DEVICE=1`，
+   并拒绝已安装 Lab 包的手机，避免卸掉日常机或把 L3/L4 实验面混进性能样本。
+4. 合成数据、item 指纹和 newest-first 分页回放先在 JVM 锁死，再进有界窗口改造。这样
+   P2 的 20 页往返哈希不必等真机才第一次失败。
+5. Benchmark Activity 只存在于 Secure flavor，只渲染生产 `ChatTranscript`，不启动
+   Runtime、app-server、MCP 或 Host Toolkit，因此不会把性能场景变成第二条聊天事实源，
+   也不会进入 Lab APK。
 
 ## 测试矩阵
 
@@ -139,7 +164,8 @@ Beta 双样本平均 Total PSS 为 122,182 KB，快速滚动卡顿帧为 1.38% /
 ## 发布门禁
 
 - `./scripts/verify-release.sh` 与 `./scripts/verify-stability-matrix.sh` 全部通过。
+- `./scripts/verify-chat-performance-compile.sh` 通过；CI 不把设备帧时序当门禁。
 - Secure/Lab JVM、Lint、R8 和 ABI/通道隔离检查通过。
-- 固定 ARM64 真机完成三轮基准，结果写回 `docs/CHAT_PERFORMANCE.md`。
+- 固定 Secure ARM64 真机完成三轮基准，结果写回 `docs/CHAT_PERFORMANCE.md`。Lab 仅自动化验证。
 - 对 20 页往返后的完整 item 哈希进行机器校验。
 - 远端 Android CI 绿色后才能创建对应版本 Release；预发布失败不得以本地成功替代。

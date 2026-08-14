@@ -12,6 +12,7 @@
 - [ ] `versionCode`, `versionName`, and `CHANGELOG.md` agree with the release.
 - [ ] Release APK is signed with the intended key; debug signing is never presented as production signing.
 - [ ] Test-signed pre-releases use the R8-optimized `beta` build, contain `assets/dexopt/baseline.prof`, and never publish `app-debug.apk` as the user-facing artifact.
+- [ ] `./scripts/verify-chat-performance-compile.sh` compiles the Secure Macrobenchmark module. Do not run connected benchmark or Baseline Profile generation on a phone that holds unique user data.
 
 ## Migration
 

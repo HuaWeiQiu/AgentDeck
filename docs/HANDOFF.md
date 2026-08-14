@@ -1,6 +1,6 @@
 # AgentDeck 开发交接
 
-- 更新时间：2026-08-12（Asia/Shanghai）
+- 更新时间：2026-08-14（Asia/Shanghai）
 - 主仓库：`HuaWeiQiu/AgentDeck`
 - 主分支：`main`
 - 交接基线：`bfb2083`（handoff 修复；本交接文档提交在其后）
@@ -14,7 +14,10 @@
 2. beta.8 Release 已发布四个 ABI/通道 APK，但不包含随后提交的 handoff 排序修复。
    不要移动 beta.8 标签或替换其资产；下一次发布使用 beta.9。
 3. 最新远端 Android CI 已全绿：发布基线、稳定性矩阵和 Artifact 上传均通过。
-4. 当前优先工作是聊天性能第二阶段。方案已经确定，但代码尚未开始改造。
+4. 当前优先工作是聊天性能第二阶段。P0–P3 已落地并通过双通道 JVM（337×2）；
+   剩余工作全部在真机侧：Secure ARM64 一次性设备采集改造前后基线（3 轮）、
+   PSS 平台化确认和发布门槛写入。官方性能数字只认 Secure Beta，
+   Lab 共享同一聊天栈但不作为发布门槛。
 5. app-server rollout 是聊天记录的唯一持久化事实源。任何性能优化都不得把消息正文双写到
    Room，也不得以窗口淘汰为由删除、裁剪或改写历史。
 6. Lab 手机 UI Agent 的完整方案已经确定，但尚未开始实现；默认排在聊天性能第二阶段之后，
@@ -121,17 +124,25 @@ beta.8 Release：<https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-bet
 这些是同机、固定会话和固定手势的点样本，不是所有设备的承诺。完整原始基线见
 [CHAT_PERFORMANCE.md](CHAT_PERFORMANCE.md)。
 
-第二阶段方案见 [chat-performance-phase-2.md](plans/chat-performance-phase-2.md)，状态为
-“待实施”。推荐严格按以下顺序执行：
+第二阶段方案见 [chat-performance-phase-2.md](plans/chat-performance-phase-2.md)。P0–P3
+已全部落地，双通道 JVM 337×2 通过，编译门禁绿色。剩余工作全部需要真机：
 
-1. P0：先建立 Macrobenchmark、固定 50/300/1000 turn 合成数据、Perfetto trace 和应用自身
-   Baseline Profile，得到可重复的改造前基线。
-2. P1：item ID 索引、分页级增量时间线投影、可视区 Markdown 调度。
-3. P2：最多 8 页或 4 MiB 的有界历史窗口，完成 cursor 重取和滚动锚点恢复。
-4. P3：Activity/Diff 父级块虚拟化、最多 2 个空闲 held app-server 的 LRU、低内存回收。
-5. P4：Secure ARM64 真机三轮性能/完整性回归，更新性能文档并发布 beta.9。
+1. P0 基线采集：在一次性 Secure ARM64 设备上用 `scripts/verify-chat-performance.sh`
+   采集 3 轮改造后基线（脚本拒绝装有 Lab 包或持有用户数据的日常机）。
+   注意：Vivo/Funtouch 会丢 profileinstaller 广播，macrobenchmark 已改用
+   `Partial(baselineProfileMode = Disable, warmupIterations = 3)`；USB adb install
+   会弹人工确认框，批量采集时先确认手机旁有人或通过设置放行。
+   **血的教训（2026-08-14）**：永远不要 kill 正在跑的 `connectedAndroidTest`/
+   macrobenchmark gradle 任务——UTP 清理会**连带卸载被测 App**，用户数据（对话
+   rollout + Room 里的角色身份）全部丢失。当天因此丢了两次。要中止测试就用
+   `adb shell am force-stop` 停设备侧进程，或等它自己结束。
+2. P2 真机确认：连续上翻 20 页观察 PSS 平台期；39 页往返哈希一致性已由 JVM 机器校验
+   （`ChatPerformancePhase2Test`）覆盖。
+3. P3 真机确认：低内存场景下空闲 held session 释放、回会话 thread resume 正常。
+4. P4：三轮固定场景回归达标后把数字写入 `docs/CHAT_PERFORMANCE.md`，随 beta.9 发布。
 
-实施有界窗口前，必须先用真实 Codex 0.147.0 验证 cursor 在新增 turn 和 resume 后的有效期。
+实施有界窗口前要求的 cursor 有效期验证，改造后只能在真机 Runtime 上最终确认：
+JVM 已按“cursor 在 app-server 生命周期内稳定”建模，重连会整体重建窗口。
 页面淘汰只释放 Android 内存；20 页往返后要机器校验全部 item 的 ID、顺序、正文和 patch
 哈希一致。
 
@@ -172,7 +183,8 @@ export JAVA_HOME="/path/to/jdk-17"
 1. 确认 `HEAD` 与 `origin/main` 一致且没有用户未提交改动。
 2. 阅读 `docs/plans/chat-performance-phase-2.md`、`docs/CHAT_PERFORMANCE.md`、
    `docs/ADR-0005-NATIVE-CHAT-BRIDGE.md` 和 `docs/ADR-0013-MANAGED-EXTENSIONS.md`。
-3. 从 P0 基准工程开始，不要直接重写 `ChatTranscriptRepository`。
+3. P0 代码已在本交接后的提交中；下一步是 Secure 真机基线，或审查后进入 P1。
+   不要在没有 JVM 哈希和编译门禁的情况下直接重写 `ChatTranscriptRepository`。
 4. 每个 P 阶段单独提交，完成测试、审查、修复、复测后再进入下一阶段。
 5. 只在需要最终 Secure ARM64 验收时要求用户连接手机；不要在含唯一用户数据的设备上运行
    可能卸载 App 的 `connectedDebugAndroidTest`。
@@ -185,6 +197,9 @@ export JAVA_HOME="/path/to/jdk-17"
 | 后台会话所有权 | `android/app/src/main/java/com/agentdeck/app/data/chat/ChatSessionRegistry.kt` |
 | RPC、Socket 和 handoff fence | `android/app/src/main/java/com/agentdeck/app/data/chat/CodexRpcClient.kt` |
 | 当前历史内存投影 | `android/app/src/main/java/com/agentdeck/app/ui/chat/ChatTranscriptRepository.kt` |
+| P0 合成数据与指纹 | `ChatPerformanceFixtures.kt`、`ChatTranscriptIntegrity.kt` |
+| P0 Secure 基准界面 | `android/app/src/secure/java/com/agentdeck/app/ui/chat/ChatPerformanceBenchmarkActivity.kt` |
+| P0 Macrobenchmark | `android/macrobenchmark/`；`scripts/verify-chat-performance-compile.sh`、`scripts/verify-chat-performance.sh` |
 | Compose 时间线 | `android/app/src/main/java/com/agentdeck/app/ui/chat/ChatScreen.kt` |
 | Markdown AST/LRU | `android/app/src/main/java/com/agentdeck/app/ui/chat/ChatMarkdown.kt` |
 | 时间线分组投影 | `android/app/src/main/java/com/agentdeck/app/ui/chat/ChatTimeline.kt` |
@@ -193,7 +208,7 @@ export JAVA_HOME="/path/to/jdk-17"
 | Remote MCP 安全网络层 | `android/app/src/main/java/com/agentdeck/app/data/extensions/SecureMcpNetwork.kt` |
 | Lab 手机 UI Agent 方案 | `docs/plans/lab-ui-agent.md` |
 | Android CI | `.github/workflows/android.yml` |
-| 发布门禁 | `scripts/verify-release.sh`、`scripts/verify-stability-matrix.sh` |
+| 发布门禁 | `scripts/verify-release.sh`、`scripts/verify-stability-matrix.sh`、`scripts/verify-chat-performance-compile.sh` |
 
 ## 明确的已知边界
 

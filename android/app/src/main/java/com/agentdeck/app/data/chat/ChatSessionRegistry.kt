@@ -79,6 +79,8 @@ object ChatSessionRegistry {
         internal var idleTeardownJob: Job? = null,
         internal var isTransferring: Boolean = false,
         internal var terminalReason: String? = null,
+        /** Last user-visible or turn activity; drives the idle-session LRU. */
+        @Volatile var lastInteractionMs: Long = System.currentTimeMillis(),
     )
 
     private val sessions = ConcurrentHashMap<String, HeldSession>()
@@ -158,6 +160,7 @@ object ChatSessionRegistry {
             try {
                 withTimeout(EVENT_HANDOFF_TIMEOUT_MILLIS) { handoff.await() }
                 if (!session.isBusy) scheduleIdleTeardown(session)
+                enforceIdleBudget()
                 client.eventsUntilHandoff().collect { event ->
                     handleEvent(session, cardName, event)
                 }
@@ -293,7 +296,9 @@ object ChatSessionRegistry {
                         title = "$cardName · Codex 已完成任务",
                         text = "点按回到对话查看结果",
                     )
+                    session.lastInteractionMs = System.currentTimeMillis()
                     scheduleIdleTeardown(session)
+                    enforceIdleBudget()
                 }
 
                 "turn/failed", "turn/cancelled" -> {
@@ -454,9 +459,52 @@ object ChatSessionRegistry {
             session.idleGeneration += 1
             session.idleTeardownJob?.cancel()
             session.idleTeardownJob = null
+            session.lastInteractionMs = System.currentTimeMillis()
             update()
             true
         }
+
+    /** True when nothing interactive is in flight; safe to release and resume later. */
+    private fun isIdleEligible(session: HeldSession): Boolean = synchronized(session) {
+        session.queued == null && !session.isBusy &&
+            session.pendingApproval == null && session.pendingApprovals.isEmpty() &&
+            session.pendingUserInput == null && session.pendingUserInputs.isEmpty() &&
+            session.pendingRequests.isEmpty()
+    }
+
+    /** Keeps at most [MAX_IDLE_HELD_SESSIONS] idle bridges; busy sessions never evict. */
+    private fun enforceIdleBudget() {
+        val snapshots = sessions.values.map { session ->
+            IdleSessionSnapshot(
+                cardId = session.cardId,
+                lastInteractionMs = session.lastInteractionMs,
+                eligible = isIdleEligible(session),
+            )
+        }
+        idleEvictionVictims(snapshots, MAX_IDLE_HELD_SESSIONS).forEach { cardId ->
+            sessions[cardId]?.let { session ->
+                if (isIdleEligible(session)) releaseSilently(session)
+            }
+        }
+    }
+
+    /** System low-memory path: release every idle held session; reopening resumes. */
+    fun releaseAllIdleSessions() {
+        sessions.values.toList().forEach { session ->
+            if (isIdleEligible(session)) releaseSilently(session)
+        }
+    }
+
+    private fun releaseSilently(session: HeldSession) {
+        val removed = synchronized(session) {
+            if (session.isTransferring) false else sessions.remove(session.cardId, session)
+        }
+        if (!removed) return
+        invalidateIdleTeardown(session)
+        session.collector?.cancel()
+        session.scope.cancel()
+        stopBridge(session)
+    }
 
     private fun stopBridge(session: HeldSession) {
         session.client.close()
@@ -521,6 +569,23 @@ object ChatSessionRegistry {
     private const val IDLE_TEARDOWN_DELAY_MILLIS = 30_000L
     private const val EVENT_HANDOFF_TIMEOUT_MILLIS = 10_000L
     internal const val MAX_PENDING_SERVER_REQUESTS = 8
+    internal const val MAX_IDLE_HELD_SESSIONS = 2
+}
+
+internal data class IdleSessionSnapshot(
+    val cardId: String,
+    val lastInteractionMs: Long,
+    val eligible: Boolean,
+)
+
+/** Oldest idle sessions beyond the budget, ready for silent release. */
+internal fun idleEvictionVictims(
+    sessions: List<IdleSessionSnapshot>,
+    maxIdle: Int,
+): List<String> {
+    val idle = sessions.filter { it.eligible }.sortedBy { it.lastInteractionMs }
+    if (idle.size <= maxIdle.coerceAtLeast(0)) return emptyList()
+    return idle.dropLast(maxIdle).map { it.cardId }
 }
 
 internal fun canBecomeIdle(

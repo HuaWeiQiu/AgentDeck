@@ -396,6 +396,7 @@ private fun downloadOnce(
             body.byteStream().use { input ->
                 val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
                 var total = if (resuming) resumedBytes else 0L
+                val stallWatchdog = DownloadStallWatchdog(startBytes = total)
                 while (true) {
                     val count = input.read(buffer)
                     if (count < 0) break
@@ -404,6 +405,7 @@ private fun downloadOnce(
                         "${artifact.fileName} 下载内容超过清单大小"
                     }
                     output.write(buffer, 0, count)
+                    stallWatchdog.onBytes(total)
                     onBytes(total)
                 }
             }
@@ -446,6 +448,36 @@ internal fun verifyArtifact(file: File, artifact: VerifiedArtifact) {
 
 private const val HTTP_PARTIAL = 206
 private const val DOWNLOAD_BUFFER_BYTES = 128 * 1024
+private const val STALL_WINDOW_MS = 20_000L
+private const val STALL_MIN_BYTES = 512L * 1024
+
+/**
+ * readTimeout 只能发现"完全没有字节"的连接；被限速的镜像会不断重置读超时，
+ * 让 116 MB 的 rootfs 以几 KB/s 永远下不完（V2301A 实测：28 MB 后掉到约
+ * 5 KB/s，恰好高过 4 KB/s 的初版下限）。这个看门狗按 20 秒窗口统计吞吐量，
+ * 低于约 26 KB/s 就抛 IOException——同一镜像重试会带 Range 续传，三次仍不
+ * 达标才换下一个源。
+ */
+internal class DownloadStallWatchdog(
+    startBytes: Long = 0L,
+    private val windowMs: Long = STALL_WINDOW_MS,
+    private val minBytesPerWindow: Long = STALL_MIN_BYTES,
+    private val nowMs: () -> Long = System::currentTimeMillis,
+) {
+    private var windowStartMs = nowMs()
+    private var windowStartBytes = startBytes
+
+    fun onBytes(totalBytes: Long) {
+        val now = nowMs()
+        if (now - windowStartMs < windowMs) return
+        val gained = totalBytes - windowStartBytes
+        if (gained < minBytesPerWindow) {
+            throw IOException("下载源速度过低（${windowMs / 1000} 秒仅 $gained B），切换下一个源")
+        }
+        windowStartMs = now
+        windowStartBytes = totalBytes
+    }
+}
 private val RETRY_BACKOFF_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)
 
 /** Guest DNS：按区域优先本地公共 DNS，再回退另一侧，降低 apt 阶段解析失败概率。 */

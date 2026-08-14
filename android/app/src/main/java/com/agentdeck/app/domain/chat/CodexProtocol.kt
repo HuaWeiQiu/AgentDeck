@@ -597,38 +597,15 @@ object CodexProtocol {
     }
 
     fun upsert(current: List<ChatItem>, incoming: ChatItem): List<ChatItem> {
-        val existingIndex = current.indexOfFirst { it.id == incoming.id }
-        if (existingIndex >= 0) {
-            val existing = current[existingIndex]
-            // Live patch updates arrive via item/fileChange/patchUpdated; keep them
-            // when a later item snapshot (e.g. item/completed) carries no patches.
-            val merged = if (incoming.patches.isEmpty() && existing.patches.isNotEmpty()) {
-                incoming.copy(patches = existing.patches)
-            } else {
-                incoming
-            }
-            return current.toMutableList().apply { set(existingIndex, merged) }
-        }
-        if (incoming.kind == ChatItemKind.USER) {
-            val optimisticIndex = current.indexOfFirst {
-                it.id.startsWith("local-user-") && it.kind == ChatItemKind.USER && it.text == incoming.text
-            }
-            if (optimisticIndex >= 0) {
-                return current.toMutableList().apply { set(optimisticIndex, incoming) }
-            }
-        }
-        return current + incoming
+        val indexed = IndexedChatItems(current)
+        indexed.upsert(incoming)
+        return indexed.toList()
     }
 
     fun appendAgentDelta(current: List<ChatItem>, itemId: String, delta: String): List<ChatItem> {
-        val index = current.indexOfFirst { it.id == itemId }
-        if (index < 0) {
-            return current + ChatItem(itemId, ChatItemKind.ASSISTANT, delta)
-        }
-        val item = current[index]
-        return current.toMutableList().apply {
-            set(index, item.copy(kind = ChatItemKind.ASSISTANT, text = item.text + delta))
-        }
+        val indexed = IndexedChatItems(current)
+        indexed.appendAgentDelta(itemId, delta)
+        return indexed.toList()
     }
 
     fun errorMessage(params: JSONObject): String {
@@ -802,8 +779,8 @@ object CodexProtocol {
     private const val MAX_MODEL_DISPLAY_NAME_LENGTH = 160
     private const val EPOCH_SECONDS_UPPER_BOUND = 10_000_000_000L
     private const val DEVELOPER_INSTRUCTIONS_CONFIG_KEY = "developer_instructions"
-    private const val INITIAL_HISTORY_TURNS = 50
-    private const val HISTORY_TURN_PAGE_SIZE = 25
+    const val INITIAL_HISTORY_TURNS = 50
+    const val HISTORY_TURN_PAGE_SIZE = 25
     private const val MAX_HISTORY_TURNS_PER_PAGE = 50
     private const val MAX_ATTACHMENTS_PER_TURN = 4
     private const val ATTACHMENT_GUEST_ROOT = "/root/projects/.agentdeck-attachments/"

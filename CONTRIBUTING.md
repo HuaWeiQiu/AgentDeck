@@ -10,7 +10,9 @@ Requirements: JDK 17 and Android SDK platform/build-tools 36.
 ./scripts/verify-release.sh
 ```
 
-This command verifies packaged recipe/wrapper synchronization, runs JVM tests, builds the R8-optimized, test-signed Beta APK, and runs Android Lint.
+This command verifies packaged recipe/wrapper synchronization, runs JVM tests, builds the R8-optimized, test-signed Beta APK, runs Android Lint, and compiles the Secure chat-performance Macrobenchmark module. It does not run connected benchmarks.
+
+Official chat-performance numbers come only from Secure Beta on a disposable ARM64 device (`scripts/verify-chat-performance.sh`). Do not point connected benchmark or Baseline Profile generation at a phone that holds the only copy of conversations or credentials. Lab shares the same chat stack and is not a second performance baseline.
 
 ## Change rules
 

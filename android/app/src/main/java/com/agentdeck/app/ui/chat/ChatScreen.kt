@@ -100,6 +100,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -316,7 +317,9 @@ fun ChatScreen(
                 showTechnicalDetails = showTechnicalDetails,
                 onLoadOlder = vm::loadOlderHistory,
                 onMarkdownNeeded = vm::requestMarkdown,
-                onMarkdownVisible = vm::touchMarkdown,
+                onVisibleItems = vm::reportVisibleItems,
+                onMarkdownTouched = vm::touchMarkdown,
+                onLoadGap = vm::refetchPage,
                 onRetry = vm::connect,
                 onLongPress = onMessageLongPress,
             )
@@ -405,24 +408,48 @@ fun ChatScreen(
 }
 
 @Composable
-private fun ChatTranscript(
+internal fun ChatTranscript(
     transcriptState: StateFlow<ChatTranscriptUiState>,
     markdownDocuments: StateFlow<Map<String, ChatMarkdownDocument>>,
     streamingText: StateFlow<String?>,
     showTechnicalDetails: Boolean,
     onLoadOlder: () -> Unit,
     onMarkdownNeeded: (String, String) -> Unit,
-    onMarkdownVisible: (String) -> Unit,
+    onVisibleItems: (Set<String>) -> Unit,
+    onMarkdownTouched: (String) -> Unit,
+    onLoadGap: (String) -> Unit,
     onRetry: () -> Unit,
     onLongPress: (ChatItem) -> Unit,
     modifier: Modifier = Modifier,
+    listTestTag: String? = null,
 ) {
     val transcript by transcriptState.collectAsStateWithLifecycle()
     val documents by markdownDocuments.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val timeline = remember(transcript.items, documents, transcript.streamingItemId) {
-        groupChatTimeline(transcript.items, documents, transcript.streamingItemId)
+    val projection = remember { TimelinePageProjection() }
+    val timeline = remember(
+        transcript.items,
+        transcript.pages,
+        transcript.tailIds,
+        transcript.refetchingPageKeys,
+        documents,
+        transcript.streamingItemId,
+    ) {
+        projection.project(
+            ChatTranscriptStoreState(
+                items = transcript.items,
+                pages = transcript.pages,
+                tailIds = transcript.tailIds,
+                streamingItemId = transcript.streamingItemId,
+                refetchingPageKeys = transcript.refetchingPageKeys,
+            ),
+            documents,
+        ).entries
+    }
+    var expandedActivities by remember { mutableStateOf(setOf<String>()) }
+    val displayEntries = remember(timeline, expandedActivities) {
+        expandTimeline(timeline, expandedActivities)
     }
     var timelineWasEmpty by remember { mutableStateOf(true) }
     var followLatest by remember { mutableStateOf(true) }
@@ -437,6 +464,29 @@ private fun ChatTranscript(
             followLatest = false
         } else {
             followLatest = listState.isNearBottom()
+        }
+    }
+
+    LaunchedEffect(listState, displayEntries, onVisibleItems, onLoadGap) {
+        snapshotFlow {
+            val headerOffset = if (transcript.isLoadingOlder) 1 else 0
+            val ids = LinkedHashSet<String>()
+            val gaps = ArrayList<String>()
+            listState.layoutInfo.visibleItemsInfo.forEach { info ->
+                when (val entry = displayEntries.getOrNull(info.index - headerOffset)) {
+                    is ChatTimelineEntry.Gap -> entry.cursor?.let(gaps::add)
+                    is ChatTimelineEntry.Message -> ids += entry.item.id
+                    is ChatTimelineEntry.AssistantBlock -> ids += entry.item.id
+                    is ChatTimelineEntry.Activity -> entry.items.forEach { ids += it.id }
+                    is ChatTimelineEntry.ActivityHeader -> Unit
+                    is ChatTimelineEntry.ActivityChild -> ids += entry.item.id
+                    null -> Unit
+                }
+            }
+            ids to gaps
+        }.distinctUntilChanged().collect { (ids, gaps) ->
+            onVisibleItems(ids)
+            gaps.forEach(onLoadGap)
         }
     }
 
@@ -490,7 +540,15 @@ private fun ChatTranscript(
         Box(modifier) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (listTestTag == null) {
+                            Modifier
+                        } else {
+                            Modifier.testTag(listTestTag)
+                        },
+                    ),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.Top,
             ) {
@@ -507,7 +565,7 @@ private fun ChatTranscript(
                 }
             }
             itemsIndexed(
-                timeline,
+                displayEntries,
                 key = { _, entry -> entry.key },
                 contentType = { _, entry -> entry.contentType },
             ) { index, entry ->
@@ -534,13 +592,27 @@ private fun ChatTranscript(
                                 )
                             }
                         }
-                        is ChatTimelineEntry.Activity -> ActivityDisclosure(
-                            entry = entry,
+                        is ChatTimelineEntry.Activity -> ActivityDisclosureHeader(
+                            items = entry.items,
+                            expanded = false,
                             showTechnicalDetails = showTechnicalDetails,
+                            onToggle = { expandedActivities = expandedActivities + entry.key },
                         )
+                        is ChatTimelineEntry.ActivityHeader -> ActivityDisclosureHeader(
+                            items = entry.group.items,
+                            expanded = true,
+                            showTechnicalDetails = showTechnicalDetails,
+                            onToggle = { expandedActivities = expandedActivities - entry.key },
+                        )
+                        is ChatTimelineEntry.ActivityChild -> Column(
+                            Modifier.padding(start = 38.dp),
+                        ) {
+                            ActivityDetailRow(entry.item, showTechnicalDetails)
+                        }
+                        is ChatTimelineEntry.Gap -> HistoryGapRow(entry)
                         is ChatTimelineEntry.AssistantBlock -> AssistantMarkdownBlock(
                             entry = entry,
-                            onVisible = onMarkdownVisible,
+                            onTouched = onMarkdownTouched,
                             onLongPress = { onLongPress(entry.item) },
                         )
                     }
@@ -651,6 +723,8 @@ private const val AUTO_FOLLOW_THRESHOLD = 3
 private fun timelineTopPadding(index: Int, entry: ChatTimelineEntry): androidx.compose.ui.unit.Dp = when {
     index == 0 -> 0.dp
     entry is ChatTimelineEntry.AssistantBlock && !entry.isFirst -> 0.dp
+    entry is ChatTimelineEntry.ActivityChild -> 0.dp
+    entry is ChatTimelineEntry.ActivityHeader -> 0.dp
     else -> 14.dp
 }
 
@@ -804,11 +878,14 @@ private fun ChatMessage(
 @Composable
 private fun AssistantMarkdownBlock(
     entry: ChatTimelineEntry.AssistantBlock,
-    onVisible: (String) -> Unit,
+    onTouched: (String) -> Unit,
     onLongPress: () -> Unit,
 ) {
+    // Touch-only: visibility is reported solely by ChatTranscript's viewport
+    // snapshotFlow. A singleton replace here shrinks the markdown window and
+    // evicts already-parsed neighbours, ping-ponging them back to the spinner.
     LaunchedEffect(entry.document.messageId) {
-        onVisible(entry.document.messageId)
+        onTouched(entry.document.messageId)
     }
     CompositionLocalProvider(
         LocalReferenceLinkHandler provides entry.document.referenceLinkHandler,
@@ -833,66 +910,76 @@ private fun AssistantMarkdownBlock(
 }
 
 @Composable
-private fun ActivityDisclosure(
-    entry: ChatTimelineEntry.Activity,
+private fun ActivityDisclosureHeader(
+    items: List<ChatItem>,
+    expanded: Boolean,
     showTechnicalDetails: Boolean,
+    onToggle: () -> Unit,
 ) {
-    var expanded by rememberSaveable(entry.key) { mutableStateOf(false) }
-    val reasoningOnly = entry.items.all { it.kind == ChatItemKind.REASONING }
+    val reasoningOnly = items.all { it.kind == ChatItemKind.REASONING }
     val title = if (reasoningOnly) "已完成思考" else "处理过程"
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded }
-                .padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            modifier = Modifier.size(28.dp),
+            shape = RoundedCornerShape(6.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
         ) {
-            Surface(
-                modifier = Modifier.size(28.dp),
-                shape = RoundedCornerShape(6.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        if (reasoningOnly) Icons.Filled.Psychology else Icons.Filled.Tune,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    activitySummary(entry.items, showTechnicalDetails),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    if (reasoningOnly) Icons.Filled.Psychology else Icons.Filled.Tune,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(
-                if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight,
-                contentDescription = if (expanded) "收起$title" else "展开$title",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                activitySummary(items, showTechnicalDetails),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        AnimatedVisibility(visible = expanded) {
-            Column(Modifier.padding(start = 38.dp)) {
-                entry.items.forEachIndexed { index, item ->
-                    ActivityDetailRow(item, showTechnicalDetails)
-                    if (index != entry.items.lastIndex) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
-                    }
-                }
-            }
+        Icon(
+            if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight,
+            contentDescription = if (expanded) "收起$title" else "展开$title",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun HistoryGapRow(entry: ChatTimelineEntry.Gap) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (entry.loading) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
         }
+        Text(
+            text = if (entry.loading) "正在恢复更早的对话…" else "向上恢复 ${entry.itemCount} 条更早的对话",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

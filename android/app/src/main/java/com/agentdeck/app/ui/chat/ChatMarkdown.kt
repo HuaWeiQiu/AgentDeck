@@ -133,6 +133,9 @@ internal class ChatMarkdownCache(
     companion object {
         const val DEFAULT_MAX_ENTRIES = 24
         const val DEFAULT_MAX_BYTES = 12 * 1024 * 1024
+
+        fun forMemoryClass(memoryClassMb: Int): ChatMarkdownCache =
+            ChatMarkdownCache(maxBytes = markdownBudgetBytes(memoryClassMb))
     }
 }
 

@@ -59,3 +59,4 @@ jobs:
             android/app/build/reports/stability/host-matrix.json
             android/app/build/reports/tests/
             android/app/build/test-results/
+            android/macrobenchmark/build/outputs/apk/

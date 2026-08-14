@@ -89,13 +89,14 @@ class ChatViewModel(
     private var streamingFlushJob: Job? = null
 
     private val markdownParser = ChatMarkdownParser()
-    private val markdownCache = ChatMarkdownCache()
+    private val markdownCache = ChatMarkdownCache.forMemoryClass(markdownMemoryClassMb())
     private val markdownParseDispatcher = Dispatchers.Default.limitedParallelism(1)
     private val markdownParseJobs = mutableMapOf<String, Job>()
     private val markdownParseContents = mutableMapOf<String, String>()
     private val mutableMarkdownDocuments = MutableStateFlow<Map<String, ChatMarkdownDocument>>(emptyMap())
     internal val markdownDocuments: StateFlow<Map<String, ChatMarkdownDocument>> =
         mutableMarkdownDocuments.asStateFlow()
+    private val visibleMarkdownIds = MutableStateFlow<Set<String>>(emptySet())
 
     private var client: CodexRpcClient? = null
     private var endpoint: CodexBridgeEndpoint? = null
@@ -128,9 +129,21 @@ class ChatViewModel(
         awaitHostWriteApproval(summary)
     }
 
+    private val trimListener: (Int) -> Unit = ::onTrimMemory
+
     init {
+        ChatMemoryTrim.register(trimListener)
         observeMarkdownItems()
         connect()
+    }
+
+    /** System memory pressure: drop off-screen ASTs, keep visible docs intact. */
+    private fun onTrimMemory(level: Int) {
+        if (level < android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) return
+        val keep = LinkedHashSet(visibleMarkdownIds.value)
+        transcriptRepository.state.value.streamingItemId?.let(keep::add)
+        markdownCache.retain(keep)
+        mutableMarkdownDocuments.value = markdownCache.snapshot()
     }
 
     internal fun requestMarkdown(messageId: String, content: String) {
@@ -164,7 +177,51 @@ class ChatViewModel(
     }
 
     internal fun touchMarkdown(messageId: String) {
+        // LRU touch only. visibleMarkdownIds has exactly one writer — the
+        // viewport snapshotFlow — so window membership stays race-free.
         markdownCache.touch(messageId)
+    }
+
+    internal fun reportVisibleItems(ids: Set<String>) {
+        transcriptRepository.reportVisibleItems(ids)
+        val assistantIds = if (ids.isEmpty()) {
+            ids
+        } else {
+            val itemsById = transcriptRepository.state.value.items.associateBy { it.id }
+            ids.filterTo(LinkedHashSet()) { itemsById[it]?.kind == ChatItemKind.ASSISTANT }
+        }
+        if (visibleMarkdownIds.value != assistantIds) {
+            visibleMarkdownIds.value = assistantIds
+        }
+        assistantIds.forEach(markdownCache::touch)
+    }
+
+    /** Re-fetch an evicted history page by its original cursor (P2 bounded window). */
+    internal fun refetchPage(pageKey: String) {
+        val request = transcriptRepository.beginRefetchPage(pageKey) ?: return
+        val rpc = client
+        val currentThread = threadId
+        if (rpc == null || currentThread == null) {
+            transcriptRepository.failRefetchPage(request)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val response = rpc.request(
+                    "thread/turns/list",
+                    CodexProtocol.threadTurnsListParams(currentThread, request.cursor),
+                )
+                val page = withContext(Dispatchers.Default) {
+                    CodexProtocol.historyPage(response)
+                }
+                transcriptRepository.finishRefetchPage(request, page)
+            } catch (error: CancellationException) {
+                transcriptRepository.failRefetchPage(request)
+                throw error
+            } catch (error: Exception) {
+                transcriptRepository.failRefetchPage(request)
+            }
+        }
     }
 
     internal fun loadOlderHistory() {
@@ -215,26 +272,25 @@ class ChatViewModel(
 
     private fun observeMarkdownItems() {
         viewModelScope.launch {
-            transcriptState.map { current ->
-                MarkdownWindow(current.items, current.streamingItemId)
+            combine(transcriptState, visibleMarkdownIds) { current, visibleIds ->
+                MarkdownWindow(current.items, visibleIds, current.streamingItemId)
             }.distinctUntilChanged().collect { window ->
-                val eligible = window.items.filter {
-                    it.kind == ChatItemKind.ASSISTANT &&
-                        it.id != window.streamingItemId &&
-                        it.text.isNotEmpty()
-                }
-                val retainedIds = eligible.mapTo(mutableSetOf()) { it.id }
-                markdownParseJobs.keys.filterNot(retainedIds::contains).forEach { messageId ->
-                    markdownParseJobs.remove(messageId)?.cancel()
-                    markdownParseContents.remove(messageId)
-                }
-                val retained = markdownCache.retain(retainedIds)
+                val scheduled = visibleMarkdownWindow(
+                    items = window.items,
+                    visibleIds = window.visibleIds,
+                    streamingItemId = window.streamingItemId,
+                )
+                val scheduledIds = scheduled.mapTo(mutableSetOf()) { it.id }
+                // Do not cancel out-of-window parse jobs here: a visible message
+                // whose job was launched by ChatMessage before the viewport report
+                // lands would be cancelled with nothing left to relaunch it
+                // (stuck "正在排版回复"). Jobs are single-flight per id and the
+                // cache below stays LRU-bounded, so a short waiting queue is cheap.
+                val retained = markdownCache.retain(scheduledIds)
                 if (retained != mutableMarkdownDocuments.value) {
                     mutableMarkdownDocuments.value = retained
                 }
-                eligible.takeLast(INITIAL_MARKDOWN_PREPARSE_COUNT).forEach { item ->
-                    requestMarkdown(item.id, item.text)
-                }
+                scheduled.forEach { item -> requestMarkdown(item.id, item.text) }
             }
         }
     }
@@ -686,7 +742,7 @@ class ChatViewModel(
                 error = null,
             )
         }
-        transcriptRepository.updateItems { it + localItem }
+        transcriptRepository.append(localItem)
         turnStartJob = viewModelScope.launch {
             try {
                 val response = rpc.request(
@@ -705,10 +761,8 @@ class ChatViewModel(
                 )
                 val startedTurnId = CodexProtocol.turnId(response)
                 activeTurnId = startedTurnId
-                transcriptRepository.updateItems { items ->
-                    items.map { item ->
-                        if (item.id == localItem.id) item.copy(turnId = startedTurnId) else item
-                    }
+                transcriptRepository.updateItem(localItem.id) { item ->
+                    item.copy(turnId = startedTurnId)
                 }
                 steerFailedForTurn = null
                 ServiceLocator.cards.touchActivity(cardId)
@@ -727,9 +781,7 @@ class ChatViewModel(
                         error = ChatError.from(error.message ?: "消息发送失败"),
                     )
                 }
-                transcriptRepository.updateItems { items ->
-                    items.filterNot { item -> item.id == localItem.id }
-                }
+                transcriptRepository.removeItem(localItem.id)
             } finally {
                 turnStartJob = null
             }
@@ -1016,9 +1068,7 @@ class ChatViewModel(
                 held.bufferedItems.toList().forEach { json -> CodexProtocol.item(json)?.let(::add) }
                 held.bufferedTurns.toList().forEach { json -> addAll(CodexProtocol.turnItems(json)) }
             }
-            transcriptRepository.updateItems { current ->
-                replayed.fold(current, CodexProtocol::upsert)
-            }
+            transcriptRepository.upsertAll(replayed)
             stopEventCollection()
             resetStreaming()
             autoReconnecting = false
@@ -1143,23 +1193,14 @@ class ChatViewModel(
                     ?.copy(turnId = notificationTurnId)
                     ?: return
                 if (method == "item/completed") discardStreaming(item.id)
-                transcriptRepository.updateItems { CodexProtocol.upsert(it, item) }
+                transcriptRepository.upsert(item)
             }
 
             "item/fileChange/patchUpdated" -> {
                 val itemId = params.optString("itemId")
                 val patches = CodexProtocol.patchUpdatedPatches(params)
                 if (itemId.isBlank() || patches.isEmpty()) return
-                transcriptRepository.updateItems { items ->
-                    val index = items.indexOfFirst { it.id == itemId }
-                    if (index < 0) return@updateItems items
-                    val item = items[index]
-                    val existingPaths = item.patches.mapTo(mutableSetOf()) { it.path }
-                    val merged = item.patches + patches.filterNot { it.path in existingPaths }
-                    items.toMutableList().apply {
-                        set(index, item.copy(patches = merged))
-                    }
-                }
+                transcriptRepository.mergePatches(itemId, patches)
             }
 
             "thread/tokenUsage/updated" -> {
@@ -1200,12 +1241,8 @@ class ChatViewModel(
                 if (transcriptRepository.state.value.streamingItemId != itemId) {
                     // A different message started streaming: commit what we have so far.
                     commitStreaming()
-                    transcriptRepository.update {
-                        it.copy(
-                            streamingItemId = itemId,
-                            items = it.items.ensureAssistantItem(itemId, notificationTurnId),
-                        )
-                    }
+                    transcriptRepository.ensureAssistantItem(itemId, notificationTurnId)
+                    transcriptRepository.setStreamingItemId(itemId)
                 }
                 streamingCoalescer.append(delta)
                 scheduleStreamingFlush()
@@ -1226,9 +1263,8 @@ class ChatViewModel(
                 commitStreaming()
                 val completed = params.optJSONObject("turn")
                 val authoritative = completed?.let(CodexProtocol::turnItems).orEmpty()
-                transcriptRepository.updateItems { current ->
-                    authoritative.fold(current, CodexProtocol::upsert)
-                }
+                transcriptRepository.upsertAll(authoritative)
+                transcriptRepository.foldTailIntoLatestPage()
                 mutableState.update { current ->
                     val turnError = completed?.optJSONObject("error")
                         ?.optString("message")
@@ -1292,16 +1328,10 @@ class ChatViewModel(
         flushStreaming()
         val text = mutableStreamingText.value
         mutableStreamingText.value = null
-        transcriptRepository.update {
-            it.copy(
-                streamingItemId = null,
-                items = if (text.isNullOrEmpty()) {
-                    it.items
-                } else {
-                    CodexProtocol.appendAgentDelta(it.items, itemId, text)
-                },
-            )
+        if (!text.isNullOrEmpty()) {
+            transcriptRepository.appendAgentDelta(itemId, text)
         }
+        transcriptRepository.setStreamingItemId(null)
     }
 
     /** Drop streaming state without committing; the server sent authoritative text. */
@@ -1457,14 +1487,14 @@ class ChatViewModel(
                 }
                 return
             }
-            transcriptRepository.updateItems { items ->
-                items + ChatItem(
+            transcriptRepository.append(
+                ChatItem(
                     id = "permission-blocked-${request.id}",
                     kind = ChatItemKind.TOOL,
                     text = "只读权限已阻止 ${approval.blockedActionLabel()}",
                     status = "blocked",
-                )
-            }
+                ),
+            )
         } else if (state.value.approval != null || respondingApproval != null) {
             if (!pendingApprovalQueue.offer(approval)) {
                 respondToServer(
@@ -1512,6 +1542,7 @@ class ChatViewModel(
     }
 
     override fun onCleared() {
+        ChatMemoryTrim.unregister(trimListener)
         reconnectJob?.cancel()
         reconnectJob = null
         autoReconnecting = false
@@ -1739,6 +1770,8 @@ private fun ChatUiState.toTranscriptState(
 ): ChatTranscriptUiState {
     return ChatTranscriptUiState(
         items = transcript.items,
+        pages = transcript.pages,
+        tailIds = transcript.tailIds,
         streamingItemId = transcript.streamingItemId,
         isConnecting = isConnecting,
         isReconnecting = isReconnecting,
@@ -1746,11 +1779,13 @@ private fun ChatUiState.toTranscriptState(
         error = error,
         hasOlderHistory = transcript.hasOlderHistory,
         isLoadingOlder = transcript.isLoadingOlder,
+        refetchingPageKeys = transcript.refetchingPageKeys,
     )
 }
 
 private data class MarkdownWindow(
     val items: List<ChatItem>,
+    val visibleIds: Set<String>,
     val streamingItemId: String?,
 )
 
@@ -1776,16 +1811,6 @@ internal fun formatTokenCount(tokens: Long): String = when {
     tokens >= 1_000 -> "%.1fk tokens".format(tokens / 1_000.0)
     else -> "$tokens tokens"
 }
-
-private fun List<ChatItem>.ensureAssistantItem(
-    itemId: String,
-    turnId: String?,
-): List<ChatItem> =
-    if (any { it.id == itemId }) {
-        this
-    } else {
-        this + ChatItem(itemId, ChatItemKind.ASSISTANT, "", turnId = turnId)
-    }
 
 private fun ChatApproval.blockedActionLabel(): String = when (kind) {
     ApprovalKind.COMMAND -> "命令执行"

@@ -4,6 +4,31 @@ All notable changes to AgentDeck are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Chat-performance P0 harness on the shared Secure chat stack: deterministic
+  50/300/1000-turn fixtures, transcript fingerprints, an isolated benchmark
+  activity, and a Secure-only Macrobenchmark / Baseline Profile module.
+- Compile-only chat-performance gate for CI. Device collection stays opt-in on a
+  disposable Secure ARM64 phone and refuses a device that already has the Lab
+  package.
+- Chat-performance P1: indexed live-tail updates, page-aware timeline projection,
+  and viewport-scoped Markdown parsing on the shared Secure chat stack.
+- Chat-performance P2: bounded 8-page/4 MiB history window with cursor-based
+  refetch; eviction only frees Android memory, the Codex rollout stays authoritative.
+- Chat-performance P3: activity/diff parent-list virtualization, idle held-session
+  LRU (max 2, busy sessions exempt), and onTrimMemory fan-out for off-screen ASTs.
+- Fixed a markdown-window race where per-block visibility reports replaced the
+  viewport-wide set, evicting neighbouring parsed ASTs and leaving messages stuck
+  on "正在排版回复"; viewport reporting is now the single visibility writer.
+- Hardened the bounded transcript window: late upserts for evicted-page items no
+  longer re-order them into the live tail, and removals always clean page
+  descriptors (re-fetch still restores server-authoritative history).
+- Runtime downloads now carry a stall watchdog: a mirror trickling below ~26 KiB/s
+  for 20 s is retried with Range resume and then abandoned for the next source,
+  instead of resetting read timeouts forever on the 116 MB rootfs (observed on a
+  throttled mirror that crawled at ~5 KiB/s past 28 MB).
+
 ## 0.2.0-beta.8 - 2026-08-12
 
 ### Added

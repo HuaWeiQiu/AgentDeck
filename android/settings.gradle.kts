@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "AgentDeck"
 include(":app")
+include(":macrobenchmark")

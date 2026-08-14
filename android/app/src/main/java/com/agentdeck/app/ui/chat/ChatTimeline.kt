@@ -32,11 +32,39 @@ internal sealed interface ChatTimelineEntry {
         override val key: String = block.key
         override val contentType: String = block.contentType
     }
+
+    /** Placeholder for an evicted history page; re-fetched when it nears the viewport. */
+    @Immutable
+    data class Gap(
+        val pageKey: String,
+        val cursor: String?,
+        val itemCount: Int,
+        val loading: Boolean,
+    ) : ChatTimelineEntry {
+        override val key: String = "gap-${pageKey}"
+        override val contentType: String = "history-gap"
+    }
+
+    /** Expanded activity group header; children render as separate parent-list entries. */
+    @Immutable
+    data class ActivityHeader(val group: Activity) : ChatTimelineEntry {
+        override val key: String = group.key
+        override val contentType: String = "activity-header"
+    }
+
+    /** One child of an expanded activity group, virtualized into the parent list. */
+    @Immutable
+    data class ActivityChild(val groupKey: String, val item: ChatItem) : ChatTimelineEntry {
+        override val key: String = "${groupKey}:${item.id}"
+        override val contentType: String = "activity-child:${item.kind}"
+    }
 }
 
 @Immutable
 internal data class ChatTranscriptUiState(
     val items: List<ChatItem> = emptyList(),
+    val pages: List<TranscriptHistoryPage> = emptyList(),
+    val tailIds: List<String> = emptyList(),
     val streamingItemId: String? = null,
     val isConnecting: Boolean = true,
     val isReconnecting: Boolean = false,
@@ -44,50 +72,49 @@ internal data class ChatTranscriptUiState(
     val error: ChatError? = null,
     val hasOlderHistory: Boolean = false,
     val isLoadingOlder: Boolean = false,
+    val refetchingPageKeys: Set<String> = emptySet(),
 )
+
+/**
+ * Splits expanded activity groups into header + per-item child entries so a long
+ * processing trace never lays out inside one parent LazyColumn item.
+ */
+internal fun expandTimeline(
+    entries: List<ChatTimelineEntry>,
+    expandedActivityKeys: Set<String>,
+): List<ChatTimelineEntry> {
+    if (expandedActivityKeys.isEmpty() || entries.none { it is ChatTimelineEntry.Activity }) {
+        return entries
+    }
+    val expanded = ArrayList<ChatTimelineEntry>(entries.size)
+    entries.forEach { entry ->
+        if (entry is ChatTimelineEntry.Activity && entry.key in expandedActivityKeys) {
+            expanded += ChatTimelineEntry.ActivityHeader(entry)
+            entry.items.forEach { item ->
+                expanded += ChatTimelineEntry.ActivityChild(entry.key, item)
+            }
+        } else {
+            expanded += entry
+        }
+    }
+    return expanded
+}
 
 internal fun groupChatTimeline(
     items: List<ChatItem>,
     markdownDocuments: Map<String, ChatMarkdownDocument> = emptyMap(),
     streamingItemId: String? = null,
-): List<ChatTimelineEntry> = buildList {
-    val activity = mutableListOf<ChatItem>()
-
-    fun flushActivity() {
-        if (activity.isNotEmpty()) {
-            add(ChatTimelineEntry.Activity(activity.toList()))
-            activity.clear()
-        }
-    }
-
-    items.forEach { item ->
-        if (item.kind.isActivity()) {
-            activity += item
-        } else if (item.kind == ChatItemKind.ASSISTANT && item.id != streamingItemId) {
-            flushActivity()
-            if (item.text.isEmpty()) return@forEach
-            val document = markdownDocuments[item.id]
-            if (document == null || document.content != item.text || document.blocks.isEmpty()) {
-                add(ChatTimelineEntry.Message(item))
-            } else {
-                document.blocks.forEachIndexed { index, block ->
-                    add(
-                        ChatTimelineEntry.AssistantBlock(
-                            item = item,
-                            document = document,
-                            block = block,
-                            isFirst = index == 0,
-                        ),
-                    )
-                }
-            }
-        } else {
-            flushActivity()
-            add(ChatTimelineEntry.Message(item))
-        }
-    }
-    flushActivity()
-}
+    pages: List<TranscriptHistoryPage> = emptyList(),
+    tailIds: List<String> = emptyList(),
+): List<ChatTimelineEntry> = TimelinePageProjection().project(
+    ChatTranscriptStoreState(
+        items = items,
+        pages = pages,
+        tailIds = tailIds,
+        streamingItemId = streamingItemId,
+    ),
+    markdownDocuments,
+).entries
 
 internal fun activitySummary(
     items: List<ChatItem>,
@@ -128,7 +155,7 @@ internal fun activityDetailText(item: ChatItem, showTechnicalDetails: Boolean): 
         item.text
     }
 
-private fun ChatItemKind.isActivity(): Boolean = when (this) {
+internal fun ChatItemKind.isActivity(): Boolean = when (this) {
     ChatItemKind.REASONING,
     ChatItemKind.COMMAND,
     ChatItemKind.FILE_CHANGE,
