@@ -1,21 +1,21 @@
 # AgentDeck 开发交接
 
-- 更新时间：2026-08-14（Asia/Shanghai）
+- 更新时间：2026-08-15（Asia/Shanghai）
 - 主仓库：`HuaWeiQiu/AgentDeck`
 - 主分支：`main`
-- 交接基线：聊天性能第二阶段已落地（P0–P3 + 真机 gfxinfo）
-- 已发布版本：`v0.2.0-beta.9`（`versionCode=14`），标签在 `38b5965`
-- 上一版：`v0.2.0-beta.8`，标签停在 `b103cba`（不要移动）
+- 交接基线：消费级完善 + Lab UI Agent 最小闭环已落地
+- 已发布版本：`v0.2.0-beta.10`（`versionCode=15`）
+- 上一版：`v0.2.0-beta.9`，标签停在 `38b5965`（不要移动）
 
 ## 先读结论
 
 1. `main` 是唯一开发事实源。Secure/Lab 已经是同一 Android 工程中的 product flavor，
    `origin/channel/secure` 与 `origin/channel/lab` 仍停在 beta.7，不应从这两个旧分支继续开发。
-2. beta.9 Release 已发布四个 ABI/通道 APK。不要移动 beta.8 标签或替换其资产。
+2. beta.10 是当前源码版本。不要移动 beta.8 / beta.9 标签或替换其资产。
 3. 最新远端 Android CI 已全绿：发布基线、稳定性矩阵和 Artifact 上传均通过。
-4. 聊天性能第二阶段已随 beta.9 发布。消费级完善（角色主路径、准备页白话、
-   备份恢复、本机说明）已在 V2301A 实测；下一步若发稳定候选，再处理正式签名
-   与去掉 `.debug` 包名。
+4. 消费级完善与 Lab UI Agent 最小闭环已随 beta.10 源码发布。下一轮是 Runtime
+   体积拆分（按 CLI 下载，不把未来 DeepSeek/pi/Claude 塞进同一份 rootfs）。
+   正式签名与去掉 `.debug` 包名仍待独立发布。
 5. app-server rollout 是聊天记录的唯一持久化事实源。任何性能优化都不得把消息正文双写到
    Room，也不得以窗口淘汰为由删除、裁剪或改写历史。
 6. Lab 手机 UI Agent 的完整方案已经确定，但尚未开始实现；默认排在聊天性能第二阶段之后，

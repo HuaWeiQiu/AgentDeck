@@ -4,6 +4,21 @@ All notable changes to AgentDeck are documented in this file.
 
 ## Unreleased
 
+## 0.2.0-beta.10 - 2026-08-15
+
+### Added
+
+- Consumer-grade first-run: conversation identity is on the create/edit path
+  without enabling Advanced; setup progress uses plain language and names
+  source switches instead of silent stalls.
+- Settings backup/restore for session names, roles, and extension IDs. Secrets,
+  chat bodies, and attachments are never written to the backup file.
+- One-time notice that chats live only on this phone.
+- Lab UI Agent observe-act loop: structured snapshots, single-owner session
+  budget, sensitive-screen stop, node click/scroll/text/back/home, and a
+  Lab-only Screen Agent settings page. Secure APK still has no accessibility
+  service.
+
 ## 0.2.0-beta.9 - 2026-08-14
 
 ### Added
