@@ -4,15 +4,14 @@
 - 主仓库：`HuaWeiQiu/AgentDeck`
 - 主分支：`main`
 - 交接基线：聊天性能第二阶段已落地（P0–P3 + 真机 gfxinfo）
-- 已发布版本：`v0.2.0-beta.8`，标签停在 `b103cba`（不要移动）
-- 当前源码版本：`v0.2.0-beta.9`（`versionCode=14`）；GitHub Release 尚未打标签
+- 已发布版本：`v0.2.0-beta.9`（`versionCode=14`），标签在 `38b5965`
+- 上一版：`v0.2.0-beta.8`，标签停在 `b103cba`（不要移动）
 
 ## 先读结论
 
 1. `main` 是唯一开发事实源。Secure/Lab 已经是同一 Android 工程中的 product flavor，
    `origin/channel/secure` 与 `origin/channel/lab` 仍停在 beta.7，不应从这两个旧分支继续开发。
-2. beta.8 Release 已发布四个 ABI/通道 APK，但不包含随后提交的 handoff 排序修复。
-   不要移动 beta.8 标签或替换其资产；下一次发布使用 beta.9。
+2. beta.9 Release 已发布四个 ABI/通道 APK。不要移动 beta.8 标签或替换其资产。
 3. 最新远端 Android CI 已全绿：发布基线、稳定性矩阵和 Artifact 上传均通过。
 4. 当前优先工作是聊天性能第二阶段。P0–P3 已落地并通过双通道 JVM（337×2）；
    剩余工作全部在真机侧：Secure ARM64 一次性设备采集改造前后基线（3 轮）、
@@ -97,6 +96,7 @@ Beta 使用测试签名、R8、资源压缩和依赖 Baseline Profile，不是�
 
 ## 发布与真机证据
 
+beta.9 Release：<https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.9>
 beta.8 Release：<https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-beta.8>
 
 - 设备：Vivo V2301A，Android 16，ARM64。
@@ -107,9 +107,8 @@ beta.8 Release：<https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-bet
 - 强停 App、重新进入同一 thread 后再次调用成功，稳定受管 server ID 保持恢复语义。
 - Lab 按既定范围未安装真机；x86_64 只有构建和包内容验证，尚未启动 Runtime。
 
-注意：以上 MCP 真机证据对应 beta.8 的 `b103cba`。beta.9 源码已升到
-`versionCode=14`，聊天性能真机数字见 `docs/CHAT_PERFORMANCE.md`；GitHub Release
-标签尚未打。
+注意：以上 MCP 真机证据对应 beta.8 的 `b103cba`。beta.9 聊天性能真机数字见
+`docs/CHAT_PERFORMANCE.md`。
 
 ## 性能现状与下一阶段
 
@@ -213,7 +212,7 @@ export JAVA_HOME="/path/to/jdk-17"
 
 ## 明确的已知边界
 
-- 源码版本已是 beta.9；GitHub Release 标签待打，打完后即可覆盖安装四个 ABI/通道 APK。
+- beta.9 GitHub Release 已发布四个 ABI/通道 APK，可覆盖安装。
 - x86_64 Runtime 尚未在 Android 模拟器完成安装、启动、会话和恢复闭环。
 - Lab 尚未真机验收，本地 MCP 无已发现工具时保留兼容模式；一旦有工具元数据就启用严格
   allowlist，全部关闭时必须保持 `enabled_tools=[]`，不能 fail-open。
