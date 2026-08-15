@@ -4,6 +4,8 @@ All notable changes to AgentDeck are documented in this file.
 
 ## Unreleased
 
+## 0.2.0-beta.9 - 2026-08-14
+
 ### Added
 
 - Chat-performance P0 harness on the shared Secure chat stack: deterministic
@@ -18,16 +20,19 @@ All notable changes to AgentDeck are documented in this file.
   refetch; eviction only frees Android memory, the Codex rollout stays authoritative.
 - Chat-performance P3: activity/diff parent-list virtualization, idle held-session
   LRU (max 2, busy sessions exempt), and onTrimMemory fan-out for off-screen ASTs.
-- Fixed a markdown-window race where per-block visibility reports replaced the
-  viewport-wide set, evicting neighbouring parsed ASTs and leaving messages stuck
-  on "正在排版回复"; viewport reporting is now the single visibility writer.
-- Hardened the bounded transcript window: late upserts for evicted-page items no
-  longer re-order them into the live tail, and removals always clean page
-  descriptors (re-fetch still restores server-authoritative history).
-- Runtime downloads now carry a stall watchdog: a mirror trickling below ~26 KiB/s
-  for 20 s is retried with Range resume and then abandoned for the next source,
-  instead of resetting read timeouts forever on the 116 MB rootfs (observed on a
-  throttled mirror that crawled at ~5 KiB/s past 28 MB).
+
+### Fixed
+
+- Serialize chat session handoff events so a late collector from a previous
+  session cannot overwrite the newly attached thread.
+- Markdown visibility dual-writer race that left replies stuck on
+  "正在排版回复"; viewport reporting is now the single visibility writer.
+- Late upserts for evicted pages no longer re-order them into the live tail;
+  removals always clean page descriptors (re-fetch still restores
+  server-authoritative history).
+- Runtime downloads now carry a stall watchdog: a mirror trickling below
+  ~26 KiB/s for 20 s is retried with Range resume and then abandoned for the
+  next source, instead of resetting read timeouts forever on the 116 MB rootfs.
 
 ## 0.2.0-beta.8 - 2026-08-12
 

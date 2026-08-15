@@ -3,9 +3,9 @@
 - 更新时间：2026-08-14（Asia/Shanghai）
 - 主仓库：`HuaWeiQiu/AgentDeck`
 - 主分支：`main`
-- 交接基线：`bfb2083`（handoff 修复；本交接文档提交在其后）
-- 已发布版本：`v0.2.0-beta.8`，标签停在 `b103cba`
-- 下一候选版本：`v0.2.0-beta.9`
+- 交接基线：聊天性能第二阶段已落地（P0–P3 + 真机 gfxinfo）
+- 已发布版本：`v0.2.0-beta.8`，标签停在 `b103cba`（不要移动）
+- 当前源码版本：`v0.2.0-beta.9`（`versionCode=14`）；GitHub Release 尚未打标签
 
 ## 先读结论
 
@@ -107,8 +107,9 @@ beta.8 Release：<https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-bet
 - 强停 App、重新进入同一 thread 后再次调用成功，稳定受管 server ID 保持恢复语义。
 - Lab 按既定范围未安装真机；x86_64 只有构建和包内容验证，尚未启动 Runtime。
 
-注意：以上真机证据对应 beta.8 的 `b103cba`。最新 `bfb2083` handoff 修复通过本地与远端
-自动化，但尚未打成 beta.9 并做真机覆盖安装。
+注意：以上 MCP 真机证据对应 beta.8 的 `b103cba`。beta.9 源码已升到
+`versionCode=14`，聊天性能真机数字见 `docs/CHAT_PERFORMANCE.md`；GitHub Release
+标签尚未打。
 
 ## 性能现状与下一阶段
 
@@ -139,7 +140,7 @@ beta.8 Release：<https://github.com/HuaWeiQiu/AgentDeck/releases/tag/v0.2.0-bet
 2. P2 真机确认：连续上翻 20 页观察 PSS 平台期；39 页往返哈希一致性已由 JVM 机器校验
    （`ChatPerformancePhase2Test`）覆盖。
 3. P3 真机确认：低内存场景下空闲 held session 释放、回会话 thread resume 正常。
-4. P4：三轮固定场景回归达标后把数字写入 `docs/CHAT_PERFORMANCE.md`，随 beta.9 发布。
+4. P4：V2301A gfxinfo 数字已写入 `docs/CHAT_PERFORMANCE.md`，随 beta.9 源码发布。
 
 实施有界窗口前要求的 cursor 有效期验证，改造后只能在真机 Runtime 上最终确认：
 JVM 已按“cursor 在 app-server 生命周期内稳定”建模，重连会整体重建窗口。
@@ -212,7 +213,7 @@ export JAVA_HOME="/path/to/jdk-17"
 
 ## 明确的已知边界
 
-- 最新源码尚无 beta.9 Release；README 中“当前源码与 beta.8”会在 beta.9 发布准备阶段一并更新。
+- 源码版本已是 beta.9；GitHub Release 标签待打，打完后即可覆盖安装四个 ABI/通道 APK。
 - x86_64 Runtime 尚未在 Android 模拟器完成安装、启动、会话和恢复闭环。
 - Lab 尚未真机验收，本地 MCP 无已发现工具时保留兼容模式；一旦有工具元数据就启用严格
   allowlist，全部关闭时必须保持 `enabled_tools=[]`，不能 fail-open。
