@@ -119,10 +119,18 @@ fun SetupScreen(
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "${install.stageLabel} · ${(install.overallFraction * 100).toInt()}%",
+                            install.stageLabel,
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        install.hint?.let { hint ->
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                hint,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     } else if (state.isScanning) {
                         Spacer(Modifier.height(14.dp))
                         LinearProgressIndicator(

@@ -1,7 +1,9 @@
 package com.agentdeck.app.ui.settings
 
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.agentdeck.app.BuildConfig
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.host.HostWriteApprovalMode
@@ -9,7 +11,13 @@ import com.agentdeck.app.domain.host.WorkspaceGrant
 import com.agentdeck.app.domain.settings.ExperienceLevel
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.setup.SetupState
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class SettingsViewModel : ViewModel() {
     private val setup = ServiceLocator.setup
@@ -28,6 +36,15 @@ class SettingsViewModel : ViewModel() {
     val labIntentEnabled: StateFlow<Boolean> = ServiceLocator.experienceSettings.labIntentEnabled
     val labUiEnabled: StateFlow<Boolean> = ServiceLocator.experienceSettings.labUiEnabled
     val labPrivEnabled: StateFlow<Boolean> = ServiceLocator.experienceSettings.labPrivEnabled
+    private val backup = ServiceLocator.conversationBackup
+    private val lastBackupExportAtState = MutableStateFlow<Long?>(null)
+    val lastBackupExportAt: StateFlow<Long?> = lastBackupExportAtState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            lastBackupExportAtState.value = backup.lastExportAtEpochMs()
+        }
+    }
 
     fun setAdvancedEnabled(enabled: Boolean) {
         ServiceLocator.experienceSettings.setLevel(
@@ -82,5 +99,31 @@ class SettingsViewModel : ViewModel() {
 
     fun revokeWorkspaceGrant(grantId: String) {
         ServiceLocator.workspaceGrants.revoke(grantId)
+    }
+
+    fun suggestedBackupFileName(): String {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.getDefault()).format(Date())
+        return "agentdeck-backup-" + stamp + ".json"
+    }
+
+    fun exportConversations(context: Context, uri: Uri, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            val message = runCatching {
+                val preview = backup.writeExport(context, uri)
+                lastBackupExportAtState.value = backup.lastExportAtEpochMs()
+                "已导出 " + preview.conversationCount + " 个会话（其中 " + preview.identityCount + " 个人设）"
+            }.getOrElse { error -> "导出失败：" + (error.message ?: "未知错误") }
+            onDone(message)
+        }
+    }
+
+    fun importConversations(context: Context, uri: Uri, onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            val message = runCatching {
+                val preview = backup.importFrom(context, uri)
+                "已恢复 " + preview.conversationCount + " 个会话（其中 " + preview.identityCount + " 个人设）。模型密钥需要重新验证。"
+            }.getOrElse { error -> "恢复失败：" + (error.message ?: "未知错误") }
+            onDone(message)
+        }
     }
 }

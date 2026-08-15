@@ -822,8 +822,12 @@ private fun ChatMessage(
         }
 
         ChatItemKind.ASSISTANT -> {
+            var waitedLong by remember(item.id) { mutableStateOf(false) }
             LaunchedEffect(item.id, item.text) {
                 onMarkdownNeeded(item.id, item.text)
+                waitedLong = false
+                kotlinx.coroutines.delay(4_000)
+                waitedLong = true
             }
             Row(
                 modifier = Modifier
@@ -835,7 +839,7 @@ private fun ChatMessage(
                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "正在排版回复",
+                    if (waitedLong) "回复已收到，正在整理显示" else "正在排版回复",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

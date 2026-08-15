@@ -10,6 +10,7 @@ import com.agentdeck.app.data.extensions.ExtensionRepository
 import com.agentdeck.app.data.extensions.secureMcpHttpClient
 import com.agentdeck.app.data.provider.OkHttpProviderModelDiscovery
 import com.agentdeck.app.data.provider.ProviderModelDiscovery
+import com.agentdeck.app.data.backup.ConversationBackupRepository
 import com.agentdeck.app.data.repo.CardRepository
 import com.agentdeck.app.data.repo.ExperienceSettingsRepository
 import com.agentdeck.app.data.repo.InitialDataSeeder
@@ -73,6 +74,9 @@ object ServiceLocator {
     }
     val modelDiscovery: ProviderModelDiscovery by lazy { OkHttpProviderModelDiscovery() }
     val cards: CardRepository by lazy { CardRepository(db) }
+    internal val conversationBackup: ConversationBackupRepository by lazy {
+        ConversationBackupRepository(app, cards, extensions)
+    }
     val seeder: InitialDataSeeder by lazy { InitialDataSeeder(db, profiles, cards) }
     val recipes: RecipeRepository by lazy { RecipeRepository(app.assets) }
     val onboarding: OnboardingRepository by lazy { OnboardingRepository(app) }

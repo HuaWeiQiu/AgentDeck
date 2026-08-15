@@ -27,6 +27,7 @@ import com.agentdeck.app.ui.chat.ChatScreen
 import com.agentdeck.app.ui.config.CodexConfigScreen
 import com.agentdeck.app.ui.sessions.SessionsScreen
 import com.agentdeck.app.ui.settings.SettingsScreen
+import com.agentdeck.app.ui.settings.BackupRestoreScreen
 import com.agentdeck.app.ui.settings.ConversationDefaultsScreen
 import com.agentdeck.app.ui.models.ModelsScreen
 import com.agentdeck.app.ui.extensions.ExtensionDetailScreen
@@ -134,7 +135,11 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
                     onOpenConversationDefaults = {
                         navController.navigate("conversation-defaults")
                     },
+                    onOpenBackup = { navController.navigate("backup") },
                 )
+            }
+            composable("backup") {
+                BackupRestoreScreen(onBack = navController::navigateUp)
             }
             composable("conversation-defaults") {
                 ConversationDefaultsScreen(onBack = navController::navigateUp)

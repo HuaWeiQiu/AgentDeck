@@ -107,6 +107,15 @@ class SessionsViewModel : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val setupState: StateFlow<SetupState> = ServiceLocator.setup.state
+    private val localDataNoticeState = MutableStateFlow(
+        ServiceLocator.onboarding.shouldShowLocalDataNotice(),
+    )
+    val showLocalDataNotice: StateFlow<Boolean> = localDataNoticeState.asStateFlow()
+
+    fun dismissLocalDataNotice() {
+        ServiceLocator.onboarding.markLocalDataNoticeSeen()
+        localDataNoticeState.value = false
+    }
     val experienceLevel: StateFlow<ExperienceLevel> = ServiceLocator.experienceSettings.level
     val defaultPermissionLevel: StateFlow<CodexPermissionLevel> =
         ServiceLocator.experienceSettings.codexPermissionLevel

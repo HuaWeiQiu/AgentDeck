@@ -60,6 +60,7 @@ fun SettingsScreen(
     onOpenExtensions: () -> Unit = {},
     onOpenCodexConfig: () -> Unit = {},
     onOpenConversationDefaults: () -> Unit = {},
+    onOpenBackup: () -> Unit = {},
     vm: SettingsViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -114,6 +115,16 @@ fun SettingsScreen(
                 )
             }
             item { HorizontalDivider() }
+            item { SectionLabel("备份") }
+            item {
+                SettingsDestination(
+                    title = "备份与恢复",
+                    summary = "导出会话名称和人设；卸载前请先备份",
+                    icon = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                    onClick = onOpenBackup,
+                )
+            }
+            item { HorizontalDivider() }
             item { SectionLabel("会话") }
             item {
                 SettingsDestination(
@@ -151,6 +162,7 @@ fun SettingsScreen(
                                 } else {
                                     append(" · 安全版")
                                 }
+                                append("。聊天记录只存在这台手机，卸载前请先备份会话与角色。")
                             },
                         )
                     },

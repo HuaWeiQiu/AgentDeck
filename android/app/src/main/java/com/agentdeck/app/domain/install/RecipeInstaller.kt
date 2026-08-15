@@ -34,6 +34,12 @@ data class RecipeInstallProgress(
     val bytesDone: Long? = null,
     /** 下载总字节数（跨文件累计），仅 DOWNLOADING 阶段提供。 */
     val bytesTotal: Long? = null,
+    /** 出口网络被判定为境内时为 true；用于准备页白话，不展示 IP。 */
+    val prefersDomesticSources: Boolean? = null,
+    /** 已放弃并切换过的下载源次数（同一安装过程累计）。 */
+    val sourceSwitchCount: Int = 0,
+    /** 当前是否因速度过低而正在换源。 */
+    val switchingSource: Boolean = false,
 )
 
 interface RecipeInstallation {

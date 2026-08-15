@@ -105,8 +105,8 @@ class SetupStatusUiTest {
             SetupState(report = readyReport(), isInstalling = true),
         )
 
-        assertEquals("正在准备 Codex", presentation.title)
-        assertEquals("正在安装并验证所需组件", presentation.summary)
+        assertEquals("正在准备聊天环境", presentation.title)
+        assertEquals("第一次需要下载组件，请保持网络畅通", presentation.summary)
         assertEquals("准备中", presentation.primaryActionLabel)
     }
 
@@ -124,10 +124,30 @@ class SetupStatusUiTest {
             ),
         )
 
-        assertEquals("下载 Runtime 文件", presentation.title)
+        assertEquals("正在下载聊天组件", presentation.title)
         assertEquals("60 MB / 120 MB（50%）", presentation.detail)
-        assertEquals("阶段 2 / 7", presentation.stageLabel)
+        assertEquals("正在下载", presentation.stageLabel)
         assertEquals(0.275f, presentation.overallFraction, 0.0001f)
+        assertEquals("请保持 Wi-Fi 连接，第一次准备大约需要几分钟", presentation.hint)
+    }
+
+    @Test
+    fun `download hint explains international route and source switch`() {
+        val presentation = setupInstallProgressPresentation(
+            RecipeInstallProgress(
+                recipeId = "recipe_codex",
+                recipeName = "Codex Runtime",
+                recipeIndex = 0,
+                recipeCount = 1,
+                phase = InstallPhase.DOWNLOADING,
+                bytesDone = 28L * 1024 * 1024,
+                bytesTotal = 116L * 1024 * 1024,
+                prefersDomesticSources = false,
+                sourceSwitchCount = 1,
+                switchingSource = true,
+            ),
+        )
+        assertEquals("当前线路较慢，正在换一条线路继续下", presentation.hint)
     }
 
     @Test
@@ -143,7 +163,7 @@ class SetupStatusUiTest {
         )
 
         assertEquals("安装基础工具", presentation.title)
-        assertEquals("阶段 5 / 7", presentation.stageLabel)
+        assertEquals("正在安装工具", presentation.stageLabel)
         assertEquals(true, presentation.detail.contains("国内软件源"))
         assertEquals(true, presentation.detail.contains("可能需要几分钟"))
     }

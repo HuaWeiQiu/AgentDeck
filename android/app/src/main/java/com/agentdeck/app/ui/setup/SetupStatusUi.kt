@@ -50,6 +50,7 @@ data class SetupInstallProgressPresentation(
     val detail: String,
     val stageLabel: String,
     val overallFraction: Float,
+    val hint: String? = null,
 )
 
 fun setupInstallProgressPresentation(
@@ -72,12 +73,12 @@ fun setupInstallProgressPresentation(
         InstallPhase.PROBING -> ProgressStage(1, "检查安装条件", "确认架构、空间和 APK 运行组件", 0.03f)
         InstallPhase.DOWNLOADING -> ProgressStage(
             2,
-            "下载 Runtime 文件",
+            "正在下载聊天组件",
             if (progress.bytesDone != null && progress.bytesTotal != null) {
                 "${formatInstallBytes(progress.bytesDone)} / ${formatInstallBytes(progress.bytesTotal)}" +
                     "（${(downloadFraction * 100).toInt()}%）"
             } else {
-                "正在连接下载源"
+                "正在连接下载线路"
             },
             0.05f + 0.45f * downloadFraction,
         )
@@ -119,24 +120,51 @@ fun setupInstallProgressPresentation(
     return SetupInstallProgressPresentation(
         title = presentation.title,
         detail = presentation.detail,
-        stageLabel = "阶段 ${presentation.index} / $INSTALL_STAGE_COUNT",
+        stageLabel = customerInstallStageLabel(presentation.index),
         overallFraction = presentation.fraction,
+        hint = customerInstallHint(progress),
     )
+}
+
+internal fun customerInstallHint(progress: RecipeInstallProgress?): String? {
+    progress ?: return null
+    if (progress.phase != InstallPhase.DOWNLOADING) return null
+    return when {
+        progress.switchingSource -> "当前线路较慢，正在换一条线路继续下"
+        progress.sourceSwitchCount > 0 && progress.prefersDomesticSources == false ->
+            "当前网络走了国际线路，下载可能较慢，已换过 ${progress.sourceSwitchCount} 次线路"
+        progress.sourceSwitchCount > 0 ->
+            "刚才那条线路不通或太慢，已换过 ${progress.sourceSwitchCount} 次线路"
+        progress.prefersDomesticSources == false ->
+            "当前网络走了国际线路，下载可能较慢"
+        else -> "请保持 Wi-Fi 连接，第一次准备大约需要几分钟"
+    }
+}
+
+private fun customerInstallStageLabel(index: Int): String = when (index) {
+    1 -> "正在检查"
+    2 -> "正在下载"
+    3 -> "正在校验"
+    4 -> "正在解压"
+    5 -> "正在安装工具"
+    6 -> "正在验证"
+    7 -> "即将完成"
+    else -> "准备中"
 }
 
 fun customerSetupPresentation(state: SetupState): CustomerSetupPresentation {
     val title = when {
         state.isScanning -> "正在检查设备"
-        state.isInstalling -> "正在准备 Codex"
+        state.isInstalling -> "正在准备聊天环境"
         state.error != null -> "准备未完成"
         state.action == SetupAction.READY -> "一切就绪"
         state.action == SetupAction.CONFIGURE_CODEX_AUTH -> "连接模型服务"
-        state.action == SetupAction.INSTALL_CODEX -> "准备 Codex"
+        state.action == SetupAction.INSTALL_CODEX -> "准备聊天环境"
         else -> "完成设备准备"
     }
     val summary = when {
-        state.isScanning -> "正在确认本机运行环境和模型连接"
-        state.isInstalling -> "正在安装并验证所需组件"
+        state.isScanning -> "正在确认这台手机能不能开始聊天"
+        state.isInstalling -> "第一次需要下载组件，请保持网络畅通"
         else -> when (state.action) {
             SetupAction.SCAN -> "正在确认本机运行环境和模型连接"
             SetupAction.INSTALL_CODEX -> "将安装或修复所需组件，不会删除对话和项目"

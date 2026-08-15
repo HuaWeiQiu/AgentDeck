@@ -119,6 +119,7 @@ fun SessionsScreen(
     var deleting by remember { mutableStateOf<AgentCard?>(null) }
     var renaming by remember { mutableStateOf<SessionCardUi?>(null) }
     var runtimeMissingDialog by remember { mutableStateOf(false) }
+    val showLocalDataNotice by vm.showLocalDataNotice.collectAsStateWithLifecycle()
     val showSetupBanner = shouldShowSetupBanner(setupState, cardItems.map { it.card }, profiles)
     val activeItems = remember(visibleItems) { visibleItems.filter { !it.card.archived } }
     val archivedItems = remember(visibleItems) { visibleItems.filter { it.card.archived } }
@@ -417,6 +418,19 @@ fun SessionsScreen(
         )
     }
 
+    if (showLocalDataNotice) {
+        AlertDialog(
+            onDismissRequest = { vm.dismissLocalDataNotice() },
+            title = { Text("聊天记录只在这台手机") },
+            text = {
+                Text("对话和人设保存在本机。卸载或清除数据会丢掉它们，可先到设置里导出「会话与角色」。")
+            },
+            confirmButton = {
+                Button(onClick = { vm.dismissLocalDataNotice() }) { Text("知道了") }
+            },
+        )
+    }
+
     if (runtimeMissingDialog) {
         AlertDialog(
             onDismissRequest = { runtimeMissingDialog = false },
@@ -522,19 +536,32 @@ private fun EmptySessionsChecklist(
             .padding(vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("开始使用", style = MaterialTheme.typography.titleMedium)
+        Text(
+            if (runtimeReady && modelReady) "还没有会话" else "开始使用",
+            style = MaterialTheme.typography.titleMedium,
+        )
         Spacer(Modifier.height(AppSpacing.sm))
         Text(
-            "完成三步即可聊天",
+            if (runtimeReady && modelReady) {
+                "新建一个会话就可以开始聊天，也可以先给助手写个人设"
+            } else {
+                "准备好环境并连上模型后，就可以聊天"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(AppSpacing.lg))
+        if (runtimeReady && modelReady) {
+            Button(onClick = onCreate, enabled = canCreate) {
+                Text("新建会话")
+            }
+            return@Column
+        }
         ChecklistStep(
             index = 1,
-            title = "准备运行环境",
+            title = "准备聊天环境",
             done = runtimeReady,
-            actionLabel = if (runtimeReady) "已完成" else "去安装",
+            actionLabel = if (runtimeReady) "已完成" else "去准备",
             onAction = onOpenSetup,
             enabled = !runtimeReady,
         )
@@ -1010,6 +1037,97 @@ private fun CardEditorDialog(
                         }
                     }
                 }
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (draft.id == null) "给这个助手写个人设" else "角色身份",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            if (draft.id == null) "可选，跳过也能直接开始聊" else "本会话的固定人设",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = draft.identity != null,
+                        onCheckedChange = { enabled ->
+                            draft = draft.copy(
+                                identity = if (enabled) {
+                                    draft.identity ?: ConversationIdentity("", "")
+                                } else {
+                                    null
+                                },
+                            )
+                        },
+                    )
+                }
+                draft.identity?.let { identity ->
+                    OutlinedTextField(
+                        value = identity.roleName,
+                        onValueChange = {
+                            if (it.length <= ConversationIdentityPolicy.MAX_ROLE_NAME_LENGTH) {
+                                draft = draft.copy(identity = identity.copy(roleName = it))
+                            }
+                        },
+                        label = { Text("角色名称") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = identity.selfDefinition,
+                        onValueChange = {
+                            if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
+                                draft = draft.copy(identity = identity.copy(selfDefinition = it))
+                            }
+                        },
+                        label = { Text("这个助手是谁") },
+                        minLines = 2,
+                        maxLines = 4,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = identity.objective,
+                        onValueChange = {
+                            if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
+                                draft = draft.copy(identity = identity.copy(objective = it))
+                            }
+                        },
+                        label = { Text("主要目标（可选）") },
+                        minLines = 1,
+                        maxLines = 3,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = identity.communicationStyle,
+                        onValueChange = {
+                            if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
+                                draft = draft.copy(identity = identity.copy(communicationStyle = it))
+                            }
+                        },
+                        label = { Text("表达方式（可选）") },
+                        minLines = 1,
+                        maxLines = 3,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = identity.boundaries,
+                        onValueChange = {
+                            if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
+                                draft = draft.copy(identity = identity.copy(boundaries = it))
+                            }
+                        },
+                        label = { Text("必须遵守的设定（可选）") },
+                        minLines = 1,
+                        maxLines = 3,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 ListItem(
                     headlineContent = { Text("扩展") },
                     supportingContent = {
@@ -1086,94 +1204,6 @@ private fun CardEditorDialog(
                                 )
                             }
                         }
-                    }
-                    HorizontalDivider()
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("角色身份", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "本会话的固定人设",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = draft.identity != null,
-                            onCheckedChange = { enabled ->
-                                draft = draft.copy(
-                                    identity = if (enabled) {
-                                        draft.identity ?: ConversationIdentity("", "")
-                                    } else {
-                                        null
-                                    },
-                                )
-                            },
-                        )
-                    }
-                    draft.identity?.let { identity ->
-                        OutlinedTextField(
-                            value = identity.roleName,
-                            onValueChange = {
-                                if (it.length <= ConversationIdentityPolicy.MAX_ROLE_NAME_LENGTH) {
-                                    draft = draft.copy(identity = identity.copy(roleName = it))
-                                }
-                            },
-                            label = { Text("角色名称") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            value = identity.selfDefinition,
-                            onValueChange = {
-                                if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
-                                    draft = draft.copy(identity = identity.copy(selfDefinition = it))
-                                }
-                            },
-                            label = { Text("角色是谁") },
-                            minLines = 2,
-                            maxLines = 4,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            value = identity.objective,
-                            onValueChange = {
-                                if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
-                                    draft = draft.copy(identity = identity.copy(objective = it))
-                                }
-                            },
-                            label = { Text("主要目标（可选）") },
-                            minLines = 1,
-                            maxLines = 3,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            value = identity.communicationStyle,
-                            onValueChange = {
-                                if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
-                                    draft = draft.copy(identity = identity.copy(communicationStyle = it))
-                                }
-                            },
-                            label = { Text("表达方式（可选）") },
-                            minLines = 1,
-                            maxLines = 3,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            value = identity.boundaries,
-                            onValueChange = {
-                                if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
-                                    draft = draft.copy(identity = identity.copy(boundaries = it))
-                                }
-                            },
-                            label = { Text("必须遵守的设定（可选）") },
-                            minLines = 1,
-                            maxLines = 3,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
                     }
                     OutlinedTextField(
                         value = draft.workspacePath,

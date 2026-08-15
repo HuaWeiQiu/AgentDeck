@@ -15,6 +15,12 @@ class OnboardingRepository(context: Context) {
     /** Runtime + model auth were both OK last scan. */
     fun lastFullyReady(): Boolean = preferences.getBoolean(KEY_FULLY_READY, false)
 
+    fun shouldShowLocalDataNotice(): Boolean = !preferences.getBoolean(KEY_LOCAL_DATA_NOTICE, false)
+
+    fun markLocalDataNoticeSeen() {
+        preferences.edit { putBoolean(KEY_LOCAL_DATA_NOTICE, true) }
+    }
+
     fun record(report: EnvironmentReport) {
         preferences.edit {
             if (report.canLaunchSessions) {
@@ -28,5 +34,6 @@ class OnboardingRepository(context: Context) {
         private const val PREFERENCES_NAME = "agentdeck_onboarding"
         private const val KEY_DOCTOR_COMPLETED = "doctor_completed"
         private const val KEY_FULLY_READY = "setup_fully_ready"
+        private const val KEY_LOCAL_DATA_NOTICE = "local_data_notice_seen"
     }
 }

@@ -47,6 +47,9 @@ internal class EmbeddedRuntimeInstaller(
             }
             // 按出口 IP 判定国内外源顺序；探测失败时软回退（locale/时区）。
             val region = regionDetector.detect()
+            installPrefersDomestic = region == NetworkRegion.CHINA
+            sourceSwitchCount = 0
+            switchingSource = false
             paths.ensureHostLayout()
             verifyPackagedRuntime()
             checkFreeSpace()
@@ -130,12 +133,28 @@ internal class EmbeddedRuntimeInstaller(
     ): File = withContext(Dispatchers.IO) {
         var lastReportedBytes = -PROGRESS_MIN_BYTES
         var lastReportedAtNanos = 0L
-        downloadArtifact(paths.cacheDir, artifact, client, region) { artifactBytesDone ->
+        downloadArtifact(
+            paths.cacheDir,
+            artifact,
+            client,
+            region,
+            onSourceSwitch = {
+                sourceSwitchCount += 1
+                switchingSource = true
+                progress(
+                    InstallPhase.DOWNLOADING,
+                    onProgress,
+                    bytesDone = completedBytes,
+                    bytesTotal = totalBytes,
+                )
+            },
+        ) { artifactBytesDone ->
             val now = System.nanoTime()
             val shouldReport = artifactBytesDone == artifact.sizeBytes ||
                 artifactBytesDone - lastReportedBytes >= PROGRESS_MIN_BYTES ||
                 now - lastReportedAtNanos >= PROGRESS_MIN_INTERVAL_NANOS
             if (shouldReport) {
+                switchingSource = false
                 progress(
                     InstallPhase.DOWNLOADING,
                     onProgress,
@@ -264,6 +283,10 @@ internal class EmbeddedRuntimeInstaller(
         check(paths.stagingRootfs.renameTo(paths.activeRootfs)) { "无法启用已验证的运行环境" }
     }
 
+    private var installPrefersDomestic: Boolean? = null
+    private var sourceSwitchCount: Int = 0
+    private var switchingSource: Boolean = false
+
     private fun progress(
         phase: InstallPhase,
         callback: (RecipeInstallProgress) -> Unit,
@@ -279,6 +302,9 @@ internal class EmbeddedRuntimeInstaller(
                 phase = phase,
                 bytesDone = bytesDone,
                 bytesTotal = bytesTotal,
+                prefersDomesticSources = installPrefersDomestic,
+                sourceSwitchCount = sourceSwitchCount,
+                switchingSource = switchingSource,
             ),
         )
     }
@@ -309,6 +335,7 @@ internal suspend fun downloadArtifact(
     artifact: VerifiedArtifact,
     client: OkHttpClient,
     region: NetworkRegion = NetworkRegion.CHINA,
+    onSourceSwitch: () -> Unit = {},
     onBytes: (bytesDone: Long) -> Unit = {},
 ): File {
     val target = File(cacheDir, artifact.fileName)
@@ -321,7 +348,7 @@ internal suspend fun downloadArtifact(
         check(part.delete()) { "无法清理 ${artifact.fileName} 的残留下载" }
     }
     val orderedUrls = orderUrlsForRegion(artifact.urls, region)
-    downloadWithUrlFallback(client, artifact, part, orderedUrls, onBytes)
+    downloadWithUrlFallback(client, artifact, part, orderedUrls, onBytes, onSourceSwitch)
     verifyArtifact(part, artifact)
     target.delete()
     check(part.renameTo(target)) { "无法保存已验证的运行组件" }
@@ -339,6 +366,7 @@ private suspend fun downloadWithUrlFallback(
     part: File,
     urls: List<String>,
     onBytes: (bytesDone: Long) -> Unit,
+    onSourceSwitch: () -> Unit = {},
 ) {
     var lastError: Exception? = null
     for ((index, url) in urls.withIndex()) {
@@ -357,6 +385,7 @@ private suspend fun downloadWithUrlFallback(
             }
             onBytes(0L)
             if (index == urls.lastIndex) break
+            onSourceSwitch()
         }
     }
     throw lastError ?: IllegalStateException("下载 ${artifact.fileName} 失败：无可用源")
