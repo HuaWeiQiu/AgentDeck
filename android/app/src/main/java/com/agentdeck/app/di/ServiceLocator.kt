@@ -27,6 +27,7 @@ import com.agentdeck.app.data.host.WorkspaceGrantRepository
 import com.agentdeck.app.data.runtime.EmbeddedProotRuntime
 import com.agentdeck.app.data.runtime.EmbeddedRuntimeInstaller
 import com.agentdeck.app.data.runtime.EmbeddedRuntimePaths
+import com.agentdeck.app.data.runtime.RuntimeInventory
 import com.agentdeck.app.data.secure.AndroidExtensionCredentialVault
 import com.agentdeck.app.data.secure.AndroidProviderCredentialVault
 import com.agentdeck.app.data.secure.ExtensionCredentialVault
@@ -120,6 +121,7 @@ object ServiceLocator {
     }
     val envProbe: EnvironmentScanner by lazy { EmbeddedEnvironmentProbe(embeddedRuntime) }
     val installer: RecipeInstallation by lazy { EmbeddedRuntimeInstaller(app) }
+    internal val runtimeInventory: RuntimeInventory by lazy { RuntimeInventory(app, installer = installer) }
     val setup: SetupCoordinator by lazy {
         SetupCoordinator(
             scanner = envProbe,

@@ -47,6 +47,9 @@ interface RecipeInstallation {
         recipeId: String,
         onProgress: (RecipeInstallProgress) -> Unit = {},
     ): Result<String>
+
+    fun uninstall(recipeId: String): Result<String> =
+        Result.failure(UnsupportedOperationException("当前运行环境不支持卸载"))
 }
 
 internal object RecipeInstallResultInterpreter {

@@ -1,0 +1,9 @@
+schema_version: 1
+id: recipe_pi
+name: pi
+description: pi 运行时按需安装尚未开放；不会随首次准备下载。
+priority: p1
+version: planned
+available: false
+depends_on: []
+timeout_minutes: 10

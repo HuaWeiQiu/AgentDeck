@@ -10,6 +10,7 @@ import com.agentdeck.app.domain.host.HostWriteApprovalMode
 import com.agentdeck.app.domain.host.WorkspaceGrant
 import com.agentdeck.app.domain.settings.ExperienceLevel
 import com.agentdeck.app.domain.model.CodexPermissionLevel
+import com.agentdeck.app.domain.runtime.RuntimeCliStatus
 import com.agentdeck.app.domain.setup.SetupState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +40,8 @@ class SettingsViewModel : ViewModel() {
     private val backup = ServiceLocator.conversationBackup
     private val lastBackupExportAtState = MutableStateFlow<Long?>(null)
     val lastBackupExportAt: StateFlow<Long?> = lastBackupExportAtState.asStateFlow()
+    private val runtimeStatusesState = MutableStateFlow(ServiceLocator.runtimeInventory.statuses())
+    val runtimeStatuses: StateFlow<List<RuntimeCliStatus>> = runtimeStatusesState.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -115,6 +118,16 @@ class SettingsViewModel : ViewModel() {
             }.getOrElse { error -> "导出失败：" + (error.message ?: "未知错误") }
             onDone(message)
         }
+    }
+
+    fun refreshRuntimes() {
+        runtimeStatusesState.value = ServiceLocator.runtimeInventory.statuses()
+    }
+
+    fun deleteCodexRuntime() {
+        ServiceLocator.runtimeInventory.deleteCodex()
+        refreshRuntimes()
+        setup.scan(force = true)
     }
 
     fun importConversations(context: Context, uri: Uri, onDone: (String) -> Unit) {

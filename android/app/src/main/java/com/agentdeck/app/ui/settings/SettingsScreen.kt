@@ -56,6 +56,7 @@ import com.agentdeck.app.ui.theme.AppSpacing
 @Composable
 fun SettingsScreen(
     onOpenSetup: () -> Unit = {},
+    onOpenRuntimes: () -> Unit = {},
     onOpenModels: () -> Unit = {},
     onOpenExtensions: () -> Unit = {},
     onOpenCodexConfig: () -> Unit = {},
@@ -79,9 +80,9 @@ fun SettingsScreen(
                 SettingsDestination(
                     title = "运行环境",
                     summary = if (state.canStartChat) {
-                        "已就绪，可以创建对话"
+                        "Codex 已就绪；其它助手按需准备"
                     } else {
-                        "需要安装或修复后才能对话"
+                        "先准备 Codex，其它助手不会自动下载"
                     },
                     icon = {
                         Icon(
@@ -94,7 +95,7 @@ fun SettingsScreen(
                             },
                         )
                     },
-                    onClick = onOpenSetup,
+                    onClick = onOpenRuntimes,
                 )
             }
             item { HorizontalDivider() }

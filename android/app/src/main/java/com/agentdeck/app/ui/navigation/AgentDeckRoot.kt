@@ -30,6 +30,7 @@ import com.agentdeck.app.ui.settings.SettingsScreen
 import com.agentdeck.app.ui.settings.BackupRestoreScreen
 import com.agentdeck.app.ui.settings.ConversationDefaultsScreen
 import com.agentdeck.app.ui.settings.LabScreenAgentScreen
+import com.agentdeck.app.ui.settings.RuntimeEnvironmentScreen
 import com.agentdeck.app.ui.models.ModelsScreen
 import com.agentdeck.app.ui.extensions.ExtensionDetailScreen
 import com.agentdeck.app.ui.extensions.ExtensionsScreen
@@ -130,6 +131,7 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
             composable("settings") {
                 SettingsScreen(
                     onOpenSetup = { navController.navigate("setup") { launchSingleTop = true } },
+                    onOpenRuntimes = { navController.navigate("runtimes") },
                     onOpenModels = { navController.navigate("models") },
                     onOpenExtensions = { navController.navigate("extensions") },
                     onOpenCodexConfig = { navController.navigate("codex-config") },
@@ -138,6 +140,12 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
                     },
                     onOpenBackup = { navController.navigate("backup") },
                     onOpenLabScreenAgent = { navController.navigate("lab-screen-agent") },
+                )
+            }
+            composable("runtimes") {
+                RuntimeEnvironmentScreen(
+                    onBack = navController::navigateUp,
+                    onPrepareCodex = { navController.navigate("setup") },
                 )
             }
             composable("lab-screen-agent") {

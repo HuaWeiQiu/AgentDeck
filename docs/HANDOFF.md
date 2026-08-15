@@ -13,8 +13,8 @@
    `origin/channel/secure` 与 `origin/channel/lab` 仍停在 beta.7，不应从这两个旧分支继续开发。
 2. beta.10 是当前源码版本。不要移动 beta.8 / beta.9 标签或替换其资产。
 3. 最新远端 Android CI 已全绿：发布基线、稳定性矩阵和 Artifact 上传均通过。
-4. 消费级完善与 Lab UI Agent 最小闭环已随 beta.10 源码发布。下一轮是 Runtime
-   体积拆分（按 CLI 下载，不把未来 DeepSeek/pi/Claude 塞进同一份 rootfs）。
+4. Runtime 体积拆分已开始：设置 → 运行环境按 CLI 列出，默认只准备 Codex 0.147.0；
+   DeepSeek / pi / Claude 显示即将支持且不占下载。删除 Codex 组件不删会话和人设。
    正式签名与去掉 `.debug` 包名仍待独立发布。
 5. app-server rollout 是聊天记录的唯一持久化事实源。任何性能优化都不得把消息正文双写到
    Room，也不得以窗口淘汰为由删除、裁剪或改写历史。

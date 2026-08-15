@@ -1,6 +1,6 @@
 # 计划：Runtime 与安装包体积拆分
 
-- 状态：下一轮主线，待实施
+- 状态：V1–V3 已落地（按 CLI 列出、Codex 版本选择位、可单独删除、DeepSeek/pi/Claude 占位不下载）。V4 真接入仍待各 CLI 单独立项
 - 适用版本：`0.2.0-beta.11` 起
 - 动机：现在一份 Ubuntu + Codex rootfs 就要约 116 MB 下载、安装后近 1.1 GB。后面若再塞 DeepSeek Harness、pi、Claude Code，不能继续「一次下全套」。
 

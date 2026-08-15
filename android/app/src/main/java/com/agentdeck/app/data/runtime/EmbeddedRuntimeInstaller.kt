@@ -109,6 +109,12 @@ internal class EmbeddedRuntimeInstaller(
         Result.failure(error)
     }
 
+    override fun uninstall(recipeId: String): Result<String> = runCatching {
+        require(recipeId == CODEX_RECIPE_ID) { "只能删除当前 Codex 运行环境" }
+        paths.removeCodexRuntime()
+        "已删除 Codex 运行环境，会话和人设还在"
+    }
+
     private fun verifyPackagedRuntime() {
         val required = listOf(paths.proot, paths.prootLoader, paths.packagedTalloc)
         require(required.all(File::isFile)) { "APK 缺少当前架构的 PRoot 运行组件" }

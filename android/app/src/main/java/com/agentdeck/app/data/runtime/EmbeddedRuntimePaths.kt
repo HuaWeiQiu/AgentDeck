@@ -97,6 +97,21 @@ internal class EmbeddedRuntimePaths(
         stagingMarker.writeText(runtimeMarkerContent(target))
     }
 
+    fun usedBytes(): Long = synchronized(HOST_LAYOUT_LOCK) {
+        sequenceOf(activeRootfs, stagingRootfs, cacheDir)
+            .filter { it.exists() }
+            .sumOf(::directorySize)
+    }
+
+    fun removeCodexRuntime() = synchronized(HOST_LAYOUT_LOCK) {
+        sequenceOf(activeRootfs, stagingRootfs).forEach { directory ->
+            if (directory.exists()) deleteTreeWithoutFollowingLinks(directory.toPath())
+        }
+        cacheDir.listFiles()?.forEach { file ->
+            if (file.isFile) file.delete() else deleteTreeWithoutFollowingLinks(file.toPath())
+        }
+    }
+
     fun removeObsoleteRuntimeRoots() = synchronized(HOST_LAYOUT_LOCK) {
         check(isReady()) { "新运行环境尚未验证，不能清理旧版本" }
         versionedRuntimeRoots()
@@ -179,6 +194,12 @@ internal class EmbeddedRuntimePaths(
         private val HOST_LAYOUT_LOCK = Any()
         private var sessionSnapshotsReconciled = false
     }
+}
+
+internal fun directorySize(root: File): Long {
+    if (!root.exists()) return 0L
+    if (root.isFile) return root.length()
+    return root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
 }
 
 internal fun deleteTreeWithoutFollowingLinks(root: java.nio.file.Path) {
