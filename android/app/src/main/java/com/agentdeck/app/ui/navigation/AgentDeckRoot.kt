@@ -29,6 +29,7 @@ import com.agentdeck.app.ui.sessions.SessionsScreen
 import com.agentdeck.app.ui.settings.SettingsScreen
 import com.agentdeck.app.ui.settings.BackupRestoreScreen
 import com.agentdeck.app.ui.settings.ConversationDefaultsScreen
+import com.agentdeck.app.ui.settings.LabScreenAgentScreen
 import com.agentdeck.app.ui.models.ModelsScreen
 import com.agentdeck.app.ui.extensions.ExtensionDetailScreen
 import com.agentdeck.app.ui.extensions.ExtensionsScreen
@@ -136,13 +137,20 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
                         navController.navigate("conversation-defaults")
                     },
                     onOpenBackup = { navController.navigate("backup") },
+                    onOpenLabScreenAgent = { navController.navigate("lab-screen-agent") },
                 )
+            }
+            composable("lab-screen-agent") {
+                LabScreenAgentScreen(onBack = navController::navigateUp)
             }
             composable("backup") {
                 BackupRestoreScreen(onBack = navController::navigateUp)
             }
             composable("conversation-defaults") {
-                ConversationDefaultsScreen(onBack = navController::navigateUp)
+                ConversationDefaultsScreen(
+                    onBack = navController::navigateUp,
+                    onOpenLabScreenAgent = { navController.navigate("lab-screen-agent") },
+                )
             }
             composable("models") {
                 ModelsScreen(onBack = navController::navigateUp)

@@ -61,6 +61,7 @@ fun SettingsScreen(
     onOpenCodexConfig: () -> Unit = {},
     onOpenConversationDefaults: () -> Unit = {},
     onOpenBackup: () -> Unit = {},
+    onOpenLabScreenAgent: () -> Unit = {},
     vm: SettingsViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -177,6 +178,7 @@ fun SettingsScreen(
 @Composable
 fun ConversationDefaultsScreen(
     onBack: () -> Unit,
+    onOpenLabScreenAgent: () -> Unit = {},
     vm: SettingsViewModel = viewModel(),
 ) {
     val experienceLevel by vm.experienceLevel.collectAsStateWithLifecycle()
@@ -408,16 +410,11 @@ fun ConversationDefaultsScreen(
                     )
                 }
                 item {
-                    ListItem(
-                        headlineContent = { Text("屏幕代理") },
-                        supportingContent = { Text("系统无障碍中开启 AgentDeck Lab") },
-                        trailingContent = {
-                            Switch(
-                                checked = labUi,
-                                onCheckedChange = vm::setLabUiEnabled,
-                                enabled = labRisk,
-                            )
-                        },
+                    SettingsDestination(
+                        title = "屏幕 Agent",
+                        summary = if (labUi) "已开启，需同时打开系统无障碍" else "默认关闭；只操作你允许的应用",
+                        icon = { Icon(Icons.Filled.Tune, contentDescription = null) },
+                        onClick = onOpenLabScreenAgent,
                     )
                 }
                 item {

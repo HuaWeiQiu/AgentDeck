@@ -34,10 +34,17 @@ enum class HostToolName(val wireName: String, val capability: HostCapability, va
     /** L2：系统分享文本 */
     INTENT_SHARE_TEXT("intent.share_text", HostCapability.SHARE_INTENT, isWrite = false),
 
-    /** L3：控件树/文本快照 */
+    UI_CURRENT_APP("ui.current_app", HostCapability.UI_AUTOMATION, isWrite = false),
     UI_SNAPSHOT("ui.snapshot", HostCapability.UI_AUTOMATION, isWrite = false),
-    /** L3：按可见文本点击 */
+    UI_CLICK("ui.click", HostCapability.UI_AUTOMATION, isWrite = true),
     UI_CLICK_TEXT("ui.click_text", HostCapability.UI_AUTOMATION, isWrite = true),
+    UI_SCROLL("ui.scroll", HostCapability.UI_AUTOMATION, isWrite = true),
+    UI_BACK("ui.back", HostCapability.UI_AUTOMATION, isWrite = true),
+    UI_HOME("ui.home", HostCapability.UI_AUTOMATION, isWrite = true),
+    UI_SET_TEXT("ui.set_text", HostCapability.UI_AUTOMATION, isWrite = true),
+    UI_WAIT_FOR("ui.wait_for", HostCapability.UI_AUTOMATION, isWrite = false),
+    UI_START("ui.start", HostCapability.UI_AUTOMATION, isWrite = false),
+    UI_STOP("ui.stop", HostCapability.UI_AUTOMATION, isWrite = false),
 
     /** L4：受限特权 shell（需 Lab 风险确认；完整 Shizuku 后续增强） */
     PRIV_SHELL("priv.shell", HostCapability.PRIVILEGED_SHELL, isWrite = true),

@@ -79,7 +79,13 @@ python3 - "$secure_arm64" "$secure_x86" "$lab_arm64" "$lab_x86" <<'PY'
 import sys
 import zipfile
 
-needles = (b"LabAccessibilityService", b"LabLocalMcpRuntimeAdapter")
+needles = (
+    b"LabAccessibilityService",
+    b"LabLocalMcpRuntimeAdapter",
+    b"LabUiAutomationHolder",
+    b"LabIntentExecutorImpl",
+    b"LabPrivilegedExecutorImpl",
+)
 
 
 def contains(apk: str, needle: bytes) -> bool:

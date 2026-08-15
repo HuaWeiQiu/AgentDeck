@@ -1,6 +1,6 @@
 # 计划：Lab 手机 UI Agent
 
-- 状态：已确定方案，待实施
+- 状态：U0–U4 最小闭环已落地（结构化快照、会话预算、敏感停手、节点动作、Lab 设置页）。U5 真机矩阵与 U6 坐标手势仍待做
 - 适用通道：仅 `lab`
 - 建议版本：聊天性能第二阶段完成后的独立 Lab 预发布
 - 参考实现：[Android Action Kernel](https://github.com/ethanjlimgit/android-action-kernel)

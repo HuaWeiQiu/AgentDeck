@@ -111,7 +111,7 @@ object ServiceLocator {
             },
             approval = hostApprovalGateway,
             intentExecutor = com.agentdeck.app.data.host.LabHostLoader.intentExecutor(app),
-            uiExecutor = com.agentdeck.app.data.host.LabHostLoader.uiExecutor(),
+            uiExecutor = { com.agentdeck.app.data.host.LabHostLoader.uiExecutor() },
             privExecutor = com.agentdeck.app.data.host.LabHostLoader.privExecutor(),
         )
     }

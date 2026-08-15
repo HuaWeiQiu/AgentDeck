@@ -18,6 +18,9 @@ import com.agentdeck.app.domain.host.LabUiAutomationExecutor
 import com.agentdeck.app.domain.host.NoOpLabIntentExecutor
 import com.agentdeck.app.domain.host.NoOpLabPrivilegedExecutor
 import com.agentdeck.app.domain.host.NoOpLabUiExecutor
+import com.agentdeck.app.domain.host.UiAutomationLimits
+import com.agentdeck.app.domain.host.UiAutomationSessionManager
+import com.agentdeck.app.domain.host.UiSnapshotCodec
 import com.agentdeck.app.domain.host.WorkspaceDocumentStore
 import com.agentdeck.app.domain.settings.ExperienceLevel
 import kotlinx.coroutines.sync.Mutex
@@ -31,10 +34,13 @@ class DefaultHostToolBroker(
     private val mirrorRoot: () -> java.io.File? = { null },
     private val approval: HostApprovalGateway = DenyAllHostApprovalGateway,
     private val intentExecutor: LabIntentExecutor = NoOpLabIntentExecutor,
-    private val uiExecutor: LabUiAutomationExecutor = NoOpLabUiExecutor,
+    private val uiExecutor: () -> LabUiAutomationExecutor = { NoOpLabUiExecutor },
     private val privExecutor: LabPrivilegedExecutor = NoOpLabPrivilegedExecutor,
     private val auth: HostAuthService = HostAuthService(),
     private val auditLog: InMemoryHostAuditLog = InMemoryHostAuditLog(),
+    private val uiSessions: UiAutomationSessionManager = UiAutomationSessionManager(
+        selfPackage = "com.agentdeck.app",
+    ),
 ) : HostToolBroker {
     private val mutex = Mutex()
 
@@ -259,19 +265,153 @@ class DefaultHostToolBroker(
             else -> HostToolResult.Error("host_exec_failed", "非 Intent 工具")
         }
 
-    private fun executeUi(tool: HostToolName, args: Map<String, String>): HostToolResult =
-        when (tool) {
-            HostToolName.UI_SNAPSHOT -> {
-                val max = args["max_chars"]?.toIntOrNull()?.coerceIn(256, 8_000) ?: 4_000
-                uiExecutor.snapshot(max)
+    private fun executeUi(tool: HostToolName, args: Map<String, String>): HostToolResult {
+        val executor = uiExecutor()
+        return when (tool) {
+            HostToolName.UI_START -> startUiSession(args)
+            HostToolName.UI_STOP -> {
+                uiSessions.stop()
+                HostToolResult.Ok(mapOf("stopped" to "true"))
             }
-            HostToolName.UI_CLICK_TEXT -> {
+            HostToolName.UI_CURRENT_APP -> {
+                uiSessions.current()
+                    ?: return HostToolResult.Denied("UI_SESSION_INACTIVE", "请先开始一次屏幕任务")
+                executor.currentApp().also { result ->
+                    if (result is HostToolResult.Ok) {
+                        val pkg = result.payload["package"].orEmpty()
+                        if (pkg.isNotBlank() && !uiSessions.packageAllowed(pkg)) {
+                            return HostToolResult.Denied("UI_PACKAGE_DENIED", "当前应用不在这次任务范围内")
+                        }
+                    }
+                }
+            }
+            HostToolName.UI_SNAPSHOT -> snapshotUi(executor, args)
+            HostToolName.UI_CLICK -> mutateUi(executor) {
+                val snapshotId = args["snapshot_id"].orEmpty()
+                val nodeId = args["node_id"].orEmpty()
+                if (uiSessions.requireSnapshotNode(snapshotId, nodeId) == null) {
+                    HostToolResult.Denied("STALE_SNAPSHOT", "界面已变化，请重新观察后再点")
+                } else {
+                    executor.click(snapshotId, nodeId)
+                }
+            }
+            HostToolName.UI_CLICK_TEXT -> mutateUi(executor) {
                 val text = args["text"]?.trim().orEmpty()
                 if (text.isEmpty()) HostToolResult.Denied("host_missing_text", "缺少 text")
-                else uiExecutor.clickText(text)
+                else executor.clickText(text)
+            }
+            HostToolName.UI_SCROLL -> mutateUi(executor) {
+                executor.scroll(
+                    args["direction"]?.trim().orEmpty().ifBlank { "down" },
+                    args["snapshot_id"],
+                    args["node_id"],
+                )
+            }
+            HostToolName.UI_BACK -> mutateUi(executor) { executor.back() }
+            HostToolName.UI_HOME -> mutateUi(executor) { executor.home() }
+            HostToolName.UI_SET_TEXT -> mutateUi(executor) {
+                val snapshotId = args["snapshot_id"].orEmpty()
+                val nodeId = args["node_id"].orEmpty()
+                val value = args["text"].orEmpty()
+                if (value.length > 256) {
+                    HostToolResult.Denied("host_text_too_long", "输入太长")
+                } else if (uiSessions.requireSnapshotNode(snapshotId, nodeId) == null) {
+                    HostToolResult.Denied("STALE_SNAPSHOT", "界面已变化，请重新观察后再输入")
+                } else {
+                    executor.setText(snapshotId, nodeId, value)
+                }
+            }
+            HostToolName.UI_WAIT_FOR -> {
+                uiSessions.current()
+                    ?: return HostToolResult.Denied("UI_SESSION_INACTIVE", "请先开始一次屏幕任务")
+                val timeout = args["timeout_ms"]?.toLongOrNull()?.coerceIn(200L, 5_000L) ?: 1_000L
+                executor.waitFor(args["package"], timeout)
             }
             else -> HostToolResult.Error("host_exec_failed", "非 UI 工具")
         }
+    }
+
+    private fun startUiSession(args: Map<String, String>): HostToolResult {
+        val conversationId = args["conversation_id"].orEmpty()
+        val instanceId = args["instance_id"].orEmpty()
+        val packages = args["packages"].orEmpty()
+            .split(',', ' ')
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toSet()
+        if (conversationId.isBlank() || instanceId.isBlank()) {
+            return HostToolResult.Denied("host_missing_session", "缺少对话信息")
+        }
+        if (packages.isEmpty()) {
+            return HostToolResult.Denied("host_missing_packages", "请先选择允许操作的应用")
+        }
+        return runCatching {
+            val grant = uiSessions.start(
+                conversationId = conversationId,
+                instanceId = instanceId,
+                allowedPackages = packages,
+                steps = args["steps"]?.toIntOrNull() ?: UiAutomationLimits.DEFAULT_STEPS,
+            )
+            HostToolResult.Ok(
+                mapOf(
+                    "remainingSteps" to grant.remainingSteps.toString(),
+                    "expiresAtEpochMs" to grant.expiresAtEpochMs.toString(),
+                    "packages" to grant.allowedPackages.joinToString(","),
+                ),
+            )
+        }.getOrElse { error ->
+            HostToolResult.Denied("UI_SESSION_DENIED", error.message ?: "无法开始屏幕任务")
+        }
+    }
+
+    private fun snapshotUi(
+        executor: LabUiAutomationExecutor,
+        args: Map<String, String>,
+    ): HostToolResult {
+        val grant = uiSessions.current()
+            ?: return HostToolResult.Denied("UI_SESSION_INACTIVE", "请先开始一次屏幕任务")
+        if (uiSessions.noProgress()) {
+            uiSessions.stop()
+            return HostToolResult.Denied("NO_PROGRESS", "界面没有变化，已停止自动操作")
+        }
+        val max = args["max_chars"]?.toIntOrNull()?.coerceIn(256, UiAutomationLimits.MAX_JSON_CHARS)
+            ?: 8_000
+        val snapshotId = "snap-" + System.currentTimeMillis().toString(16)
+        val result = executor.snapshot(max, grant.sessionNonce, snapshotId)
+        if (result is HostToolResult.Ok) {
+            val pkg = result.payload["package"].orEmpty()
+            if (pkg.isNotBlank() && !uiSessions.packageAllowed(pkg)) {
+                return HostToolResult.Denied("UI_PACKAGE_DENIED", "当前应用不在这次任务范围内")
+            }
+            if (result.payload["sensitive"] == "true") {
+                uiSessions.stop()
+                return HostToolResult.Denied("SENSITIVE_SCREEN", "这是敏感页面，请你在手机上亲自完成")
+            }
+            result.payload["snapshot"]?.let(UiSnapshotCodec::fromJson)?.let(uiSessions::rememberSnapshot)
+        }
+        return result
+    }
+
+    private fun mutateUi(
+        executor: LabUiAutomationExecutor,
+        block: () -> HostToolResult,
+    ): HostToolResult {
+        uiSessions.consumeStep()?.let { return it }
+        val result = block()
+        if (result is HostToolResult.Ok) {
+            currentSnapshotAfterMutation(executor)
+        }
+        return result
+    }
+
+    private fun currentSnapshotAfterMutation(executor: LabUiAutomationExecutor) {
+        val grant = uiSessions.current() ?: return
+        val snapshotId = "snap-" + System.currentTimeMillis().toString(16)
+        val result = executor.snapshot(4_000, grant.sessionNonce, snapshotId)
+        if (result is HostToolResult.Ok) {
+            result.payload["snapshot"]?.let(UiSnapshotCodec::fromJson)?.let(uiSessions::rememberSnapshot)
+        }
+    }
 
     private fun executePriv(tool: HostToolName, args: Map<String, String>): HostToolResult =
         when (tool) {
@@ -290,8 +430,12 @@ class DefaultHostToolBroker(
             HostToolName.WORKSPACE_MKDIR -> "在真实工作区创建目录 $path"
             HostToolName.WORKSPACE_REMOVE -> "删除真实工作区文件 $path"
             HostToolName.WORKSPACE_PUSH -> "推送镜像文件到真实目录 $path"
-            HostToolName.UI_CLICK_TEXT -> "点击界面文本「${args["text"]?.take(40)}」"
-            HostToolName.PRIV_SHELL -> "执行特权命令：${args["command"]?.take(80)}"
+            HostToolName.UI_CLICK, HostToolName.UI_CLICK_TEXT -> "点击界面控件"
+            HostToolName.UI_SCROLL -> "滚动当前界面"
+            HostToolName.UI_BACK -> "返回上一页"
+            HostToolName.UI_HOME -> "回到桌面"
+            HostToolName.UI_SET_TEXT -> "在输入框填写文字"
+            HostToolName.PRIV_SHELL -> "执行特权命令"
             else -> tool.wireName
         }
     }
