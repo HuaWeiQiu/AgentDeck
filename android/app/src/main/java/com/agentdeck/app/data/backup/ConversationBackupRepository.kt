@@ -52,12 +52,30 @@ internal class ConversationBackupRepository(
                 output.write(text.toByteArray(Charsets.UTF_8))
             } ?: error("无法写入备份文件")
         }
+        writeLocalCopy(text)
         preferences.edit { putLong(LAST_EXPORT_KEY, document.exportedAtEpochMs) }
         return previewOf(document)
     }
 
+    suspend fun importLocalCopy(): ConversationBackupPreview {
+        val text = withContext(Dispatchers.IO) {
+            val file = localCopyFile()
+            if (!file.isFile) error("还没有本机备份，请先导出一次")
+            file.readText(Charsets.UTF_8)
+        }
+        return applyDocument(ConversationBackupCodec.decode(text))
+    }
+
+    fun hasLocalCopy(): Boolean = localCopyFile().isFile
+
     suspend fun importFrom(context: Context, uri: Uri): ConversationBackupPreview {
-        val document = readDocument(context, uri)
+        return applyDocument(readDocument(context, uri))
+    }
+
+    fun lastExportAtEpochMs(): Long? =
+        preferences.getLong(LAST_EXPORT_KEY, 0L).takeIf { it > 0L }
+
+    private suspend fun applyDocument(document: ConversationBackupDocument): ConversationBackupPreview {
         val existing = cards.observeCards().first().associateBy { it.id }
         val knownExtensions = extensions.getAll().map { it.id }.toSet()
         document.conversations.forEach { item ->
@@ -68,8 +86,11 @@ internal class ConversationBackupRepository(
         return previewOf(document)
     }
 
-    fun lastExportAtEpochMs(): Long? =
-        preferences.getLong(LAST_EXPORT_KEY, 0L).takeIf { it > 0L }
+    private fun localCopyFile(): java.io.File = java.io.File(app.filesDir, LOCAL_COPY_NAME)
+
+    private fun writeLocalCopy(text: String) {
+        localCopyFile().writeText(text, Charsets.UTF_8)
+    }
 
     private suspend fun readDocument(context: Context, uri: Uri): ConversationBackupDocument {
         val text = withContext(Dispatchers.IO) {
@@ -89,5 +110,6 @@ internal class ConversationBackupRepository(
     companion object {
         private const val PREFERENCES_NAME = "agentdeck_backup"
         private const val LAST_EXPORT_KEY = "conversation_backup_exported_at"
+        private const val LOCAL_COPY_NAME = "conversation-backup.latest.json"
     }
 }

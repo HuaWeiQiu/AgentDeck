@@ -130,6 +130,16 @@ class SettingsViewModel : ViewModel() {
         setup.scan(force = true)
     }
 
+    fun importLocalBackup(onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            val message = runCatching {
+                val preview = backup.importLocalCopy()
+                "已从本机备份恢复 " + preview.conversationCount + " 个会话（其中 " + preview.identityCount + " 个人设）"
+            }.getOrElse { error -> "恢复失败：" + (error.message ?: "未知错误") }
+            onDone(message)
+        }
+    }
+
     fun importConversations(context: Context, uri: Uri, onDone: (String) -> Unit) {
         viewModelScope.launch {
             val message = runCatching {

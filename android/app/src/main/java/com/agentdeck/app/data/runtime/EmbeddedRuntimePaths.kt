@@ -17,15 +17,19 @@ internal class EmbeddedRuntimePaths(
     private val releaseId = runtimeTarget?.releaseId ?: "unsupported"
 
     val root = File(app.noBackupFilesDir, "agentdeck-runtime")
-    val activeRootfs = File(root, "rootfs-$releaseId")
-    val stagingRootfs = File(root, ".rootfs-$releaseId.staging")
+    val cliRoot = File(root, "runtimes/codex")
+    val activeRootfs = File(cliRoot, "rootfs-$releaseId")
+    val stagingRootfs = File(cliRoot, ".rootfs-$releaseId.staging")
     val stateDir = File(root, "state")
     val tempDir = File(root, "tmp")
     val codexHome = File(root, "codex-home")
     val projectsHome = File(root, "projects")
     val extensionPackages = File(root, "extensions/packages")
     val extensionSessionSnapshots = File(root, "extensions/sessions")
-    val cacheDir = File(app.cacheDir, "agentdeck-runtime-downloads")
+    val cacheDir = File(cliRoot, "downloads")
+    private val legacyActiveRootfs = File(root, "rootfs-$releaseId")
+    private val legacyStagingRootfs = File(root, ".rootfs-$releaseId.staging")
+    private val legacyCacheDir = File(app.cacheDir, "agentdeck-runtime-downloads")
     val marker = File(activeRootfs, ".agentdeck-runtime")
     val stagingMarker = File(stagingRootfs, ".agentdeck-runtime")
 
@@ -36,8 +40,10 @@ internal class EmbeddedRuntimePaths(
     val runtimeTalloc = File(root, "libtalloc.so.2")
 
     fun ensureHostLayout() = synchronized(HOST_LAYOUT_LOCK) {
+        migrateCliLayout()
         listOf(
             root,
+            cliRoot,
             stateDir,
             tempDir,
             codexHome,
@@ -88,6 +94,7 @@ internal class EmbeddedRuntimePaths(
 
     fun isReady(): Boolean {
         val target = runtimeTarget ?: return false
+        migrateCliLayout()
         if (!marker.isFile || !File(activeRootfs, "usr/local/bin/codex").canExecute()) return false
         return runtimeMarkerMatches(marker.readText(), target)
     }
@@ -98,9 +105,36 @@ internal class EmbeddedRuntimePaths(
     }
 
     fun usedBytes(): Long = synchronized(HOST_LAYOUT_LOCK) {
+        migrateCliLayout()
         sequenceOf(activeRootfs, stagingRootfs, cacheDir)
             .filter { it.exists() }
             .sumOf(::directorySize)
+    }
+
+    private fun migrateCliLayout() {
+        if (!cliRoot.exists()) {
+            check(cliRoot.mkdirs() || cliRoot.isDirectory) { "无法创建 Codex 运行目录" }
+        }
+        moveIfNeeded(legacyActiveRootfs, activeRootfs)
+        moveIfNeeded(legacyStagingRootfs, stagingRootfs)
+        if (legacyCacheDir.isDirectory) {
+            cacheDir.mkdirs()
+            legacyCacheDir.listFiles().orEmpty().forEach { file ->
+                val target = File(cacheDir, file.name)
+                if (!target.exists() && !file.renameTo(target)) {
+                    file.copyRecursively(target, overwrite = false)
+                }
+            }
+        }
+    }
+
+    private fun moveIfNeeded(source: File, destination: File) {
+        if (!source.exists() || destination.exists()) return
+        destination.parentFile?.mkdirs()
+        if (!source.renameTo(destination)) {
+            source.copyRecursively(destination, overwrite = false)
+            deleteTreeWithoutFollowingLinks(source.toPath())
+        }
     }
 
     fun removeCodexRuntime() = synchronized(HOST_LAYOUT_LOCK) {
@@ -110,6 +144,9 @@ internal class EmbeddedRuntimePaths(
         cacheDir.listFiles()?.forEach { file ->
             if (file.isFile) file.delete() else deleteTreeWithoutFollowingLinks(file.toPath())
         }
+        if (legacyCacheDir.exists()) deleteTreeWithoutFollowingLinks(legacyCacheDir.toPath())
+        if (legacyActiveRootfs.exists()) deleteTreeWithoutFollowingLinks(legacyActiveRootfs.toPath())
+        if (legacyStagingRootfs.exists()) deleteTreeWithoutFollowingLinks(legacyStagingRootfs.toPath())
     }
 
     fun removeObsoleteRuntimeRoots() = synchronized(HOST_LAYOUT_LOCK) {
@@ -170,7 +207,11 @@ internal class EmbeddedRuntimePaths(
 
     private fun versionedRuntimeRoots(): List<File> {
         val current = activeRootfs.takeIf(::isVersionedRuntimeRoot)
-        val others = root.listFiles().orEmpty()
+        val candidates = buildList {
+            root.listFiles()?.let { addAll(it) }
+            cliRoot.listFiles()?.let { addAll(it) }
+        }
+        val others = candidates
             .asSequence()
             .filter(::isVersionedRuntimeRoot)
             .filterNot { it.absolutePath == activeRootfs.absolutePath }
@@ -180,7 +221,8 @@ internal class EmbeddedRuntimePaths(
     }
 
     private fun isVersionedRuntimeRoot(candidate: File): Boolean {
-        if (candidate.parentFile?.absolutePath != root.absolutePath) return false
+        val parent = candidate.parentFile?.absolutePath
+        if (parent != root.absolutePath && parent != cliRoot.absolutePath) return false
         if (!candidate.name.matches(Regex("rootfs-[A-Za-z0-9._-]{1,160}"))) return false
         if (!Files.isDirectory(candidate.toPath(), LinkOption.NOFOLLOW_LINKS)) return false
         return Files.isRegularFile(

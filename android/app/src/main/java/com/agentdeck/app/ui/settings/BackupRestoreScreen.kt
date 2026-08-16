@@ -91,7 +91,17 @@ fun BackupRestoreScreen(
             }
             Spacer(Modifier.height(AppSpacing.sm))
             OutlinedButton(onClick = { openDocument.launch(arrayOf("application/json", "*/*")) }) {
-                Text("从备份恢复")
+                Text("从文件恢复")
+            }
+            Spacer(Modifier.height(AppSpacing.sm))
+            OutlinedButton(
+                onClick = {
+                    vm.importLocalBackup { result ->
+                        Toast.makeText(context, result, Toast.LENGTH_LONG).show()
+                    }
+                },
+            ) {
+                Text("恢复本机备份")
             }
             Spacer(Modifier.height(AppSpacing.md))
             Text(
