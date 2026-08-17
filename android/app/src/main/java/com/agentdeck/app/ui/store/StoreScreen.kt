@@ -41,6 +41,7 @@ import com.agentdeck.app.ui.setup.customerSetupPresentation
 import com.agentdeck.app.ui.setup.customerSetupSteps
 import com.agentdeck.app.ui.setup.SetupStepList
 import com.agentdeck.app.ui.setup.setupInstallProgressPresentation
+import com.agentdeck.app.ui.theme.AgentDeckTopBar
 import com.agentdeck.app.ui.theme.AppSpacing
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,8 +60,8 @@ fun SetupScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("准备 AgentDeck") },
+            AgentDeckTopBar(
+                title = "准备 AgentDeck",
                 navigationIcon = {
                     onBack?.let { navigateBack ->
                         IconButton(onClick = navigateBack) {

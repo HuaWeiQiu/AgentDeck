@@ -41,7 +41,7 @@ cd android
 | 项目 | 安全版 Secure | Lab 实验版 |
 |---|---|---|
 | applicationId（beta） | `com.agentdeck.app.debug` | `com.agentdeck.app.lab.debug` |
-| 版本 | `0.2.0-beta.10`（`versionCode=15`） | `0.2.0-beta.10-lab` |
+| 版本 | `0.2.0-beta.11`（`versionCode=16`） | `0.2.0-beta.11-lab` |
 | ARM64 APK | `app/build/outputs/apk/secure/beta/app-secure-arm64-v8a-beta.apk` | `app/build/outputs/apk/lab/beta/app-lab-arm64-v8a-beta.apk` |
 | Lint | `app/build/reports/lint-results-secureBeta.html` | `app/build/reports/lint-results-labBeta.html` |
 

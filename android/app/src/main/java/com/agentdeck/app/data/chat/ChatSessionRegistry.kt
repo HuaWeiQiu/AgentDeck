@@ -278,6 +278,10 @@ object ChatSessionRegistry {
                 }
 
                 "item/completed" -> event.params.optJSONObject("item")?.let { item ->
+                    // Cap offline buffer: reattach only needs a bounded tail.
+                    if (session.bufferedItems.size >= MAX_BUFFERED_ITEMS) {
+                        session.bufferedItems.removeAt(0)
+                    }
                     session.bufferedItems.add(item)
                 }
 
@@ -289,7 +293,12 @@ object ChatSessionRegistry {
                     session.pendingUserInput = null
                     session.pendingUserInputs.clear()
                     session.pendingRequests.clear()
-                    event.params.optJSONObject("turn")?.let(session.bufferedTurns::add)
+                    event.params.optJSONObject("turn")?.let { turn ->
+                        if (session.bufferedTurns.size >= MAX_BUFFERED_TURNS) {
+                            session.bufferedTurns.removeAt(0)
+                        }
+                        session.bufferedTurns.add(turn)
+                    }
                     runCatching { ServiceLocator.cards.touchActivity(session.cardId) }
                     postNotification(
                         cardId = session.cardId,
@@ -309,7 +318,12 @@ object ChatSessionRegistry {
                     session.pendingUserInput = null
                     session.pendingUserInputs.clear()
                     session.pendingRequests.clear()
-                    event.params.optJSONObject("turn")?.let(session.bufferedTurns::add)
+                    event.params.optJSONObject("turn")?.let { turn ->
+                        if (session.bufferedTurns.size >= MAX_BUFFERED_TURNS) {
+                            session.bufferedTurns.removeAt(0)
+                        }
+                        session.bufferedTurns.add(turn)
+                    }
                     runCatching { ServiceLocator.cards.touchActivity(session.cardId) }
                     postNotification(
                         cardId = session.cardId,
@@ -566,10 +580,16 @@ object ChatSessionRegistry {
 
     private const val CHANNEL_ID = "agentdeck_chat_events"
     private const val NOTIFICATION_ID_BASE = 5_000
-    private const val IDLE_TEARDOWN_DELAY_MILLIS = 30_000L
+    // Warm keep-alive while App process lives: long idle before optional teardown.
+    // System memory pressure still calls releaseAllIdleSessions() immediately.
+    private const val IDLE_TEARDOWN_DELAY_MILLIS = 30 * 60_000L
     private const val EVENT_HANDOFF_TIMEOUT_MILLIS = 10_000L
     internal const val MAX_PENDING_SERVER_REQUESTS = 8
-    internal const val MAX_IDLE_HELD_SESSIONS = 2
+    /** Several warm Codex bridges OK for fast switch; pressure path still reclaims all. */
+    internal const val MAX_IDLE_HELD_SESSIONS = 3
+    /** Offline item/turn buffers for reattach — drop oldest beyond these. */
+    private const val MAX_BUFFERED_ITEMS = 80
+    private const val MAX_BUFFERED_TURNS = 4
 }
 
 internal data class IdleSessionSnapshot(

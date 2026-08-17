@@ -1,9 +1,14 @@
 schema_version: 1
 id: recipe_deepseek_harness
 name: DeepSeek Harness
-description: DeepSeek Harness 按需安装尚未开放；不会随首次准备下载。
+description: >
+  DeepSeek Harness (dsh) 是本机 Web UI（官方 dsh web → 127.0.0.1），
+  不是 Codex 原生聊天。可在「新建会话」里选 Agent；安装仍由设置 → 运行环境
+  的 DshRuntimeInstaller 完成（Node + npm），不走通用 RecipeInstaller，故
+  available 保持 false（避免要求 install/verify 脚本）。
+  须先准备 Codex。密钥在 dsh-home，不要写进 Codex config.toml。
 priority: p1
-version: planned
+version: "0.1.0-rc.6"
 available: false
 depends_on: []
-timeout_minutes: 10
+timeout_minutes: 30

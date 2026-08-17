@@ -72,8 +72,9 @@ class ChatRecoveryTest {
     }
 
     @Test
-    fun `only active or waiting conversations stay alive in background`() {
-        assertFalse(shouldKeepSessionInBackground(ChatUiState(isConnected = true)))
+    fun `healthy connected conversations stay warm in background`() {
+        // Idle but connected — warm keep-alive for fast re-open.
+        assertTrue(shouldKeepSessionInBackground(ChatUiState(isConnected = true)))
         assertTrue(
             shouldKeepSessionInBackground(
                 ChatUiState(isConnected = true, isStreaming = true),
@@ -102,6 +103,7 @@ class ChatRecoveryTest {
                 ),
             ),
         )
+        assertFalse(shouldKeepSessionInBackground(ChatUiState(isConnected = false)))
         assertFalse(
             hasActiveSessionWork(
                 ChatUiState(

@@ -53,15 +53,35 @@ data class CodexAccountUiState(
 )
 
 internal fun ProviderEditorDraft.selectAdapter(adapterId: ProviderAdapterId): ProviderEditorDraft {
-    val defaultNames = setOf("Sub2API", "Responses 服务")
+    val defaultNames = setOf("Sub2API", "Responses 服务", "Chat Completions", "小红书 dots")
     val nextName = if (id == null && (name.isBlank() || name in defaultNames)) {
-        if (adapterId == ProviderAdapterId.SUB2API) "Sub2API" else "Responses 服务"
+        when (adapterId) {
+            ProviderAdapterId.SUB2API -> "Sub2API"
+            ProviderAdapterId.OPENAI_CHAT_COMPLETIONS -> "Chat Completions"
+            else -> "Responses 服务"
+        }
     } else {
         name
+    }
+    val nextBase = if (id == null && adapterId == ProviderAdapterId.OPENAI_CHAT_COMPLETIONS &&
+        (baseUrl.isBlank() || baseUrl.contains("sub2api", ignoreCase = true))
+    ) {
+        "https://note3-prev-api.askdiandian.com/v1"
+    } else {
+        baseUrl
+    }
+    val nextModel = if (id == null && adapterId == ProviderAdapterId.OPENAI_CHAT_COMPLETIONS &&
+        model.isBlank()
+    ) {
+        "dots3-note-prev"
+    } else {
+        model
     }
     return copy(
         name = nextName,
         adapterId = adapterId,
+        baseUrl = nextBase,
+        model = nextModel,
         validated = false,
         models = emptyList(),
         error = null,

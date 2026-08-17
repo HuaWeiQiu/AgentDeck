@@ -167,10 +167,14 @@ internal class TimelinePageProjection {
     }
 }
 
+/**
+ * Markdown AST cache budget. Tuned for phones that also host PRoot + Node:
+ * keep the visible window crisp without retaining multi-page ASTs.
+ */
 internal fun markdownBudgetBytes(memoryClassMb: Int): Int = when {
-    memoryClassMb <= 128 -> 8 * 1024 * 1024
-    memoryClassMb >= 384 -> 24 * 1024 * 1024
-    else -> 12 * 1024 * 1024
+    memoryClassMb <= 128 -> 4 * 1024 * 1024
+    memoryClassMb >= 384 -> 12 * 1024 * 1024
+    else -> 8 * 1024 * 1024
 }
 
 internal fun markdownMemoryClassMb(): Int = try {

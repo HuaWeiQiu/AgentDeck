@@ -42,8 +42,9 @@ class OkHttpProviderModelDiscovery(
     ): List<ProviderModel> = withContext(Dispatchers.IO) {
         require(
             profile.adapterId == ProviderAdapterId.SUB2API ||
-                profile.adapterId == ProviderAdapterId.OPENAI_RESPONSES,
-        ) { "该 Provider 不支持 Codex 模型发现" }
+                profile.adapterId == ProviderAdapterId.OPENAI_RESPONSES ||
+                profile.adapterId == ProviderAdapterId.OPENAI_CHAT_COMPLETIONS,
+        ) { "该 Provider 不支持模型发现" }
         validateApiKey(apiKey)
         val endpoint = ProviderEndpointNormalizer.normalize(profile.baseUrl).getOrElse { error ->
             throw ProviderDiscoveryException(
@@ -218,6 +219,7 @@ class OkHttpProviderModelDiscovery(
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .callTimeout(30, TimeUnit.SECONDS)
+            .connectionPool(okhttp3.ConnectionPool(2, 30, TimeUnit.SECONDS))
             .build()
     }
 }

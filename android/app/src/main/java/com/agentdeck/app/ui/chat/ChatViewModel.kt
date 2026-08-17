@@ -88,8 +88,7 @@ class ChatViewModel(
     private val streamingCoalescer = StreamingDeltaCoalescer(STREAM_FLUSH_INTERVAL_MS)
     private var streamingFlushJob: Job? = null
 
-    private val markdownParser = ChatMarkdownParser()
-    private val markdownCache = ChatMarkdownCache.forMemoryClass(markdownMemoryClassMb())
+    private val markdownCache get() = SharedChatMarkdown.cache()
     private val markdownParseDispatcher = Dispatchers.Default.limitedParallelism(1)
     private val markdownParseJobs = mutableMapOf<String, Job>()
     private val markdownParseContents = mutableMapOf<String, String>()
@@ -162,7 +161,7 @@ class ChatViewModel(
         markdownParseJobs[messageId] = viewModelScope.launch {
             try {
                 val document = withContext(markdownParseDispatcher) {
-                    markdownParser.parse(messageId, content)
+                    SharedChatMarkdown.parse(messageId, content)
                 }
                 if (markdownParseContents[messageId] == content) {
                     mutableMarkdownDocuments.value = markdownCache.put(document)
@@ -264,7 +263,7 @@ class ChatViewModel(
         }.takeLast(INITIAL_MARKDOWN_PREPARSE_COUNT)
         if (candidates.isEmpty()) return
         val documents = withContext(markdownParseDispatcher) {
-            candidates.map { item -> markdownParser.parse(item.id, item.text) }
+            candidates.map { item -> SharedChatMarkdown.parse(item.id, item.text) }
         }
         documents.forEach(markdownCache::put)
         mutableMarkdownDocuments.value = markdownCache.snapshot()
@@ -314,6 +313,8 @@ class ChatViewModel(
                 reattach(held)
                 return@launch
             }
+            // Warm keep-alive: track foreground; do not kill pi/dsh.
+            com.agentdeck.app.data.runtime.NativeRuntimeBudget.onCodexForeground()
             disconnectServer()
             mutableState.update {
                 it.copy(
@@ -333,9 +334,13 @@ class ChatViewModel(
                 mutableState.update {
                     it.copy(card = card, runtimeModel = card.modelId ?: it.runtimeModel)
                 }
-                transcriptRepository.showPreview(
-                    ChatTranscriptPreviewCache.get(cardId, card.profileId, card.modelId),
-                )
+                val memPreview = ChatTranscriptPreviewCache.get(cardId, card.profileId, card.modelId)
+                val preview = memPreview.ifEmpty {
+                    withContext(Dispatchers.IO) {
+                        ServiceLocator.diskTranscriptPreview.get(cardId, card.profileId, card.modelId)
+                    }
+                }
+                transcriptRepository.showPreview(preview)
                 // Card/profile validation and bridge launch do file and process work;
                 // keep them off the main thread.
                 val (managedRuntime, endpoint, modelOptions, providerLabel, extensionPlan) = withContext(Dispatchers.IO) {
@@ -1043,9 +1048,13 @@ class ChatViewModel(
             mutableState.update {
                 it.copy(card = card, runtimeModel = card.modelId ?: it.runtimeModel)
             }
-            transcriptRepository.showPreview(
-                ChatTranscriptPreviewCache.get(cardId, card.profileId, card.modelId),
-            )
+            val memPreview = ChatTranscriptPreviewCache.get(cardId, card.profileId, card.modelId)
+            val preview = memPreview.ifEmpty {
+                withContext(Dispatchers.IO) {
+                    ServiceLocator.diskTranscriptPreview.get(cardId, card.profileId, card.modelId)
+                }
+            }
+            transcriptRepository.showPreview(preview)
             bindHostWorkspaceSession(held.endpoint.instanceKey)
 
             // The registry intentionally does not retain a second copy of transcript
@@ -1551,12 +1560,23 @@ class ChatViewModel(
         markdownParseJobs.clear()
         markdownParseContents.clear()
         state.value.card?.let { card ->
+            val snap = transcriptRepository.state.value
             ChatTranscriptPreviewCache.put(
                 cardId,
                 card.profileId,
                 card.modelId,
-                transcriptRepository.state.value,
+                snap,
             )
+            // Disk copy for force-stop / process death (non-authoritative).
+            val profileId = card.profileId
+            val modelId = card.modelId
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                try {
+                    ServiceLocator.diskTranscriptPreview.put(cardId, profileId, modelId, snap)
+                } finally {
+                    cancel()
+                }
+            }
         }
         deletePendingAttachments(state.value.attachments)
         holdOrDisconnect()
@@ -1576,8 +1596,8 @@ class ChatViewModel(
     }
 
     /**
-     * Leaving the screen hands a healthy session to [ChatSessionRegistry] so the turn
-     * keeps running in the background; anything unhealthy is torn down instead.
+     * Leaving the screen hands a healthy session to [ChatSessionRegistry] so re-open
+     * is warm (and in-flight turns keep running). Unhealthy sessions tear down.
      */
     private fun holdOrDisconnect() {
         val rpc = client
@@ -1589,7 +1609,6 @@ class ChatViewModel(
                 hasServerResponseInFlight = serverResponsesInFlight.isNotEmpty(),
             ) &&
             rpc != null && currentThread != null && currentEndpoint != null &&
-            state.value.isConnected &&
             ChatSessionRegistry.hold(
                 cardId = cardId,
                 cardName = state.value.card?.name ?: "Codex",
@@ -1789,12 +1808,18 @@ private data class MarkdownWindow(
     val streamingItemId: String?,
 )
 
+/**
+ * Warm keep-alive: any healthy connected Codex session stays held while the App
+ * process lives, so re-entering chat is fast. Only in-flight host-write approvals
+ * or unresolved server responses force a teardown (unsafe to background).
+ * System memory pressure still calls [ChatSessionRegistry.releaseAllIdleSessions].
+ */
 internal fun shouldKeepSessionInBackground(
     state: ChatUiState,
     hasServerResponseInFlight: Boolean = false,
-): Boolean = !hasServerResponseInFlight &&
-    state.hostWriteApproval == null &&
-    (hasActiveSessionWork(state) || state.queued != null)
+): Boolean = state.isConnected &&
+    !hasServerResponseInFlight &&
+    state.hostWriteApproval == null
 
 internal fun hasActiveSessionWork(state: ChatUiState): Boolean =
     state.isStreaming ||

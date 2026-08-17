@@ -16,10 +16,13 @@ import com.agentdeck.app.domain.extensions.ManagedExtension
 import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.RecipeSummary
-import com.agentdeck.app.domain.model.ProviderAdapterId
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
 import com.agentdeck.app.domain.model.ProviderModel
 import com.agentdeck.app.domain.model.ProviderProfile
+import com.agentdeck.app.domain.model.isChatCompletionsCompatible
+import com.agentdeck.app.domain.model.isCodexResponsesCompatible
+import com.agentdeck.app.domain.settings.ConversationMode
+import com.agentdeck.app.domain.settings.ConversationModePolicy
 import com.agentdeck.app.domain.settings.ExperienceLevel
 import com.agentdeck.app.domain.setup.SetupState
 import kotlinx.coroutines.Dispatchers
@@ -90,9 +93,13 @@ class SessionsViewModel : ViewModel() {
     private val searchQueryInput = MutableStateFlow("")
 
     val recipes: List<RecipeSummary> = recipesRepo.loadRecipes().map { it.summary }
-    val availableAdapters: List<CliAdapterDescriptor> = recipes
-        .filter { it.available }
-        .mapNotNull { adapters.forRecipe(it.id)?.descriptor }
+    /**
+     * Session-create CLI list: Codex / dsh / pi.
+     * Install readiness is separate (runtime inventory); recipes may stay
+     * `available: false` so RecipeInstaller does not own dsh/pi installs.
+     */
+    private val allSessionAdapters: List<CliAdapterDescriptor> =
+        CliAdapterRegistry.SESSION_RECIPE_ORDER.mapNotNull { adapters.forRecipe(it)?.descriptor }
 
     private val mutableCardsHydrated = MutableStateFlow(false)
 
@@ -116,9 +123,22 @@ class SessionsViewModel : ViewModel() {
         ServiceLocator.onboarding.markLocalDataNoticeSeen()
         localDataNoticeState.value = false
     }
+    val conversationMode: StateFlow<ConversationMode> =
+        ServiceLocator.experienceSettings.conversationMode
     val experienceLevel: StateFlow<ExperienceLevel> = ServiceLocator.experienceSettings.level
     val defaultPermissionLevel: StateFlow<CodexPermissionLevel> =
         ServiceLocator.experienceSettings.codexPermissionLevel
+
+    /** 对话顶栏从模式菜单选择；枚举可扩展，不依赖两两互切。 */
+    fun setConversationMode(mode: ConversationMode) {
+        ServiceLocator.experienceSettings.setConversationMode(mode)
+    }
+
+    /** Adapters allowed when creating a session under the current global mode. */
+    val availableAdapters: StateFlow<List<CliAdapterDescriptor>> =
+        conversationMode.map { mode ->
+            ConversationModePolicy.adaptersForMode(mode, allSessionAdapters)
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val profiles: StateFlow<List<ProviderProfile>> = ServiceLocator.profiles.observeProfiles()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -153,11 +173,22 @@ class SessionsViewModel : ViewModel() {
                 }
                 val displayTitle = card.customTitle ?: card.name
                 val modelDisplayName = model?.displayName ?: card.modelId
-                val runtimeName = card.profileId?.let {
-                    listOfNotNull(profile?.name, modelDisplayName)
-                        .joinToString(" · ")
-                        .ifBlank { "模型服务不可用" }
-                } ?: "当前 Codex 配置"
+                val runtimeName = when {
+                    CliAdapterRegistry.usesLightChat(card.recipeId) && card.profileId == null ->
+                        "轻聊 · 请绑定 Chat Completions"
+                    CliAdapterRegistry.usesLightChat(card.recipeId) ->
+                        listOfNotNull("轻聊 · 无本地 runtime", profile?.name, modelDisplayName)
+                            .joinToString(" · ")
+                    CliAdapterRegistry.usesExternalAgentUi(card.recipeId) ->
+                        "本机网页 · chat 网关在 dsh 内配置"
+                    CliAdapterRegistry.usesPiNativeChat(card.recipeId) && card.profileId == null ->
+                        "请绑定 Chat Completions 模型服务"
+                    card.profileId != null ->
+                        listOfNotNull(profile?.name, modelDisplayName)
+                            .joinToString(" · ")
+                            .ifBlank { "模型服务不可用" }
+                    else -> "当前 Codex 配置"
+                }
                 SessionCardUi(
                     card = card,
                     recipeAvailable = isRecipeAvailable(card.recipeId),
@@ -184,8 +215,15 @@ class SessionsViewModel : ViewModel() {
             filterAndSortSessions(items, query)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    fun newDraft(): CardDraft? = availableAdapters.firstOrNull()?.let { descriptor ->
-        CardDraft(
+    /** 仅当前全局模式的会话（再按搜索过滤）。另一模式会话不出现在列表。 */
+    val primaryVisibleItems: StateFlow<List<SessionCardUi>> =
+        combine(visibleItems, conversationMode) { items, mode ->
+            items.filter { ConversationModePolicy.cardMatchesMode(it.card, mode) }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun newDraft(): CardDraft? {
+        val descriptor = availableAdapters.value.firstOrNull() ?: return null
+        return CardDraft(
             id = null,
             name = descriptor.displayName,
             recipeId = descriptor.recipeId,
@@ -213,12 +251,33 @@ class SessionsViewModel : ViewModel() {
     )
 
     fun isRecipeAvailable(recipeId: String): Boolean =
-        recipes.firstOrNull { it.id == recipeId }?.available == true
+        CliAdapterRegistry.isSessionRecipe(recipeId) ||
+            recipes.firstOrNull { it.id == recipeId }?.available == true
 
     fun adapterDisplayName(recipeId: String): String =
         adapters.forRecipe(recipeId)?.descriptor?.displayName
             ?: recipes.firstOrNull { it.id == recipeId }?.name
             ?: "CLI"
+
+    fun isDshRuntimeReady(): Boolean =
+        ServiceLocator.runtimeInventory.statuses()
+            .firstOrNull { it.kind.id == com.agentdeck.app.domain.runtime.RuntimeCliCatalog.DEEPSEEK_HARNESS }
+            ?.installed == true
+
+    fun isPiRuntimeReady(): Boolean =
+        ServiceLocator.runtimeInventory.statuses()
+            .firstOrNull { it.kind.id == com.agentdeck.app.domain.runtime.RuntimeCliCatalog.PI }
+            ?.installed == true
+
+    suspend fun openDshWebUrl(): Result<String> = runCatching {
+        com.agentdeck.app.data.runtime.NativeRuntimeBudget.onDshOpen()
+        ServiceLocator.runtimeInventory.dshSupervisor().open().getOrThrow().url
+    }
+
+    suspend fun smokePiHelp(): Result<String> = ServiceLocator.runtimeInventory.smokePiHelp()
+
+    /** Prefer native pi chat; fallback smoke only for diagnostics. */
+    fun isPiChatSupported(): Boolean = isPiRuntimeReady()
 
     suspend fun save(draft: CardDraft): Result<AgentCard> = runCatching {
         require(isRecipeAvailable(draft.recipeId)) { "该 CLI 配方尚未开放" }
@@ -230,15 +289,42 @@ class SessionsViewModel : ViewModel() {
                 "该对话仍在后台运行，请等待任务结束后再编辑"
             }
         }
-        val profile = draft.profileId?.let { profileId ->
+        val normalizedDraft = when {
+            draft.recipeId == "recipe_deepseek_harness" -> draft.copy(
+                // dsh still primarily configures models in-web; keep card free of Responses binding.
+                profileId = null,
+                modelId = null,
+                permissionLevel = null,
+                selectedExtensionIds = emptySet(),
+            )
+            draft.recipeId == "recipe_pi" || draft.recipeId == "recipe_light" -> draft.copy(
+                permissionLevel = null,
+                selectedExtensionIds = emptySet(),
+            )
+            else -> draft
+        }
+        val profile = normalizedDraft.profileId?.let { profileId ->
             requireNotNull(ServiceLocator.profiles.getProfile(profileId)) { "模型服务不存在" }
+        }
+        if (adapter.descriptor.recipeId == "recipe_pi" ||
+            adapter.descriptor.recipeId == "recipe_light"
+        ) {
+            requireNotNull(profile) {
+                "请选择「Chat Completions」模型服务（设置 → 模型服务）"
+            }
         }
         if (profile != null) {
             if (adapter.descriptor.recipeId == "recipe_codex") {
-                require(
-                    profile.adapterId == ProviderAdapterId.SUB2API ||
-                        profile.adapterId == ProviderAdapterId.OPENAI_RESPONSES,
-                ) { "该模型服务不支持 Codex Responses" }
+                require(profile.adapterId.isCodexResponsesCompatible()) {
+                    "该模型服务不支持 Codex Responses；Chat Completions 请用于轻聊 / pi"
+                }
+            }
+            if (adapter.descriptor.recipeId == "recipe_pi" ||
+                adapter.descriptor.recipeId == "recipe_light"
+            ) {
+                require(profile.adapterId.isChatCompletionsCompatible()) {
+                    "轻聊 / pi 只能使用「Chat Completions」模型服务"
+                }
             }
             require(
                 profile.connectionStatus == ProviderConnectionStatus.READY ||
@@ -246,7 +332,7 @@ class SessionsViewModel : ViewModel() {
             ) { "模型服务尚未验证" }
             val credentialRef = requireNotNull(profile.credentialRef) { "模型服务缺少 API Key" }
             require(ServiceLocator.credentials.contains(credentialRef)) { "模型服务的 API Key 不存在" }
-            val modelId = requireNotNull(draft.modelId?.takeIf(String::isNotBlank)) { "请选择模型" }
+            val modelId = requireNotNull(normalizedDraft.modelId?.takeIf(String::isNotBlank)) { "请选择模型" }
             val knownModels = ServiceLocator.profiles.getModels(profile.id)
             require(
                 knownModels.any { it.id == modelId } ||
@@ -255,7 +341,7 @@ class SessionsViewModel : ViewModel() {
             ) { "所选模型不属于该模型服务，请重新获取模型列表" }
         }
         val id = "card_${UUID.randomUUID().toString().replace("-", "").take(8)}"
-        val card = CardEditor.build(draft, existing, id, adapter, profile).getOrThrow()
+        val card = CardEditor.build(normalizedDraft, existing, id, adapter, profile).getOrThrow()
         // CardEditor 从草稿重建卡片，自定义标题/置顶/归档等列表管理字段从旧卡片继承
         val persisted = card.copy(
             customTitle = existing?.customTitle,
@@ -265,7 +351,7 @@ class SessionsViewModel : ViewModel() {
         )
         ServiceLocator.extensions.saveCardWithSelections(
             persisted,
-            draft.selectedExtensionIds,
+            normalizedDraft.selectedExtensionIds,
         )
         persisted
     }
@@ -292,6 +378,12 @@ class SessionsViewModel : ViewModel() {
     suspend fun setArchived(cardId: String, archived: Boolean): Result<Unit> = runCatching {
         cardsRepo.setArchived(cardId, archived)
         syncThreadArchived(cardId, archived)
+    }
+
+    fun touchActivity(cardId: String) {
+        viewModelScope.launch {
+            runCatching { cardsRepo.touchActivity(cardId) }
+        }
     }
 
     /**

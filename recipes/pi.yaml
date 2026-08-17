@@ -1,9 +1,12 @@
 schema_version: 1
 id: recipe_pi
 name: pi
-description: pi 运行时按需安装尚未开放；不会随首次准备下载。
+description: >
+  pi 是终端 / RPC coding agent（@earendil-works/pi-coding-agent），
+  不并入 Codex 聊天时间线。可在「新建会话」里选 Agent；安装由运行环境
+  PiRuntimeInstaller 完成，available 保持 false（专用安装器，非 RecipeInstaller）。
 priority: p1
-version: planned
+version: "0.84.2"
 available: false
 depends_on: []
-timeout_minutes: 10
+timeout_minutes: 30

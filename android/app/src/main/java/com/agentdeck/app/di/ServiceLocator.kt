@@ -69,7 +69,7 @@ object ServiceLocator {
             db = db,
             policy = ExtensionPolicy(BuildConfig.EXTENSION_MAX_LEVEL),
             credentials = extensionCredentials,
-            paths = EmbeddedRuntimePaths(app),
+            paths = EmbeddedRuntimePaths.shared(app),
             secureMcpClient = secureMcpHttpClient(app),
         )
     }
@@ -104,7 +104,7 @@ object ServiceLocator {
                 SafWorkspaceDocumentStore(app, uri)
             },
             mirrorRoot = {
-                val paths = com.agentdeck.app.data.runtime.EmbeddedRuntimePaths(app)
+                val paths = com.agentdeck.app.data.runtime.EmbeddedRuntimePaths.shared(app)
                 paths.ensureHostLayout()
                 val mirror = java.io.File(paths.projectsHome, "host-mirror")
                 mirror.mkdirs()
@@ -122,6 +122,22 @@ object ServiceLocator {
     val envProbe: EnvironmentScanner by lazy { EmbeddedEnvironmentProbe(embeddedRuntime) }
     val installer: RecipeInstallation by lazy { EmbeddedRuntimeInstaller(app) }
     internal val runtimeInventory: RuntimeInventory by lazy { RuntimeInventory(app, installer = installer) }
+    /** Long-lived pi --mode rpc process for native chat shell. */
+    internal val piRpcSession: com.agentdeck.app.data.runtime.PiRpcSession by lazy {
+        com.agentdeck.app.data.runtime.PiRpcSession(
+            context = app,
+            vault = credentials,
+        )
+    }
+    internal val diskTranscriptPreview: com.agentdeck.app.data.chat.DiskTranscriptPreviewStore by lazy {
+        com.agentdeck.app.data.chat.DiskTranscriptPreviewStore(app)
+    }
+    internal val piChatHistory: com.agentdeck.app.data.chat.PiChatHistoryStore by lazy {
+        com.agentdeck.app.data.chat.PiChatHistoryStore(app)
+    }
+    internal val chatCompletions: com.agentdeck.app.data.provider.ChatCompletionsClient by lazy {
+        com.agentdeck.app.data.provider.ChatCompletionsClient(vault = credentials)
+    }
     val setup: SetupCoordinator by lazy {
         SetupCoordinator(
             scanner = envProbe,
@@ -167,11 +183,13 @@ object ServiceLocator {
     /**
      * 冷启动后在后台线程预热重资源对象图（Room、runtime status、reapStaleProcesses），
      * 避免首个访问者（通常是主线程上的 ViewModel）承担初始化成本。不触发环境扫描。
+     * 若 pi/dsh 已安装，额外异步 seed Node compile cache（进程不常驻）。
      */
     fun warmUp() {
         check(initialized) { "ServiceLocator 尚未初始化" }
         setup
         credentials
         extensions
+        com.agentdeck.app.data.runtime.RuntimeNodePrewarm.scheduleIfNeeded(app)
     }
 }

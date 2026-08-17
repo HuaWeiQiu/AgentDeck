@@ -13,8 +13,8 @@ android {
         applicationId = "com.agentdeck.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "0.2.0-beta.10"
+        versionCode = 16
+        versionName = "0.2.0-beta.11"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Secure channel defaults (ADR-0012); lab flavor overrides.
         buildConfigField("boolean", "HOST_LAB", "false")
@@ -115,6 +115,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.webkit:webkit:1.14.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("androidx.room:room-runtime:2.8.4")

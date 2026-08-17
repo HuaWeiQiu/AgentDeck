@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.agentdeck.app.ui.theme.AgentDeckTopBar
 import com.agentdeck.app.ui.theme.AppSpacing
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,8 +40,8 @@ fun LabScreenAgentScreen(
     val context = LocalContext.current
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("屏幕 Agent") },
+            AgentDeckTopBar(
+                title = "屏幕 Agent",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")

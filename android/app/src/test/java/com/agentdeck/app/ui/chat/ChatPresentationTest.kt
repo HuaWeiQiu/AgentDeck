@@ -38,6 +38,14 @@ class ChatPresentationTest {
             "回复失败，请重试",
             customerFacingChatError(ChatError.from("unexpected internal failure"), false),
         )
+        val protocol400 =
+            "unexpected status 400 Bad Request: " +
+                "{\"error_type\":\"provider.client_bad_request\"," +
+                "\"detail\":\"Invalid provider request\"}"
+        val protocolCopy = customerFacingChatError(ChatError.from(protocol400), false)
+        assertTrue(protocolCopy.contains("Chat Completions"))
+        assertTrue(protocolCopy.contains("DeepSeek Harness") || protocolCopy.contains("网页助手"))
+        assertEquals(protocol400, customerFacingChatError(ChatError.from(protocol400), true))
     }
 
     @Test

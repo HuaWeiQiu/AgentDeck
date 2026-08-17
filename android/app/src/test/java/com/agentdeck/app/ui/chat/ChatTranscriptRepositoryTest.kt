@@ -24,8 +24,10 @@ class ChatTranscriptRepositoryTest {
         )
 
         val preview = ChatTranscriptPreviewCache.get("chat-a", "provider-a", "model-a")
-        assertEquals(120, preview.size)
-        assertEquals("item-5", preview.first().id)
+        // Keeps a completed-only tail under MAX_PREVIEW_ITEMS (60); drops the
+        // in-progress last item ("item-125").
+        assertEquals(60, preview.size)
+        assertEquals("item-65", preview.first().id)
         assertEquals("item-124", preview.last().id)
         assertTrue(ChatTranscriptPreviewCache.get("chat-b", "provider-a", "model-a").isEmpty())
         assertTrue(ChatTranscriptPreviewCache.get("chat-a", "provider-b", "model-a").isEmpty())

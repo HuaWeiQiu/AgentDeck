@@ -1,11 +1,14 @@
 package com.agentdeck.app.ui.navigation
 
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -24,6 +27,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.ui.chat.ChatScreen
+import com.agentdeck.app.ui.chat.LightChatScreen
+import com.agentdeck.app.ui.chat.PiChatScreen
 import com.agentdeck.app.ui.config.CodexConfigScreen
 import com.agentdeck.app.ui.sessions.SessionsScreen
 import com.agentdeck.app.ui.settings.SettingsScreen
@@ -31,10 +36,14 @@ import com.agentdeck.app.ui.settings.BackupRestoreScreen
 import com.agentdeck.app.ui.settings.ConversationDefaultsScreen
 import com.agentdeck.app.ui.settings.LabScreenAgentScreen
 import com.agentdeck.app.ui.settings.RuntimeEnvironmentScreen
+import com.agentdeck.app.ui.runtime.LoopbackWebScreen
 import com.agentdeck.app.ui.models.ModelsScreen
 import com.agentdeck.app.ui.extensions.ExtensionDetailScreen
 import com.agentdeck.app.ui.extensions.ExtensionsScreen
 import com.agentdeck.app.ui.store.SetupScreen
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 private data class Tab(
     val route: String,
@@ -81,16 +90,24 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
         }
     }
 
+    // Edge-to-edge is on (MainActivity). Child screens own status-bar insets via
+    // their TopAppBar. Root Scaffold must NOT also apply safeDrawing top padding,
+    // or every page gets a double status-bar gap under the system icons.
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             if (currentRoute in standardTopLevelRoutes) {
-                NavigationBar {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = NavigationBarDefaults.Elevation,
+                ) {
                     tabs.forEach { tab ->
                         NavigationBarItem(
                             selected = currentRoute == tab.route,
                             onClick = { navigateTopLevel(tab.route) },
                             icon = { Icon(tab.icon, contentDescription = tab.label) },
                             label = { Text(tab.label) },
+                            alwaysShowLabel = true,
                         )
                     }
                 }
@@ -100,6 +117,7 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
         NavHost(
             navController = navController,
             startDestination = startDestination,
+            // Only bottomBar height (and 0 insets) — not a second status-bar pad.
             modifier = Modifier.padding(padding),
         ) {
             composable("sessions") {
@@ -107,6 +125,21 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
                     onOpenSetup = { navController.navigate("setup") { launchSingleTop = true } },
                     onOpenModels = { navController.navigate("models") { launchSingleTop = true } },
                     onOpenChat = { cardId -> navController.navigate("chat/$cardId") },
+                    onOpenDshWeb = { url ->
+                        val encoded = android.net.Uri.encode(url)
+                        navController.navigate("dsh-web/$encoded")
+                    },
+                    onOpenPiChat = { cardId, title ->
+                        val encTitle = URLEncoder.encode(
+                            title.ifBlank { "pi" },
+                            StandardCharsets.UTF_8.name(),
+                        )
+                        navController.navigate("pi-chat/$cardId/$encTitle")
+                    },
+                    onOpenLightChat = { cardId ->
+                        navController.navigate("light-chat-session/$cardId")
+                    },
+                    onOpenRuntimes = { navController.navigate("runtimes") },
                 )
             }
             composable("setup") {
@@ -146,6 +179,33 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
                 RuntimeEnvironmentScreen(
                     onBack = navController::navigateUp,
                     onPrepareCodex = { navController.navigate("setup") },
+                    onOpenDshWeb = { url ->
+                        val encoded = URLEncoder.encode(url, StandardCharsets.UTF_8.name())
+                        navController.navigate("dsh-web/$encoded")
+                    },
+                )
+            }
+            composable("dsh-web/{url}") { entry ->
+                val encoded = entry.arguments?.getString("url").orEmpty()
+                val url = runCatching {
+                    URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())
+                }.getOrDefault("")
+                LoopbackWebScreen(
+                    title = "DeepSeek Harness",
+                    url = url,
+                    onBack = {
+                        ServiceLocator.runtimeInventory.dshSupervisor().stop()
+                        navController.navigateUp()
+                    },
+                    // Always tear down Node/PRoot when the screen is disposed (system back, etc.).
+                    onCloseSession = {
+                        ServiceLocator.runtimeInventory.dshSupervisor().stop()
+                    },
+                    onNewSession = { reload ->
+                        // Wipe on-disk dsh sessions then reload SPA — phone UI is hard to tap.
+                        ServiceLocator.runtimeInventory.dshSupervisor().clearChatSessions()
+                        reload()
+                    },
                 )
             }
             composable("lab-screen-agent") {
@@ -161,7 +221,14 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
                 )
             }
             composable("models") {
-                ModelsScreen(onBack = navController::navigateUp)
+                ModelsScreen(
+                    onBack = navController::navigateUp,
+                    onOpenLightChat = { profileId, modelId, title ->
+                        val encTitle = URLEncoder.encode(title, StandardCharsets.UTF_8.name())
+                        val encModel = URLEncoder.encode(modelId, StandardCharsets.UTF_8.name())
+                        navController.navigate("light-chat/$profileId/$encModel/$encTitle")
+                    },
+                )
             }
             composable("extensions") {
                 ExtensionsScreen(
@@ -181,10 +248,48 @@ fun AgentDeckRoot(deepLink: Pair<String, Long>? = null) {
             composable("codex-config") {
                 CodexConfigScreen(onBack = navController::navigateUp)
             }
+            composable("light-chat-session/{cardId}") { entry ->
+                val cardId = entry.arguments?.getString("cardId").orEmpty()
+                LightChatScreen(
+                    onBack = navController::navigateUp,
+                    cardId = cardId,
+                )
+            }
+            composable("light-chat/{profileId}/{modelId}/{title}") { entry ->
+                val profileId = entry.arguments?.getString("profileId").orEmpty()
+                val modelEnc = entry.arguments?.getString("modelId").orEmpty()
+                val titleEnc = entry.arguments?.getString("title").orEmpty()
+                val modelId = runCatching {
+                    URLDecoder.decode(modelEnc, StandardCharsets.UTF_8.name())
+                }.getOrDefault(modelEnc)
+                val title = runCatching {
+                    URLDecoder.decode(titleEnc, StandardCharsets.UTF_8.name())
+                }.getOrDefault(titleEnc)
+                LightChatScreen(
+                    onBack = navController::navigateUp,
+                    profileId = profileId,
+                    modelId = modelId,
+                    title = title,
+                )
+            }
             composable("chat/{cardId}") { entry ->
                 val cardId = entry.arguments?.getString("cardId").orEmpty()
                 ChatScreen(
                     cardId = cardId,
+                    onBack = navController::navigateUp,
+                )
+            }
+            composable("pi-chat/{cardId}/{title}") { entry ->
+                val cardId = entry.arguments?.getString("cardId").orEmpty()
+                val title = runCatching {
+                    URLDecoder.decode(
+                        entry.arguments?.getString("title").orEmpty(),
+                        StandardCharsets.UTF_8.name(),
+                    )
+                }.getOrDefault("pi")
+                PiChatScreen(
+                    cardId = cardId,
+                    title = title.ifBlank { "pi" },
                     onBack = navController::navigateUp,
                 )
             }

@@ -5,8 +5,8 @@ import com.agentdeck.app.data.config.CodexProfileRuntimeConfig
 import com.agentdeck.app.data.config.CodexProfileSynchronizer
 import com.agentdeck.app.domain.model.AgentCard
 import com.agentdeck.app.domain.model.ProviderProfile
-import com.agentdeck.app.domain.model.ProviderAdapterId
 import com.agentdeck.app.domain.model.ProviderType
+import com.agentdeck.app.domain.model.isCodexResponsesCompatible
 import com.agentdeck.app.domain.extensions.ExtensionSessionPlan
 import com.agentdeck.app.domain.profiles.ProviderEndpointNormalizer
 import com.agentdeck.app.domain.runtime.AgentRuntime
@@ -41,9 +41,8 @@ data class ManagedProviderRuntime(
         ): ManagedProviderRuntime {
             require(
                 profile.type == ProviderType.OPENAI_COMPATIBLE &&
-                    (profile.adapterId == ProviderAdapterId.SUB2API ||
-                        profile.adapterId == ProviderAdapterId.OPENAI_RESPONSES),
-            ) { "该模型服务不支持 Codex Responses" }
+                    profile.adapterId.isCodexResponsesCompatible(),
+            ) { "该模型服务不支持 Codex Responses（Chat Completions 请用于 pi / dsh）" }
             val endpoint = ProviderEndpointNormalizer.normalize(profile.baseUrl).getOrThrow()
             val credentialRef = requireNotNull(profile.credentialRef) { "模型服务缺少 API Key" }
             require(modelId.isNotBlank() && modelId.length <= 160 && modelId.none(Char::isISOControl)) {

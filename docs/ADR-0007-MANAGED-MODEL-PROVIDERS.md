@@ -18,7 +18,11 @@
 3. 受管密钥不得进入 Intent、argv、shell 源码、`config.toml`、Termux 持久文件、日志、异常文本或备份。
 4. 每个原生聊天实例在 Android 回环地址启动一个有界 credential broker。Termux 内的固定 token helper 读取本实例的 `0600` capability token，向 broker 请求对应 Provider 的密钥，并只把 bearer token 输出给 Codex。
 5. Provider 配置通过当前 app-server 进程的 `-c` 覆盖传入。Base URL、Provider ID、模型和 broker 端口是非敏感结构化值；密钥只经过鉴权回环请求。
-6. 受管 Provider 首批只支持 Codex 0.147.0 可用的 Responses wire API。Sub2API 与通用 OpenAI Responses 兼容服务使用 bearer token；Anthropic Messages 留给未来 Claude adapter。
+6. 受管 Provider 对 **Codex 原生聊天**只支持 Codex 0.147.0 可用的 **Responses** wire API。
+   Sub2API 与通用 OpenAI Responses 兼容服务使用 bearer token；Anthropic Messages 留给未来 Claude adapter。
+   **补充（2026-08-17）**：另设 **Chat Completions** adapter（`OPENAI_CHAT_COMPLETIONS`），
+   仅绑定 **pi / dsh** 等非 Codex 宿主，**不得**用于 `CodexBridgeLauncher`。密钥仍遵守本 ADR
+   的 Keystore / vault 边界；不得写入 Codex `config.toml`。
 7. 模型发现由 Provider adapter 负责。Sub2API/OpenAI 兼容 adapter 请求同源 HTTPS `/models`，解析 `data[].id`，限制响应大小和模型数量，并保留手动模型 ID 兜底。
 8. 对话绑定 Provider 与模型。Provider 域名变化必须创建新配置；切换模型使用独立 thread 映射，不能让已有 thread 静默换上游或模型。
 9. app-server 返回的实际 `modelProvider` 和 `model` 仍是最终事实。请求值与实际值不一致时，UI 必须失败关闭，不能显示假成功。

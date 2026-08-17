@@ -1,17 +1,23 @@
 # 聊天性能基线
 
+Agent **进程冷/温启动**（PRoot、Node、hold/reattach、磁盘 compile cache 等）见独立计划：
+[`docs/plans/agent-startup-acceleration.md`](plans/agent-startup-acceleration.md)。
+本文聚焦聊天 **UI 时间线、Markdown、分页与滑动** 基线。
+
 ## 实现约束
 
 - 时间线只有一个父级 `LazyColumn`，不嵌套纵向懒列表。
 - 已完成的 Agent 回复在后台解析为 Markdown AST，顶层语义块直接成为父列表项；段落、列表、代码块和链接的 Markdown 语义保持完整。
 - 解析使用单并发调度器，流式回复完成前只渲染纯文本，避免逐 token 重复解析。
-- AST 文档缓存采用访问顺序 LRU，上限为 24 条回复或 12 MiB；单条超大回复允许临时超过字节上限，确保当前内容可显示。
+- AST 文档缓存采用访问顺序 LRU；**当前默认**约 10–18 条回复、**4–12 MiB**（随 `memoryClass`，见 `markdownBudgetBytes` / `ChatMarkdownCache.forMemoryClass`）。Codex 与 pi 共用进程级 `SharedChatMarkdown`。单条超大回复允许临时超过字节上限，确保当前内容可显示。
 - 恢复会话时通过 Codex 0.147.0 `initialTurnsPage` 只读取最近 50 个 turn；滚动到顶部后使用 `thread/turns/list` 游标每次读取更早的 25 个。Android 内存不再先接收完整历史再截断。
 - `ChatTranscriptRepository` 是已加载页、游标和实时尾部的唯一内存状态源；app-server rollout 是唯一持久化事实源，不用 Room 双写消息正文。
-- 返回再进入时可先绘制最近一个会话的临时首屏预览，最多 120 个已完成 item 或约 256 KiB 字符；该上限不影响磁盘完整历史。预览没有游标且不落盘，首个 app-server 页面会整体替换它。
+- **内存窗口（P2 收紧后）**：默认最多约 **5** 个历史页或约 **2 MiB** 估计字符；更早页只保留轻量描述符，可按原 cursor 回拉。
+- 返回再进入时可先绘制最近一个会话的临时首屏预览，最多约 **60** 个已完成 item 或约 **128 KiB** 字符；该上限不影响磁盘完整历史。预览没有游标且不落盘，首个 app-server 页面会整体替换它。
 - 分页请求使用唯一 request token；重连前的迟到成功或失败不能覆盖新会话页，也不能释放新请求的单飞锁。
 - transcript 状态与 composer 状态分离，输入框变化不会发布新的 transcript；用户开始拖动后立即停止自动跟随，流式滚动每帧最多执行一次。
-- Markdown 颜色、排版、尺寸和组件环境由整条时间线共享，每个块只注入自己的引用链接处理器，不为每块创建独立状态流。
+- Markdown 颜色、排版、尺寸和组件环境由整条时间线共享（`ChatMarkdownEnvironment`）；每个块只注入自己的引用链接处理器，不为每块创建独立状态流。
+- **离开聊天后的进程策略**不在本文：见 `docs/plans/agent-startup-acceleration.md`（warm keep-alive + 磁盘 compile cache）。
 
 ## 固定真机基准
 

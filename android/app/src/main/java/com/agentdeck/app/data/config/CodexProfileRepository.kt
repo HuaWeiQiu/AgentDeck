@@ -68,7 +68,7 @@ class CodexProfileRepository(
     context: Context,
     private val allowUnmanagedMcp: Boolean = false,
 ) : CodexProfileSynchronizer {
-    private val paths = EmbeddedRuntimePaths(context)
+    private val paths = EmbeddedRuntimePaths.shared(context)
     private val mutex = Mutex()
     private val profileFile = File(paths.codexHome, PROFILE_FILE_NAME)
 

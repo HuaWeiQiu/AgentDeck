@@ -8,8 +8,19 @@ enum class ProviderType {
 enum class ProviderAdapterId {
     SUB2API,
     OPENAI_RESPONSES,
+    /**
+     * OpenAI Chat Completions (`POST /v1/chat/completions`).
+     * For pi / dsh / native light chat — **not** Codex Responses.
+     */
+    OPENAI_CHAT_COMPLETIONS,
     ANTHROPIC,
 }
+
+fun ProviderAdapterId.isCodexResponsesCompatible(): Boolean =
+    this == ProviderAdapterId.SUB2API || this == ProviderAdapterId.OPENAI_RESPONSES
+
+fun ProviderAdapterId.isChatCompletionsCompatible(): Boolean =
+    this == ProviderAdapterId.OPENAI_CHAT_COMPLETIONS
 
 enum class ProviderConnectionStatus {
     UNVERIFIED,

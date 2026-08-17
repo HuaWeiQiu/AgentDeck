@@ -5,6 +5,7 @@ import androidx.core.content.edit
 import com.agentdeck.app.BuildConfig
 import com.agentdeck.app.domain.host.HostWriteApprovalMode
 import com.agentdeck.app.domain.model.CodexPermissionLevel
+import com.agentdeck.app.domain.settings.ConversationMode
 import com.agentdeck.app.domain.settings.ExperienceLevel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,6 +13,9 @@ import kotlinx.coroutines.flow.asStateFlow
 
 class ExperienceSettingsRepository(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val mutableConversationMode = MutableStateFlow(
+        ConversationMode.fromStorage(preferences.getString(KEY_CONVERSATION_MODE, null)),
+    )
     private val mutableLevel = MutableStateFlow(
         ExperienceLevel.fromStorage(preferences.getString(KEY_LEVEL, null)),
     )
@@ -37,6 +41,8 @@ class ExperienceSettingsRepository(context: Context) {
         preferences.getBoolean(KEY_LAB_PRIV, false) && BuildConfig.HOST_LAB,
     )
 
+    /** 轻聊 / 开发：影响新建会话可选引擎与默认入口。 */
+    val conversationMode: StateFlow<ConversationMode> = mutableConversationMode.asStateFlow()
     val level: StateFlow<ExperienceLevel> = mutableLevel.asStateFlow()
     val codexPermissionLevel: StateFlow<CodexPermissionLevel> =
         mutableCodexPermissionLevel.asStateFlow()
@@ -49,6 +55,12 @@ class ExperienceSettingsRepository(context: Context) {
     val labIntentEnabled: StateFlow<Boolean> = mutableLabIntentEnabled.asStateFlow()
     val labUiEnabled: StateFlow<Boolean> = mutableLabUiEnabled.asStateFlow()
     val labPrivEnabled: StateFlow<Boolean> = mutableLabPrivEnabled.asStateFlow()
+
+    fun setConversationMode(mode: ConversationMode) {
+        if (mutableConversationMode.value == mode) return
+        preferences.edit { putString(KEY_CONVERSATION_MODE, mode.name) }
+        mutableConversationMode.value = mode
+    }
 
     fun setLevel(level: ExperienceLevel) {
         if (mutableLevel.value == level) return
@@ -124,6 +136,7 @@ class ExperienceSettingsRepository(context: Context) {
 
     companion object {
         private const val PREFERENCES_NAME = "agentdeck_experience"
+        private const val KEY_CONVERSATION_MODE = "conversation_mode"
         private const val KEY_LEVEL = "level"
         private const val KEY_CODEX_PERMISSION_LEVEL = "codex_permission_level"
         private const val KEY_HOST_WORKSPACE_ENABLED = "host_workspace_enabled"

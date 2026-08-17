@@ -177,12 +177,31 @@ sealed interface ChatError {
             return when {
                 "登录" in raw || "auth" in normalized || "unauthorized" in normalized ->
                     Auth(raw)
+                // Codex only speaks Responses; chat-only gateways (e.g. dots) often 400 here.
+                isResponsesProtocolMismatch(normalized) -> Model(raw)
                 "模型" in raw || "provider" in normalized || "model" in normalized ->
                     Model(raw)
                 "连接" in raw || "connect" in normalized || "timeout" in normalized ->
                     Network(raw)
                 else -> Unknown(raw)
             }
+        }
+
+        /** True when the failure looks like Responses vs chat/completions mismatch. */
+        fun isResponsesProtocolMismatch(normalized: String): Boolean {
+            if ("chat/completions" in normalized && "responses" in normalized) return true
+            if ("wire_api" in normalized && "chat" in normalized) return true
+            if ("client_bad_request" in normalized) return true
+            if ("invalid provider request" in normalized) return true
+            if ("provider.client_bad_request" in normalized) return true
+            // HTTP 400 on provider path without auth wording → treat as model/protocol.
+            if ((" 400" in normalized || "status=400" in normalized || "http 400" in normalized ||
+                    "400 bad request" in normalized) &&
+                ("provider" in normalized || "responses" in normalized || "request" in normalized)
+            ) {
+                return true
+            }
+            return false
         }
     }
 }

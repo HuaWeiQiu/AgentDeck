@@ -12,8 +12,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 internal const val INITIAL_PAGE_KEY = "initial"
-internal const val DEFAULT_WINDOW_MAX_PAGES = 8
-internal const val DEFAULT_WINDOW_MAX_CHARS = 4 * 1024 * 1024
+/** Fewer materialized history pages → less RSS while scrolling is still smooth. */
+internal const val DEFAULT_WINDOW_MAX_PAGES = 5
+internal const val DEFAULT_WINDOW_MAX_CHARS = 2 * 1024 * 1024
 
 /** Descriptor for one cursor page. Evicted pages keep only ids + cursors. */
 @Immutable
@@ -96,8 +97,8 @@ internal object ChatTranscriptPreviewCache {
         items = emptyList()
     }
 
-    private const val MAX_PREVIEW_ITEMS = 120
-    private const val MAX_PREVIEW_CHARS = 256 * 1024
+    private const val MAX_PREVIEW_ITEMS = 60
+    private const val MAX_PREVIEW_CHARS = 128 * 1024
 }
 
 /**

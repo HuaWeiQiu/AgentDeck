@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
@@ -26,18 +27,20 @@ import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -48,8 +51,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.agentdeck.app.BuildConfig
 import com.agentdeck.app.domain.host.HostWriteApprovalMode
 import com.agentdeck.app.domain.model.CodexPermissionLevel
+import com.agentdeck.app.domain.settings.ConversationMode
+import com.agentdeck.app.domain.settings.ConversationModePolicy
 import com.agentdeck.app.domain.settings.ExperienceLevel
 import com.agentdeck.app.ui.permissions.codexPermissionPresentation
+import com.agentdeck.app.ui.theme.AgentDeckTopBar
 import com.agentdeck.app.ui.theme.AppSpacing
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,110 +72,136 @@ fun SettingsScreen(
     vm: SettingsViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val conversationMode by vm.conversationMode.collectAsStateWithLifecycle()
     val experienceLevel by vm.experienceLevel.collectAsStateWithLifecycle()
     val permission by vm.codexPermissionLevel.collectAsStateWithLifecycle()
     val permissionPresentation = codexPermissionPresentation(permission)
+    val showRuntimes = ConversationModePolicy.showSettingsRuntimes(conversationMode)
+    val showExtensions = ConversationModePolicy.showSettingsExtensions(conversationMode)
+    val showConversationAdvanced =
+        ConversationModePolicy.showSettingsConversationAdvanced(conversationMode)
+    val showCodexConfig = ConversationModePolicy.showSettingsCodexConfig(conversationMode) &&
+        experienceLevel.advancedEnabled
 
-    Scaffold(topBar = { TopAppBar(title = { Text("设置") }) }) { padding ->
+    Scaffold(topBar = { AgentDeckTopBar(title = "设置") }) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(vertical = AppSpacing.sm),
+            contentPadding = PaddingValues(
+                horizontal = AppSpacing.page,
+                vertical = AppSpacing.sm,
+            ),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.md),
         ) {
-            item { SectionLabel("开始使用") }
             item {
-                SettingsDestination(
-                    title = "运行环境",
-                    summary = if (state.canStartChat) {
-                        "Codex 已就绪；其它助手按需准备"
-                    } else {
-                        "先准备 Codex，其它助手不会自动下载"
-                    },
-                    icon = {
-                        Icon(
-                            if (state.canStartChat) Icons.Filled.CheckCircle else Icons.Filled.ErrorOutline,
-                            contentDescription = null,
-                            tint = if (state.canStartChat) {
-                                MaterialTheme.colorScheme.secondary
+                SettingsGroup(title = "开始使用") {
+                    if (showRuntimes) {
+                        SettingsDestination(
+                            title = "运行环境",
+                            summary = if (state.canStartChat) {
+                                "Codex 已就绪；其它助手按需准备"
                             } else {
-                                MaterialTheme.colorScheme.error
+                                "先准备 Codex，其它助手不会自动下载"
                             },
+                            icon = {
+                                Icon(
+                                    if (state.canStartChat) {
+                                        Icons.Filled.CheckCircle
+                                    } else {
+                                        Icons.Filled.ErrorOutline
+                                    },
+                                    contentDescription = null,
+                                    tint = if (state.canStartChat) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.error
+                                    },
+                                )
+                            },
+                            onClick = onOpenRuntimes,
+                            showDivider = true,
                         )
-                    },
-                    onClick = onOpenRuntimes,
-                )
-            }
-            item { HorizontalDivider() }
-            item {
-                SettingsDestination(
-                    title = "模型服务",
-                    summary = "登录 ChatGPT 或填写 API 密钥",
-                    icon = { Icon(Icons.Filled.Hub, contentDescription = null) },
-                    onClick = onOpenModels,
-                )
-            }
-            item { HorizontalDivider() }
-            item {
-                SettingsDestination(
-                    title = "扩展",
-                    summary = "Skills 与 MCP 服务",
-                    icon = { Icon(Icons.Filled.Extension, contentDescription = null) },
-                    onClick = onOpenExtensions,
-                )
-            }
-            item { HorizontalDivider() }
-            item { SectionLabel("备份") }
-            item {
-                SettingsDestination(
-                    title = "备份与恢复",
-                    summary = "导出会话名称和人设；卸载前请先备份",
-                    icon = { Icon(Icons.Filled.Folder, contentDescription = null) },
-                    onClick = onOpenBackup,
-                )
-            }
-            item { HorizontalDivider() }
-            item { SectionLabel("会话") }
-            item {
-                SettingsDestination(
-                    title = "会话高级设置",
-                    summary = "默认权限：${permissionPresentation.title}" +
-                        if (experienceLevel.advancedEnabled) " · 高级已开" else "",
-                    icon = { Icon(Icons.Filled.Tune, contentDescription = null) },
-                    onClick = onOpenConversationDefaults,
-                )
-            }
-            if (experienceLevel.advancedEnabled) {
-                item { HorizontalDivider() }
-                item {
+                    }
                     SettingsDestination(
-                        title = "Codex 配置文件",
-                        summary = "给熟悉配置的人用，一般可忽略",
-                        icon = { Icon(Icons.Filled.Description, contentDescription = null) },
-                        onClick = onOpenCodexConfig,
+                        title = "模型服务",
+                        summary = when (conversationMode) {
+                            ConversationMode.LIGHT ->
+                                "轻聊需要 Chat Completions（如 dots）；也可管理 Responses 供开发使用"
+                            ConversationMode.DEV ->
+                                "Responses 给 Codex；Chat Completions 给 pi / 轻聊"
+                        },
+                        icon = { Icon(Icons.Filled.Hub, contentDescription = null) },
+                        onClick = onOpenModels,
+                        showDivider = showExtensions,
+                    )
+                    if (showExtensions) {
+                        SettingsDestination(
+                            title = "扩展",
+                            summary = "Skills 与 MCP 服务",
+                            icon = { Icon(Icons.Filled.Extension, contentDescription = null) },
+                            onClick = onOpenExtensions,
+                            showDivider = false,
+                        )
+                    }
+                }
+            }
+            item {
+                SettingsGroup(title = "备份") {
+                    SettingsDestination(
+                        title = "备份与恢复",
+                        summary = "导出会话名称和人设；卸载前请先备份",
+                        icon = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                        onClick = onOpenBackup,
+                        showDivider = false,
                     )
                 }
             }
-            item { HorizontalDivider() }
-            item { SectionLabel("关于") }
-            item {
-                ListItem(
-                    headlineContent = {
-                        Text(if (BuildConfig.HOST_LAB) "AgentDeck Lab" else "AgentDeck")
-                    },
-                    supportingContent = {
-                        Text(
-                            buildString {
-                                append("版本 ${BuildConfig.VERSION_NAME}")
-                                if (BuildConfig.HOST_LAB) {
-                                    append(" · 实验版（非日常）")
-                                } else {
-                                    append(" · 安全版")
-                                }
-                                append("。聊天记录只存在这台手机，卸载前请先备份会话与角色。")
-                            },
+            if (showConversationAdvanced) {
+                item {
+                    SettingsGroup(title = "会话") {
+                        SettingsDestination(
+                            title = "会话高级设置",
+                            summary = "默认权限：${permissionPresentation.title}" +
+                                if (experienceLevel.advancedEnabled) " · 高级已开" else "",
+                            icon = { Icon(Icons.Filled.Tune, contentDescription = null) },
+                            onClick = onOpenConversationDefaults,
+                            showDivider = showCodexConfig,
                         )
-                    },
-                    leadingContent = { Icon(Icons.Filled.Info, contentDescription = null) },
-                )
+                        if (showCodexConfig) {
+                            SettingsDestination(
+                                title = "Codex 配置文件",
+                                summary = "给熟悉配置的人用，一般可忽略",
+                                icon = { Icon(Icons.Filled.Description, contentDescription = null) },
+                                onClick = onOpenCodexConfig,
+                                showDivider = false,
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                SettingsGroup(title = "关于") {
+                    ListItem(
+                        headlineContent = {
+                            Text(if (BuildConfig.HOST_LAB) "AgentDeck Lab" else "AgentDeck")
+                        },
+                        supportingContent = {
+                            Text(
+                                buildString {
+                                    append("版本 ${BuildConfig.VERSION_NAME}")
+                                    if (BuildConfig.HOST_LAB) {
+                                        append(" · 实验版（非日常）")
+                                    } else {
+                                        append(" · 安全版")
+                                    }
+                                    append("。聊天记录只存在这台手机，卸载前请先备份。")
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        },
+                        leadingContent = { Icon(Icons.Filled.Info, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+                    )
+                }
             }
         }
     }
@@ -202,8 +234,8 @@ fun ConversationDefaultsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("会话高级设置") },
+            AgentDeckTopBar(
+                title = "会话高级设置",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -437,19 +469,66 @@ fun ConversationDefaultsScreen(
 }
 
 @Composable
+private fun SettingsGroup(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = AppSpacing.xs, bottom = AppSpacing.sm),
+        )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
 private fun SettingsDestination(
     title: String,
     summary: String,
     icon: @Composable () -> Unit,
     onClick: () -> Unit,
+    showDivider: Boolean = true,
 ) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(summary) },
-        leadingContent = icon,
-        trailingContent = { Icon(Icons.Filled.ChevronRight, contentDescription = null) },
-        modifier = Modifier.clickable(onClick = onClick),
-    )
+    Column {
+        ListItem(
+            headlineContent = { Text(title) },
+            supportingContent = {
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            leadingContent = icon,
+            trailingContent = {
+                Icon(
+                    Icons.Filled.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.outline,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier.clickable(onClick = onClick),
+        )
+        if (showDivider) {
+            HorizontalDivider(
+                modifier = Modifier.padding(start = 72.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+            )
+        }
+    }
 }
 
 @Composable
@@ -457,7 +536,7 @@ private fun SectionLabel(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
     )
 }

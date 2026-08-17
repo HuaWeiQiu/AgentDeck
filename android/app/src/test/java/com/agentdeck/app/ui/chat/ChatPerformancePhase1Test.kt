@@ -92,9 +92,9 @@ class ChatPerformancePhase1Test {
 
     @Test
     fun `markdown budget uses 8 12 and 24 MiB memory class tiers`() {
-        assertEquals(8 * 1024 * 1024, markdownBudgetBytes(96))
-        assertEquals(12 * 1024 * 1024, markdownBudgetBytes(256))
-        assertEquals(24 * 1024 * 1024, markdownBudgetBytes(512))
+        assertEquals(4 * 1024 * 1024, markdownBudgetBytes(96))
+        assertEquals(8 * 1024 * 1024, markdownBudgetBytes(256))
+        assertEquals(12 * 1024 * 1024, markdownBudgetBytes(512))
     }
 
     @Test

@@ -4,6 +4,40 @@ All notable changes to AgentDeck are documented in this file.
 
 ## Unreleased
 
+### Added
+
+### Fixed
+
+### Documentation
+
+## 0.2.0-beta.11 - 2026-08-18
+
+### Added
+
+- Conversation modes **轻聊 / 开发**: pick from the sessions top bar (left);
+  list shows only the current mode’s sessions; settings hide runtime/extensions
+  advanced surfaces in 轻聊.
+- Light chat path: Chat Completions client, role/system prompt, disk history;
+  no PRoot/Agent for that mode.
+- Dev path: Codex / pi / dsh recipes; runtime setup banner only in DEV mode.
+- Startup handfeel P0/P1: node compile cache / prewarm, ready-poll backoff,
+  list press prefetch, pi history disk, Codex disk transcript preview, pi
+  `set_model` hot path.
+- Runtime layout contract: Codex under `runtimes/codex/`; per-CLI settings
+  inventory; dsh/pi on-demand install under their own trees.
+- Shared composer field and themed dropdown menus (mode picker + session ⋮).
+
+### Fixed
+
+- Mode menus and session overflow menus use theme `surface` instead of default
+  gray Material containers.
+- Light mode no longer blocks on Codex runtime readiness.
+
+### Documentation
+
+- `docs/plans/conversation-modes.md`, agent-startup / pi-dsh plans; release notes
+  for beta.11; handoff updated for modes and top-bar switcher.
+
 ## 0.2.0-beta.10 - 2026-08-15
 
 ### Added

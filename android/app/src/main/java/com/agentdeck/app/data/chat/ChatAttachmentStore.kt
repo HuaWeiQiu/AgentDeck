@@ -22,7 +22,7 @@ class ChatAttachmentStore(
     private val runtime: AgentRuntime,
 ) {
     private val app = context.applicationContext
-    private val paths = EmbeddedRuntimePaths(app)
+    private val paths = EmbeddedRuntimePaths.shared(app)
 
     suspend fun import(cardId: String, uri: Uri): ChatAttachment = withContext(Dispatchers.IO) {
         paths.ensureHostLayout()

@@ -120,11 +120,12 @@ class ProfileRepository(
         lastCheckedAtEpochMs: Long,
         models: List<ProviderModel>,
     ): ProviderProfile = db.withTransaction {
-        require(type == ProviderType.OPENAI_COMPATIBLE) { "Codex 模型服务类型不受支持" }
+        require(type == ProviderType.OPENAI_COMPATIBLE) { "模型服务类型不受支持" }
         require(
             adapterId == ProviderAdapterId.SUB2API ||
-                adapterId == ProviderAdapterId.OPENAI_RESPONSES,
-        ) { "Codex Provider adapter 不受支持" }
+                adapterId == ProviderAdapterId.OPENAI_RESPONSES ||
+                adapterId == ProviderAdapterId.OPENAI_CHAT_COMPLETIONS,
+        ) { "Provider adapter 不受支持" }
         require(
             connectionStatus == ProviderConnectionStatus.READY ||
                 connectionStatus == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED,

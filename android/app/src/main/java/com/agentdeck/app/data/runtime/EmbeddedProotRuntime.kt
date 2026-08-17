@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 
 internal class EmbeddedProotRuntime(
     context: Context,
-    private val paths: EmbeddedRuntimePaths = EmbeddedRuntimePaths(context),
+    private val paths: EmbeddedRuntimePaths = EmbeddedRuntimePaths.shared(context),
 ) : AgentRuntime {
     private val app = context.applicationContext
     override val kind = RuntimeKind.EMBEDDED_PROOT
@@ -152,6 +152,7 @@ internal class EmbeddedProotRuntime(
 
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
             var port: Int? = null
+            var pauseMs = 40L
             while (System.nanoTime() < deadline && port == null) {
                 port = LISTEN_PATTERN.find(log.readText().takeLast(MAX_START_LOG_CHARS))
                     ?.groupValues?.get(1)?.toIntOrNull()
@@ -161,7 +162,8 @@ internal class EmbeddedProotRuntime(
                         cleanup(options.instanceKey)
                         error("Codex app-server 启动失败：$detail")
                     }
-                    delay(100)
+                    delay(pauseMs)
+                    pauseMs = (pauseMs * 2).coerceAtMost(120L)
                 }
             }
             val readyPort = port ?: run {

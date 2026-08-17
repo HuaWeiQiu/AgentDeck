@@ -67,6 +67,7 @@ import com.agentdeck.app.domain.extensions.ExtensionStatus
 import com.agentdeck.app.domain.extensions.ExtensionTool
 import com.agentdeck.app.domain.extensions.ExtensionToolAccess
 import com.agentdeck.app.domain.extensions.ManagedExtension
+import com.agentdeck.app.ui.theme.AgentDeckTopBar
 import com.agentdeck.app.ui.theme.AppSpacing
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -100,8 +101,8 @@ fun ExtensionsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("扩展") },
+            AgentDeckTopBar(
+                title = "扩展",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -114,7 +115,7 @@ fun ExtensionsScreen(
                     DropdownMenu(
                         expanded = addMenuVisible,
                         onDismissRequest = { addMenuVisible = false },
-                    ) {
+            ) {
                         DropdownMenuItem(
                             text = { Text("导入 SKILL.md") },
                             leadingIcon = { Icon(Icons.Filled.Description, contentDescription = null) },
@@ -268,10 +269,8 @@ fun ExtensionDetailScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(extension?.name ?: "扩展详情", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                },
+            AgentDeckTopBar(
+                title = extension?.name ?: "扩展详情",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")

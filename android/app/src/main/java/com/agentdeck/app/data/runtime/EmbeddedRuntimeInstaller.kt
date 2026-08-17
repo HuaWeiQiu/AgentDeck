@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
 
 internal class EmbeddedRuntimeInstaller(
     context: Context,
-    private val paths: EmbeddedRuntimePaths = EmbeddedRuntimePaths(context),
+    private val paths: EmbeddedRuntimePaths = EmbeddedRuntimePaths.shared(context),
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)

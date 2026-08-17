@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.agentdeck.app.ui.theme.AgentDeckTopBar
 import com.agentdeck.app.ui.theme.AppSpacing
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -61,8 +62,8 @@ fun BackupRestoreScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("备份与恢复") },
+            AgentDeckTopBar(
+                title = "备份与恢复",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")

@@ -2,6 +2,8 @@ package com.agentdeck.app.data.runtime
 
 import android.content.Context
 import android.system.Os
+import com.agentdeck.app.domain.runtime.RuntimeCliCatalog
+import com.agentdeck.app.domain.runtime.RuntimeLayoutContract
 import java.io.File
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
@@ -16,22 +18,30 @@ internal class EmbeddedRuntimePaths(
     private val app = context.applicationContext
     private val releaseId = runtimeTarget?.releaseId ?: "unsupported"
 
-    val root = File(app.noBackupFilesDir, "agentdeck-runtime")
-    val cliRoot = File(root, "runtimes/codex")
-    val activeRootfs = File(cliRoot, "rootfs-$releaseId")
-    val stagingRootfs = File(cliRoot, ".rootfs-$releaseId.staging")
-    val stateDir = File(root, "state")
-    val tempDir = File(root, "tmp")
-    val codexHome = File(root, "codex-home")
-    val projectsHome = File(root, "projects")
-    val extensionPackages = File(root, "extensions/packages")
-    val extensionSessionSnapshots = File(root, "extensions/sessions")
-    val cacheDir = File(cliRoot, "downloads")
+    // NOTE: prefer [shared] so installers / supervisors / DI share one path graph.
+
+    val root = File(app.noBackupFilesDir, RuntimeLayoutContract.RUNTIME_ROOT_NAME)
+    /** Codex-only tree today; future CLIs use [cliRootFor]. */
+    val cliRoot = cliRootFor(RuntimeCliCatalog.CODEX)
+    val activeRootfs = File(root, RuntimeLayoutContract.rootfsRelative(RuntimeCliCatalog.CODEX, releaseId))
+    val stagingRootfs = File(
+        root,
+        RuntimeLayoutContract.stagingRootfsRelative(RuntimeCliCatalog.CODEX, releaseId),
+    )
+    val stateDir = File(root, RuntimeLayoutContract.STATE)
+    val tempDir = File(root, RuntimeLayoutContract.TEMP)
+    val codexHome = File(root, RuntimeLayoutContract.CODEX_HOME)
+    val projectsHome = File(root, RuntimeLayoutContract.PROJECTS)
+    val extensionPackages = File(root, RuntimeLayoutContract.EXTENSION_PACKAGES)
+    val extensionSessionSnapshots = File(root, RuntimeLayoutContract.EXTENSION_SESSIONS)
+    val cacheDir = File(root, RuntimeLayoutContract.downloadsRelative(RuntimeCliCatalog.CODEX))
     private val legacyActiveRootfs = File(root, "rootfs-$releaseId")
     private val legacyStagingRootfs = File(root, ".rootfs-$releaseId.staging")
     private val legacyCacheDir = File(app.cacheDir, "agentdeck-runtime-downloads")
     val marker = File(activeRootfs, ".agentdeck-runtime")
     val stagingMarker = File(stagingRootfs, ".agentdeck-runtime")
+
+    fun cliRootFor(cliId: String): File = File(root, RuntimeLayoutContract.cliRootRelative(cliId))
 
     val nativeLibraryDir: File = File(app.applicationInfo.nativeLibraryDir)
     val proot = File(nativeLibraryDir, "libproot.so")
@@ -235,6 +245,20 @@ internal class EmbeddedRuntimePaths(
         private const val FILE_MODE_MASK = 0b111111111
         private val HOST_LAYOUT_LOCK = Any()
         private var sessionSnapshotsReconciled = false
+        @Volatile private var sharedInstance: EmbeddedRuntimePaths? = null
+
+        /**
+         * Process-wide path graph for the default device target.
+         * Avoids N independent copies from installers / supervisors / DI.
+         */
+        fun shared(context: Context): EmbeddedRuntimePaths {
+            sharedInstance?.let { return it }
+            return synchronized(HOST_LAYOUT_LOCK) {
+                sharedInstance ?: EmbeddedRuntimePaths(context.applicationContext).also {
+                    sharedInstance = it
+                }
+            }
+        }
     }
 }
 

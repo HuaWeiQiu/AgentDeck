@@ -384,7 +384,11 @@ class CodexRpcClient internal constructor(
         private const val REQUEST_TIMEOUT_MILLIS = 30_000L
         internal val HTTP_CLIENT = OkHttpClient.Builder()
             .connectTimeout(CONNECT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+            .readTimeout(0, TimeUnit.MILLISECONDS) // long-lived websocket
+            .writeTimeout(30, TimeUnit.SECONDS)
             .pingInterval(30, TimeUnit.SECONDS)
+            // Local loopback only — tiny pool, no keep-alive zoo.
+            .connectionPool(okhttp3.ConnectionPool(2, 30, TimeUnit.SECONDS))
             .build()
 
         suspend fun connect(endpoint: CodexBridgeEndpoint): CodexRpcClient =

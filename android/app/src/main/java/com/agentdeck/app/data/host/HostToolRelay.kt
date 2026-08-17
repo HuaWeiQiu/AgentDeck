@@ -29,7 +29,7 @@ class HostToolRelay(
     private val scope: CoroutineScope,
 ) {
     private val app = context.applicationContext
-    private val paths = EmbeddedRuntimePaths(app)
+    private val paths = EmbeddedRuntimePaths.shared(app)
     private val reqDir = File(paths.stateDir, "host-req")
     private val resDir = File(paths.stateDir, "host-res")
     private val sessionFile = File(paths.stateDir, "host-session.json")

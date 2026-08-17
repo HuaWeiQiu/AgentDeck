@@ -1,5 +1,6 @@
 package com.agentdeck.app.ui.config
 
+import com.agentdeck.app.ui.theme.AgentDeckTopBar
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -72,13 +73,13 @@ fun CodexConfigScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
+            AgentDeckTopBar(
+                title = "Codex 参数",
                 navigationIcon = {
                     IconButton(onClick = requestBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
-                title = { Text("Codex 参数") },
                 actions = {
                     IconButton(
                         onClick = vm::save,

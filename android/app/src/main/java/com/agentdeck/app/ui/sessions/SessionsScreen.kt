@@ -2,9 +2,15 @@ package com.agentdeck.app.ui.sessions
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -36,12 +42,16 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -49,14 +59,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -70,6 +81,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -79,18 +91,25 @@ import com.agentdeck.app.domain.extensions.ExtensionKind
 import com.agentdeck.app.domain.extensions.ExtensionStatus
 import com.agentdeck.app.domain.extensions.ManagedExtension
 import com.agentdeck.app.domain.launch.CliAdapterDescriptor
+import com.agentdeck.app.domain.launch.CliAdapterRegistry
+import com.agentdeck.app.data.runtime.SessionAgentPrefetch
 import com.agentdeck.app.domain.model.AgentCard
+import com.agentdeck.app.domain.settings.ConversationModePolicy
+import com.agentdeck.app.domain.settings.ConversationMode
 import com.agentdeck.app.domain.model.CodexPermissionLevel
 import com.agentdeck.app.domain.model.ConversationIdentity
 import com.agentdeck.app.domain.model.ProviderModel
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
+import com.agentdeck.app.domain.model.isChatCompletionsCompatible
+import com.agentdeck.app.domain.model.isCodexResponsesCompatible
 import com.agentdeck.app.ui.common.DEFAULT_MAX_VISIBLE_MODELS
 import com.agentdeck.app.ui.common.filterSelectableModels
 import com.agentdeck.app.domain.setup.SetupState
 import com.agentdeck.app.ui.setup.customerSetupPresentation
 import com.agentdeck.app.ui.permissions.codexPermissionPresentation
 import com.agentdeck.app.ui.permissions.permissionSelectionLabel
+import com.agentdeck.app.ui.theme.AgentDeckTopBar
 import com.agentdeck.app.ui.theme.AppSpacing
 import kotlinx.coroutines.launch
 
@@ -100,17 +119,24 @@ fun SessionsScreen(
     onOpenSetup: () -> Unit = {},
     onOpenModels: () -> Unit = {},
     onOpenChat: (String) -> Unit = {},
+    onOpenDshWeb: (url: String) -> Unit = {},
+    onOpenPiChat: (cardId: String, title: String) -> Unit = { _, _ -> },
+    onOpenLightChat: (cardId: String) -> Unit = {},
+    onOpenRuntimes: () -> Unit = {},
     vm: SessionsViewModel = viewModel(),
 ) {
     val cardItems by vm.cardItems.collectAsStateWithLifecycle()
     val cardsHydrated by vm.cardsHydrated.collectAsStateWithLifecycle()
     val visibleItems by vm.visibleItems.collectAsStateWithLifecycle()
+    val primaryVisibleItems by vm.primaryVisibleItems.collectAsStateWithLifecycle()
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val profiles by vm.profiles.collectAsStateWithLifecycle()
     val models by vm.models.collectAsStateWithLifecycle()
     val allExtensions by vm.extensions.collectAsStateWithLifecycle()
     val selectableExtensions by vm.selectableExtensions.collectAsStateWithLifecycle()
     val setupState by vm.setupState.collectAsStateWithLifecycle()
+    val conversationMode by vm.conversationMode.collectAsStateWithLifecycle()
+    val availableAdapters by vm.availableAdapters.collectAsStateWithLifecycle()
     val experienceLevel by vm.experienceLevel.collectAsStateWithLifecycle()
     val defaultPermissionLevel by vm.defaultPermissionLevel.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -119,36 +145,146 @@ fun SessionsScreen(
     var deleting by remember { mutableStateOf<AgentCard?>(null) }
     var renaming by remember { mutableStateOf<SessionCardUi?>(null) }
     var runtimeMissingDialog by remember { mutableStateOf(false) }
+    var openingExternal by remember { mutableStateOf(false) }
+    var modeMenuExpanded by remember { mutableStateOf(false) }
     val showLocalDataNotice by vm.showLocalDataNotice.collectAsStateWithLifecycle()
-    val showSetupBanner = shouldShowSetupBanner(setupState, cardItems.map { it.card }, profiles)
-    val activeItems = remember(visibleItems) { visibleItems.filter { !it.card.archived } }
-    val archivedItems = remember(visibleItems) { visibleItems.filter { it.card.archived } }
+    val showSetupBanner = shouldShowSetupBanner(
+        conversationMode = conversationMode,
+        setupState = setupState,
+    )
+    val activeItems = remember(primaryVisibleItems) { primaryVisibleItems.filter { !it.card.archived } }
+    val archivedItems = remember(primaryVisibleItems) { primaryVisibleItems.filter { it.card.archived } }
     val runtimeReady = setupState.canStartChat
 
     fun tryCreateSession() {
-        if (!runtimeReady) {
-            runtimeMissingDialog = true
-        } else {
-            editor = vm.newDraft()
-        }
+        // 轻聊不依赖 Codex runtime；开发 Agent 在保存/进入时再校验环境。
+        editor = vm.newDraft()
     }
 
-    fun tryOpenChat(cardId: String) {
-        if (!runtimeReady) {
-            runtimeMissingDialog = true
-        } else {
-            onOpenChat(cardId)
+    fun enterSession(item: SessionCardUi) {
+        if (openingExternal) return
+        val recipeId = item.card.recipeId
+        when {
+            CliAdapterRegistry.usesLightChat(recipeId) -> {
+                vm.touchActivity(item.card.id)
+                onOpenLightChat(item.card.id)
+            }
+            !runtimeReady -> runtimeMissingDialog = true
+            CliAdapterRegistry.requiresCodexNativeChat(recipeId) -> {
+                if (!canStartConversation(setupState, item.profile)) {
+                    onOpenSetup()
+                } else {
+                    onOpenChat(item.card.id)
+                }
+            }
+            recipeId == "recipe_deepseek_harness" -> {
+                if (!vm.isDshRuntimeReady()) {
+                    Toast.makeText(
+                        context,
+                        "请先安装 dsh：设置 → 运行环境",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    onOpenRuntimes()
+                    return
+                }
+                openingExternal = true
+                scope.launch {
+                    val result = vm.openDshWebUrl()
+                    openingExternal = false
+                    result.fold(
+                        onSuccess = { url ->
+                            vm.touchActivity(item.card.id)
+                            onOpenDshWeb(url)
+                        },
+                        onFailure = { error ->
+                            Toast.makeText(
+                                context,
+                                error.message ?: "无法打开 dsh",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        },
+                    )
+                }
+            }
+            recipeId == "recipe_pi" -> {
+                if (!vm.isPiRuntimeReady()) {
+                    Toast.makeText(
+                        context,
+                        "请先安装 pi：设置 → 运行环境",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    onOpenRuntimes()
+                    return
+                }
+                vm.touchActivity(item.card.id)
+                onOpenPiChat(
+                    item.card.id,
+                    item.displayTitle.ifBlank { item.card.name },
+                )
+            }
+            else -> {
+                Toast.makeText(context, "该 Agent 尚未支持从对话打开", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("对话") },
+            AgentDeckTopBar(
+                title = "对话",
+                centerTitle = true,
+                // 左：模式；中：对话；右：新建
+                navigationIcon = {
+                    Box(modifier = Modifier.wrapContentSize(Alignment.TopStart)) {
+                        TextButton(onClick = { modeMenuExpanded = true }) {
+                            Text(conversationMode.title)
+                        }
+                        DropdownMenu(
+                            expanded = modeMenuExpanded,
+                            onDismissRequest = { modeMenuExpanded = false },
+                            modifier = Modifier.border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                shape = RoundedCornerShape(12.dp),
+                            ),
+                            offset = DpOffset(0.dp, 4.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 0.dp,
+                            shadowElevation = 6.dp,
+                        ) {
+                            ConversationMode.entries.forEach { mode ->
+                                val selected = mode == conversationMode
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            mode.title,
+                                            color = if (selected) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            },
+                                            style = MaterialTheme.typography.bodyLarge,
+                                        )
+                                    },
+                                    onClick = {
+                                        modeMenuExpanded = false
+                                        if (!selected) {
+                                            vm.setConversationMode(mode)
+                                        }
+                                    },
+                                    colors = MenuDefaults.itemColors(
+                                        textColor = MaterialTheme.colorScheme.onSurface,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                },
                 actions = {
                     IconButton(
                         onClick = { tryCreateSession() },
-                        enabled = vm.availableAdapters.isNotEmpty(),
+                        enabled = availableAdapters.isNotEmpty(),
                     ) {
                         Icon(Icons.Filled.Add, contentDescription = "新建会话")
                     }
@@ -160,17 +296,16 @@ fun SessionsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(horizontal = AppSpacing.lg, vertical = AppSpacing.sm),
+            contentPadding = PaddingValues(horizontal = AppSpacing.page, vertical = AppSpacing.sm),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.sm),
         ) {
             if (showSetupBanner) {
                 item {
-                    Box(Modifier.padding(bottom = 10.dp)) {
-                        SetupBanner(
-                            state = setupState,
-                            onClick = onOpenSetup,
-                            titleOverride = "运行环境未就绪",
-                        )
-                    }
+                    SetupBanner(
+                        state = setupState,
+                        onClick = onOpenSetup,
+                        titleOverride = "运行环境未就绪",
+                    )
                 }
             }
             if (cardItems.isNotEmpty()) {
@@ -180,9 +315,15 @@ fun SessionsScreen(
                         onValueChange = vm::setSearchQuery,
                         placeholder = { Text("搜索对话") },
                         singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = AppSpacing.sm),
+                            .heightIn(min = 48.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        ),
                         leadingIcon = {
                             Icon(
                                 Icons.Filled.Search,
@@ -208,22 +349,35 @@ fun SessionsScreen(
             } else if (cardItems.isEmpty()) {
                 item {
                     EmptySessionsChecklist(
+                        mode = conversationMode,
                         runtimeReady = runtimeReady,
-                        modelReady = setupState.isReady || profiles.any { profile ->
-                            profile.credentialRef != null &&
-                                (profile.connectionStatus == ProviderConnectionStatus.READY ||
-                                    profile.connectionStatus == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED)
+                        modelReady = when (conversationMode) {
+                            ConversationMode.LIGHT -> profiles.any { profile ->
+                                profile.adapterId.isChatCompletionsCompatible() &&
+                                    profile.credentialRef != null &&
+                                    (profile.connectionStatus == ProviderConnectionStatus.READY ||
+                                        profile.connectionStatus == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED)
+                            }
+                            ConversationMode.DEV -> setupState.isReady || profiles.any { profile ->
+                                profile.credentialRef != null &&
+                                    (profile.connectionStatus == ProviderConnectionStatus.READY ||
+                                        profile.connectionStatus == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED)
+                            }
                         },
                         onOpenSetup = onOpenSetup,
                         onOpenModels = onOpenModels,
                         onCreate = { tryCreateSession() },
-                        canCreate = vm.availableAdapters.isNotEmpty(),
+                        canCreate = availableAdapters.isNotEmpty(),
                     )
                 }
-            } else if (visibleItems.isEmpty()) {
+            } else if (primaryVisibleItems.isEmpty()) {
                 item {
                     Text(
-                        "没有匹配的对话",
+                        if (searchQuery.isNotBlank()) {
+                            "没有匹配的对话"
+                        } else {
+                            "当前模式还没有会话，点右上角新建"
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 32.dp),
@@ -233,17 +387,16 @@ fun SessionsScreen(
                     )
                 }
             }
-            itemsIndexed(activeItems, key = { _, item -> item.card.id }) { index, item ->
+            itemsIndexed(activeItems, key = { _, item -> item.card.id }) { _, item ->
                 AgentCardItem(
                     item = item,
                     setupState = setupState,
                     onEnter = {
-                        if (!canStartConversation(setupState, item.profile)) {
-                            onOpenSetup()
-                        } else {
-                            tryOpenChat(item.card.id)
-                        }
+                        SessionAgentPrefetch.onCardOpened(item.card.id)
+                        enterSession(item)
                     },
+                    onPrefetch = { SessionAgentPrefetch.onCardPress(item.card) },
+                    onPrefetchCancel = { SessionAgentPrefetch.onCardCancel(item.card.id) },
                     onEdit = { editor = vm.editDraft(item) },
                     onRename = { renaming = item },
                     onTogglePinned = {
@@ -271,30 +424,26 @@ fun SessionsScreen(
                     },
                     onDelete = { deleting = item.card },
                 )
-                if (index < activeItems.lastIndex) {
-                    HorizontalDivider()
-                }
             }
             if (archivedItems.isNotEmpty()) {
                 item {
                     Text(
                         "已归档",
-                        modifier = Modifier.padding(top = AppSpacing.lg, bottom = AppSpacing.xs),
+                        modifier = Modifier.padding(top = AppSpacing.sm),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                itemsIndexed(archivedItems, key = { _, item -> item.card.id }) { index, item ->
+                itemsIndexed(archivedItems, key = { _, item -> item.card.id }) { _, item ->
                     AgentCardItem(
                         item = item,
                         setupState = setupState,
                         onEnter = {
-                            if (!canStartConversation(setupState, item.profile)) {
-                                onOpenSetup()
-                            } else {
-                                tryOpenChat(item.card.id)
-                            }
+                            SessionAgentPrefetch.onCardOpened(item.card.id)
+                            enterSession(item)
                         },
+                        onPrefetch = { SessionAgentPrefetch.onCardPress(item.card) },
+                        onPrefetchCancel = { SessionAgentPrefetch.onCardCancel(item.card.id) },
                         onEdit = { editor = vm.editDraft(item) },
                         onRename = { renaming = item },
                         onTogglePinned = {
@@ -322,9 +471,6 @@ fun SessionsScreen(
                         },
                         onDelete = { deleting = item.card },
                     )
-                    if (index < archivedItems.lastIndex) {
-                        HorizontalDivider()
-                    }
                 }
             }
         }
@@ -333,7 +479,7 @@ fun SessionsScreen(
     editor?.let { draft ->
         CardEditorDialog(
             initial = draft,
-            adapters = vm.availableAdapters,
+            adapters = availableAdapters,
             profiles = profiles,
             models = models,
             extensions = extensionPickerOptions(
@@ -488,10 +634,11 @@ private fun RenameDialog(
 }
 
 internal fun shouldShowSetupBanner(
+    conversationMode: ConversationMode,
     setupState: SetupState,
-    cards: List<AgentCard>,
-    profiles: List<ProviderProfile>,
 ): Boolean {
+    // 轻聊不依赖嵌入式 Runtime，勿用 Codex 安装状态打扰。
+    if (!ConversationModePolicy.requiresEmbeddedRuntime(conversationMode)) return false
     // Runtime already launchable → never show the "runtime not ready" strip.
     if (setupState.canStartChat) return false
     // Still checking / not settled → don't flash a premature failure.
@@ -523,6 +670,7 @@ internal fun conversationSummary(
 
 @Composable
 private fun EmptySessionsChecklist(
+    mode: ConversationMode,
     runtimeReady: Boolean,
     modelReady: Boolean,
     onOpenSetup: () -> Unit,
@@ -530,45 +678,69 @@ private fun EmptySessionsChecklist(
     onCreate: () -> Unit,
     canCreate: Boolean,
 ) {
+    val needsRuntime = ConversationModePolicy.requiresEmbeddedRuntime(mode)
+    val gateReady = (!needsRuntime || runtimeReady) && modelReady
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 24.dp),
+            .padding(vertical = AppSpacing.xxl, horizontal = AppSpacing.sm),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.size(64.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Chat,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(30.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(AppSpacing.md))
         Text(
-            if (runtimeReady && modelReady) "还没有会话" else "开始使用",
-            style = MaterialTheme.typography.titleMedium,
+            if (gateReady) "还没有会话" else "开始使用",
+            style = MaterialTheme.typography.titleLarge,
         )
         Spacer(Modifier.height(AppSpacing.sm))
         Text(
-            if (runtimeReady && modelReady) {
+            if (gateReady) {
                 "新建一个会话就可以开始聊天，也可以先给助手写个人设"
             } else {
                 "准备好环境并连上模型后，就可以聊天"
             },
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(AppSpacing.lg))
-        if (runtimeReady && modelReady) {
+        if (gateReady) {
             Button(onClick = onCreate, enabled = canCreate) {
                 Text("新建会话")
             }
             return@Column
         }
+        if (needsRuntime) {
+            ChecklistStep(
+                index = 1,
+                title = "准备聊天环境",
+                done = runtimeReady,
+                actionLabel = if (runtimeReady) "已完成" else "去准备",
+                onAction = onOpenSetup,
+                enabled = !runtimeReady,
+            )
+            Spacer(Modifier.height(AppSpacing.sm))
+        }
         ChecklistStep(
-            index = 1,
-            title = "准备聊天环境",
-            done = runtimeReady,
-            actionLabel = if (runtimeReady) "已完成" else "去准备",
-            onAction = onOpenSetup,
-            enabled = !runtimeReady,
-        )
-        Spacer(Modifier.height(AppSpacing.sm))
-        ChecklistStep(
-            index = 2,
-            title = "连接模型服务",
+            index = if (needsRuntime) 2 else 1,
+            title = if (mode == ConversationMode.LIGHT) {
+                "连接 Chat Completions 模型服务"
+            } else {
+                "连接模型服务"
+            },
             done = modelReady,
             actionLabel = if (modelReady) "已完成" else "去设置",
             onAction = onOpenModels,
@@ -576,12 +748,12 @@ private fun EmptySessionsChecklist(
         )
         Spacer(Modifier.height(AppSpacing.sm))
         ChecklistStep(
-            index = 3,
+            index = if (needsRuntime) 3 else 2,
             title = "新建会话",
             done = false,
             actionLabel = "新建",
             onAction = onCreate,
-            enabled = canCreate,
+            enabled = canCreate && modelReady && (!needsRuntime || runtimeReady),
         )
     }
 }
@@ -689,6 +861,8 @@ private fun AgentCardItem(
     onTogglePinned: () -> Unit,
     onToggleArchived: () -> Unit,
     onDelete: () -> Unit,
+    onPrefetch: () -> Unit = {},
+    onPrefetchCancel: () -> Unit = {},
 ) {
     val card = item.card
     val canEnter = item.recipeAvailable && card.enabled
@@ -698,72 +872,89 @@ private fun AgentCardItem(
         !card.enabled -> "已停用"
         else -> "运行中"
     }
+    val statusColor = when {
+        !item.recipeAvailable -> MaterialTheme.colorScheme.error
+        !card.enabled -> MaterialTheme.colorScheme.outline
+        else -> MaterialTheme.colorScheme.primary
+    }
 
-    Row(
+    Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = canEnter, onClick = onEnter)
-            .padding(vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .pointerInput(canEnter, item.card.id) {
+                if (!canEnter) return@pointerInput
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    onPrefetch()
+                    val up = waitForUpOrCancellation()
+                    if (up == null) {
+                        onPrefetchCancel()
+                    }
+                }
+            }
+            .clickable(enabled = canEnter, onClick = onEnter),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        // 状态圆点仅靠颜色传达语义，补 contentDescription 供无障碍读取
-        Box(
+        Row(
             modifier = Modifier
-                .size(9.dp)
-                .semantics(mergeDescendants = true) {
-                    contentDescription = statusDescription
-                }
-                .background(
-                    color = when {
-                        !item.recipeAvailable -> MaterialTheme.colorScheme.error
-                        !card.enabled -> MaterialTheme.colorScheme.outline
-                        else -> MaterialTheme.colorScheme.secondary
-                    },
-                    shape = CircleShape,
-                ),
-        )
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (card.pinned) {
-                    Icon(
-                        Icons.Filled.PushPin,
-                        contentDescription = "已置顶",
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.primary,
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 状态圆点仅靠颜色传达语义，补 contentDescription 供无障碍读取
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = statusDescription
+                    }
+                    .background(color = statusColor, shape = CircleShape),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (card.pinned) {
+                        Icon(
+                            Icons.Filled.PushPin,
+                            contentDescription = "已置顶",
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        item.displayTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
-                    Spacer(Modifier.width(4.dp))
                 }
+                Spacer(Modifier.height(3.dp))
                 Text(
-                    item.displayTitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 2,
+                    item.summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    listOfNotNull(
+                        card.identity?.roleName?.let { "角色 · $it" },
+                        item.lastActiveLabel,
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(3.dp))
-            Text(
-                item.summary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                listOfNotNull(
-                    card.identity?.roleName?.let { "角色 · $it" },
-                    "最后活动 · ${item.lastActiveLabel}",
-                ).joinToString("   "),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.width(AppSpacing.sm))
-        Row(verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.width(AppSpacing.xs))
             if (!item.recipeAvailable || !card.enabled) {
                 Text(
                     if (!item.recipeAvailable) "尚未开放" else "已停用",
@@ -775,13 +966,23 @@ private fun AgentCardItem(
                     },
                 )
             }
-            Box {
+            Box(modifier = Modifier.wrapContentSize(Alignment.TopEnd)) {
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(Icons.Filled.MoreVert, contentDescription = "对话操作")
                 }
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
+                    modifier = Modifier.border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        shape = RoundedCornerShape(12.dp),
+                    ),
+                    offset = DpOffset(0.dp, 4.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 6.dp,
                 ) {
                     DropdownMenuItem(
                         text = { Text("编辑") },
@@ -790,6 +991,10 @@ private fun AgentCardItem(
                             menuExpanded = false
                             onEdit()
                         },
+                        colors = MenuDefaults.itemColors(
+                            textColor = MaterialTheme.colorScheme.onSurface,
+                            leadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
                     )
                     DropdownMenuItem(
                         text = { Text("重命名") },
@@ -798,6 +1003,10 @@ private fun AgentCardItem(
                             menuExpanded = false
                             onRename()
                         },
+                        colors = MenuDefaults.itemColors(
+                            textColor = MaterialTheme.colorScheme.onSurface,
+                            leadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
                     )
                     DropdownMenuItem(
                         text = { Text(if (card.pinned) "取消置顶" else "置顶") },
@@ -808,6 +1017,10 @@ private fun AgentCardItem(
                             menuExpanded = false
                             onTogglePinned()
                         },
+                        colors = MenuDefaults.itemColors(
+                            textColor = MaterialTheme.colorScheme.onSurface,
+                            leadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
                     )
                     DropdownMenuItem(
                         text = { Text(if (card.archived) "取消归档" else "归档") },
@@ -816,6 +1029,10 @@ private fun AgentCardItem(
                             menuExpanded = false
                             onToggleArchived()
                         },
+                        colors = MenuDefaults.itemColors(
+                            textColor = MaterialTheme.colorScheme.onSurface,
+                            leadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
                     )
                     DropdownMenuItem(
                         text = { Text("删除") },
@@ -824,6 +1041,10 @@ private fun AgentCardItem(
                             menuExpanded = false
                             onDelete()
                         },
+                        colors = MenuDefaults.itemColors(
+                            textColor = MaterialTheme.colorScheme.error,
+                            leadingIconColor = MaterialTheme.colorScheme.error,
+                        ),
                     )
                 }
             }
@@ -852,10 +1073,30 @@ private fun CardEditorDialog(
     var permissionExpanded by remember { mutableStateOf(false) }
     var extensionPickerVisible by remember { mutableStateOf(false) }
     val selectedAdapter = adapters.firstOrNull { it.recipeId == draft.recipeId }
-    val compatibleProfiles = profiles.filter {
-        it.type == selectedAdapter?.providerType &&
-            (it.connectionStatus == ProviderConnectionStatus.READY ||
-                it.connectionStatus == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED)
+    val externalAgent = CliAdapterRegistry.usesExternalAgentUi(draft.recipeId)
+    val piAgent = CliAdapterRegistry.usesPiNativeChat(draft.recipeId)
+    val lightAgent = CliAdapterRegistry.usesLightChat(draft.recipeId)
+    val lightMode = lightAgent
+    val modeAdapters = remember(adapters, lightMode) {
+        adapters.filter {
+            if (lightMode) CliAdapterRegistry.usesLightChat(it.recipeId)
+            else CliAdapterRegistry.isDevMode(it.recipeId)
+        }
+    }
+    val compatibleProfiles = when {
+        externalAgent -> emptyList()
+        piAgent || lightAgent -> profiles.filter {
+            it.type == selectedAdapter?.providerType &&
+                it.adapterId.isChatCompletionsCompatible() &&
+                (it.connectionStatus == ProviderConnectionStatus.READY ||
+                    it.connectionStatus == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED)
+        }
+        else -> profiles.filter {
+            it.type == selectedAdapter?.providerType &&
+                it.adapterId.isCodexResponsesCompatible() &&
+                (it.connectionStatus == ProviderConnectionStatus.READY ||
+                    it.connectionStatus == ProviderConnectionStatus.DISCOVERY_UNSUPPORTED)
+        }
     }
     val selectedProfile = compatibleProfiles.firstOrNull { it.id == draft.profileId }
     val availableModels = selectedProfile?.let { profile ->
@@ -920,7 +1161,7 @@ private fun CardEditorDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (showAdvanced && adapters.size > 1) {
+                if (modeAdapters.size > 1) {
                     ExposedDropdownMenuBox(
                         expanded = cliExpanded,
                         onExpandedChange = { cliExpanded = it },
@@ -929,7 +1170,20 @@ private fun CardEditorDialog(
                             value = selectedAdapter?.displayName.orEmpty(),
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Agent") },
+                            label = { Text(if (lightMode) "轻聊引擎" else "开发引擎") },
+                            supportingText = {
+                                Text(
+                                    when (draft.recipeId) {
+                                        "recipe_light" ->
+                                            "轻聊 · 无本地 runtime · 可写角色"
+                                        "recipe_deepseek_harness" ->
+                                            "本机网页；chat 网关（如 dots）在 dsh 内配置"
+                                        "recipe_pi" ->
+                                            "开发 · pi 原生聊天 · Chat Completions"
+                                        else -> "开发 · Codex 原生 · Responses"
+                                    },
+                                )
+                            },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(cliExpanded) },
                             modifier = Modifier
                                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
@@ -939,14 +1193,35 @@ private fun CardEditorDialog(
                             expanded = cliExpanded,
                             onDismissRequest = { cliExpanded = false },
                         ) {
-                            adapters.forEach { adapter ->
+                            modeAdapters.forEach { adapter ->
                                 DropdownMenuItem(
-                                    text = { Text(adapter.displayName) },
+                                    text = {
+                                        Column {
+                                            Text(adapter.displayName)
+                                            Text(
+                                                when (adapter.recipeId) {
+                                                    "recipe_light" -> "轻聊 · 无 runtime"
+                                                    "recipe_deepseek_harness" -> "网页 · chat 网关"
+                                                    "recipe_pi" -> "开发 · Chat Completions"
+                                                    else -> "开发 · Responses"
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    },
                                     onClick = {
                                         draft = draft.copy(
                                             recipeId = adapter.recipeId,
+                                            name = if (draft.id == null) {
+                                                adapter.displayName
+                                            } else {
+                                                draft.name
+                                            },
                                             profileId = null,
                                             modelId = null,
+                                            permissionLevel = null,
+                                            selectedExtensionIds = emptySet(),
                                             workspacePath = adapter.defaultWorkspacePath,
                                         )
                                         cliExpanded = false
@@ -956,262 +1231,295 @@ private fun CardEditorDialog(
                         }
                     }
                 }
-                ExposedDropdownMenuBox(
-                    expanded = providerExpanded,
-                    onExpandedChange = { providerExpanded = it },
-                ) {
-                    OutlinedTextField(
-                        value = selectedProfile?.name ?: "当前 Codex 配置",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("模型服务") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(providerExpanded) },
-                        modifier = Modifier
-                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                            .fillMaxWidth(),
+                if (externalAgent) {
+                    Text(
+                        "打开会话会进入 dsh 网页。未安装时会跳转到「运行环境」。密钥与模型在 dsh 内配置。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    ExposedDropdownMenu(
-                        expanded = providerExpanded,
-                        onDismissRequest = { providerExpanded = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("当前 Codex 配置") },
-                            onClick = {
-                                draft = draft.copy(profileId = null, modelId = null)
-                                providerExpanded = false
+                } else {
+                    if (piAgent || lightAgent) {
+                        Text(
+                            if (lightAgent) {
+                                "轻聊：选 Chat Completions（如 dots）。不装 runtime，可写角色。"
+                            } else {
+                                "选择「模型服务」里添加的 Chat Completions（如小红书 dots）。不走 Codex Responses。"
                             },
-                        )
-                        compatibleProfiles.forEach { profile ->
-                            DropdownMenuItem(
-                                text = { Text(profile.name) },
-                                onClick = {
-                                    draft = draft.copy(
-                                        profileId = profile.id,
-                                        modelId = profile.defaultModel,
-                                    )
-                                    providerExpanded = false
-                                },
-                            )
-                        }
-                    }
-                }
-                if (selectedProfile != null) {
-                    ExposedDropdownMenuBox(
-                        expanded = modelExpanded,
-                        onExpandedChange = { modelExpanded = it },
-                    ) {
-                        OutlinedTextField(
-                            value = selectedModelLabel,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("模型") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(modelExpanded) },
-                            modifier = Modifier
-                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                                .fillMaxWidth(),
-                        )
-                        ExposedDropdownMenu(
-                            expanded = modelExpanded,
-                            onDismissRequest = { modelExpanded = false },
-                        ) {
-                            selectableModels.forEach { model ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(model.displayName)
-                                            if (model.displayName != model.id) {
-                                                Text(
-                                                    model.id,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onClick = {
-                                        draft = draft.copy(modelId = model.id)
-                                        modelExpanded = false
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-                HorizontalDivider()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            if (draft.id == null) "给这个助手写个人设" else "角色身份",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            if (draft.id == null) "可选，跳过也能直接开始聊" else "本会话的固定人设",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(
-                        checked = draft.identity != null,
-                        onCheckedChange = { enabled ->
-                            draft = draft.copy(
-                                identity = if (enabled) {
-                                    draft.identity ?: ConversationIdentity("", "")
-                                } else {
-                                    null
-                                },
-                            )
-                        },
-                    )
-                }
-                draft.identity?.let { identity ->
-                    OutlinedTextField(
-                        value = identity.roleName,
-                        onValueChange = {
-                            if (it.length <= ConversationIdentityPolicy.MAX_ROLE_NAME_LENGTH) {
-                                draft = draft.copy(identity = identity.copy(roleName = it))
-                            }
-                        },
-                        label = { Text("角色名称") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = identity.selfDefinition,
-                        onValueChange = {
-                            if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
-                                draft = draft.copy(identity = identity.copy(selfDefinition = it))
-                            }
-                        },
-                        label = { Text("这个助手是谁") },
-                        minLines = 2,
-                        maxLines = 4,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = identity.objective,
-                        onValueChange = {
-                            if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
-                                draft = draft.copy(identity = identity.copy(objective = it))
-                            }
-                        },
-                        label = { Text("主要目标（可选）") },
-                        minLines = 1,
-                        maxLines = 3,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = identity.communicationStyle,
-                        onValueChange = {
-                            if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
-                                draft = draft.copy(identity = identity.copy(communicationStyle = it))
-                            }
-                        },
-                        label = { Text("表达方式（可选）") },
-                        minLines = 1,
-                        maxLines = 3,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = identity.boundaries,
-                        onValueChange = {
-                            if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
-                                draft = draft.copy(identity = identity.copy(boundaries = it))
-                            }
-                        },
-                        label = { Text("必须遵守的设定（可选）") },
-                        minLines = 1,
-                        maxLines = 3,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                ListItem(
-                    headlineContent = { Text("扩展") },
-                    supportingContent = {
-                        Text(extensionSelectionLabel(draft.selectedExtensionIds, extensions))
-                    },
-                    leadingContent = {
-                        Icon(Icons.Filled.Extension, contentDescription = null)
-                    },
-                    trailingContent = {
-                        if (extensions.isNotEmpty()) {
-                            Icon(Icons.Filled.ChevronRight, contentDescription = null)
-                        }
-                    },
-                    modifier = Modifier.clickable(enabled = extensions.isNotEmpty()) {
-                        extensionPickerVisible = true
-                    },
-                )
-                if (showAdvanced) {
                     ExposedDropdownMenuBox(
-                        expanded = permissionExpanded,
-                        onExpandedChange = { permissionExpanded = it },
+                        expanded = providerExpanded,
+                        onExpandedChange = { providerExpanded = it },
                     ) {
                         OutlinedTextField(
-                            value = permissionSelectionLabel(
-                                draft.permissionLevel,
-                                defaultPermissionLevel,
-                            ),
+                            value = selectedProfile?.name ?: if (piAgent || lightAgent) {
+                                "请选择 Chat Completions 服务"
+                            } else {
+                                "当前 Codex 配置"
+                            },
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Codex 权限") },
-                            supportingText = {
-                                Text(permissionPresentation.description)
-                            },
-                            trailingIcon = {
-                                ExposedDropdownMenuDefaults.TrailingIcon(permissionExpanded)
-                            },
+                            label = { Text("模型服务") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(providerExpanded) },
                             modifier = Modifier
                                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                                 .fillMaxWidth(),
                         )
                         ExposedDropdownMenu(
-                            expanded = permissionExpanded,
-                            onDismissRequest = { permissionExpanded = false },
+                            expanded = providerExpanded,
+                            onDismissRequest = { providerExpanded = false },
                         ) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        "使用默认 · " +
-                                            codexPermissionPresentation(defaultPermissionLevel).title,
-                                    )
-                                },
-                                onClick = {
-                                    draft = draft.copy(permissionLevel = null)
-                                    permissionExpanded = false
-                                },
-                            )
-                            CodexPermissionLevel.entries.forEach { level ->
-                                val presentation = codexPermissionPresentation(level)
+                            if (!piAgent && !lightAgent) {
                                 DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(presentation.title)
-                                            Text(
-                                                presentation.description,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                    },
+                                    text = { Text("当前 Codex 配置") },
                                     onClick = {
-                                        draft = draft.copy(permissionLevel = level)
-                                        permissionExpanded = false
+                                        draft = draft.copy(profileId = null, modelId = null)
+                                        providerExpanded = false
+                                    },
+                                )
+                            }
+                            if (compatibleProfiles.isEmpty() && (piAgent || lightAgent)) {
+                                DropdownMenuItem(
+                                    text = { Text("暂无 Chat Completions 服务 · 请先到模型服务添加") },
+                                    onClick = { providerExpanded = false },
+                                )
+                            }
+                            compatibleProfiles.forEach { profile ->
+                                DropdownMenuItem(
+                                    text = { Text(profile.name) },
+                                    onClick = {
+                                        draft = draft.copy(
+                                            profileId = profile.id,
+                                            modelId = profile.defaultModel,
+                                        )
+                                        providerExpanded = false
                                     },
                                 )
                             }
                         }
                     }
-                    OutlinedTextField(
-                        value = draft.workspacePath,
-                        onValueChange = { draft = draft.copy(workspacePath = it) },
-                        label = { Text("项目文件夹") },
-                        singleLine = true,
+                    if (selectedProfile != null) {
+                        ExposedDropdownMenuBox(
+                            expanded = modelExpanded,
+                            onExpandedChange = { modelExpanded = it },
+                        ) {
+                            OutlinedTextField(
+                                value = selectedModelLabel,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("模型") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(modelExpanded) },
+                                modifier = Modifier
+                                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                                    .fillMaxWidth(),
+                            )
+                            ExposedDropdownMenu(
+                                expanded = modelExpanded,
+                                onDismissRequest = { modelExpanded = false },
+                            ) {
+                                selectableModels.forEach { model ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(model.displayName)
+                                                if (model.displayName != model.id) {
+                                                    Text(
+                                                        model.id,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            draft = draft.copy(modelId = model.id)
+                                            modelExpanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    HorizontalDivider()
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                    )
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                if (draft.id == null) "给这个助手写个人设" else "角色身份",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                if (draft.id == null) "可选，跳过也能直接开始聊" else "本会话的固定人设",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = draft.identity != null,
+                            onCheckedChange = { enabled ->
+                                draft = draft.copy(
+                                    identity = if (enabled) {
+                                        draft.identity ?: ConversationIdentity("", "")
+                                    } else {
+                                        null
+                                    },
+                                )
+                            },
+                        )
+                    }
+                    draft.identity?.let { identity ->
+                        OutlinedTextField(
+                            value = identity.roleName,
+                            onValueChange = {
+                                if (it.length <= ConversationIdentityPolicy.MAX_ROLE_NAME_LENGTH) {
+                                    draft = draft.copy(identity = identity.copy(roleName = it))
+                                }
+                            },
+                            label = { Text("角色名称") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = identity.selfDefinition,
+                            onValueChange = {
+                                if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
+                                    draft = draft.copy(identity = identity.copy(selfDefinition = it))
+                                }
+                            },
+                            label = { Text("这个助手是谁") },
+                            minLines = 2,
+                            maxLines = 4,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = identity.objective,
+                            onValueChange = {
+                                if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
+                                    draft = draft.copy(identity = identity.copy(objective = it))
+                                }
+                            },
+                            label = { Text("主要目标（可选）") },
+                            minLines = 1,
+                            maxLines = 3,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = identity.communicationStyle,
+                            onValueChange = {
+                                if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
+                                    draft = draft.copy(identity = identity.copy(communicationStyle = it))
+                                }
+                            },
+                            label = { Text("表达方式（可选）") },
+                            minLines = 1,
+                            maxLines = 3,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = identity.boundaries,
+                            onValueChange = {
+                                if (it.length <= ConversationIdentityPolicy.MAX_FIELD_LENGTH) {
+                                    draft = draft.copy(identity = identity.copy(boundaries = it))
+                                }
+                            },
+                            label = { Text("必须遵守的设定（可选）") },
+                            minLines = 1,
+                            maxLines = 3,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (!lightAgent && !piAgent && !externalAgent) {
+                        ListItem(
+                            headlineContent = { Text("扩展") },
+                            supportingContent = {
+                                Text(extensionSelectionLabel(draft.selectedExtensionIds, extensions))
+                            },
+                            leadingContent = {
+                                Icon(Icons.Filled.Extension, contentDescription = null)
+                            },
+                            trailingContent = {
+                                if (extensions.isNotEmpty()) {
+                                    Icon(Icons.Filled.ChevronRight, contentDescription = null)
+                                }
+                            },
+                            modifier = Modifier.clickable(enabled = extensions.isNotEmpty()) {
+                                extensionPickerVisible = true
+                            },
+                        )
+                    }
+                    if (showAdvanced && !lightAgent && !piAgent && !externalAgent) {
+                        ExposedDropdownMenuBox(
+                            expanded = permissionExpanded,
+                            onExpandedChange = { permissionExpanded = it },
+                        ) {
+                            OutlinedTextField(
+                                value = permissionSelectionLabel(
+                                    draft.permissionLevel,
+                                    defaultPermissionLevel,
+                                ),
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Codex 权限") },
+                                supportingText = {
+                                    Text(permissionPresentation.description)
+                                },
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(permissionExpanded)
+                                },
+                                modifier = Modifier
+                                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                                    .fillMaxWidth(),
+                            )
+                            ExposedDropdownMenu(
+                                expanded = permissionExpanded,
+                                onDismissRequest = { permissionExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "使用默认 · " +
+                                                codexPermissionPresentation(defaultPermissionLevel).title,
+                                        )
+                                    },
+                                    onClick = {
+                                        draft = draft.copy(permissionLevel = null)
+                                        permissionExpanded = false
+                                    },
+                                )
+                                CodexPermissionLevel.entries.forEach { level ->
+                                    val presentation = codexPermissionPresentation(level)
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(presentation.title)
+                                                Text(
+                                                    presentation.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            draft = draft.copy(permissionLevel = level)
+                                            permissionExpanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        OutlinedTextField(
+                            value = draft.workspacePath,
+                            onValueChange = { draft = draft.copy(workspacePath = it) },
+                            label = { Text("项目文件夹") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
                 if (showAdvanced || !draft.enabled) {
                     Row(
@@ -1233,11 +1541,20 @@ private fun CardEditorDialog(
                 enabled = selectedAdapter != null &&
                     draft.name.isNotBlank() &&
                     draft.workspacePath.startsWith('/') &&
-                    (draft.identity == null ||
-                        draft.identity?.roleName?.isNotBlank() == true &&
-                        draft.identity?.selfDefinition?.isNotBlank() == true) &&
-                    (draft.profileId == null ||
-                        availableModels.any { it.id == draft.modelId }),
+                    (externalAgent || (
+                        (draft.identity == null ||
+                            draft.identity?.roleName?.isNotBlank() == true &&
+                            draft.identity?.selfDefinition?.isNotBlank() == true) &&
+                            (
+                                if (piAgent || lightAgent) {
+                                    draft.profileId != null &&
+                                        availableModels.any { it.id == draft.modelId }
+                                } else {
+                                    draft.profileId == null ||
+                                        availableModels.any { it.id == draft.modelId }
+                                }
+                            )
+                        )),
             ) { Text("保存") }
         },
         dismissButton = {

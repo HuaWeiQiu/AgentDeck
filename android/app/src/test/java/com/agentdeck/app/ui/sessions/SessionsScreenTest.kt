@@ -1,6 +1,7 @@
 package com.agentdeck.app.ui.sessions
 
 import com.agentdeck.app.domain.model.EnvironmentCheckStatus
+import com.agentdeck.app.domain.settings.ConversationMode
 import com.agentdeck.app.domain.extensions.ExtensionKind
 import com.agentdeck.app.domain.extensions.ExtensionLevel
 import com.agentdeck.app.domain.extensions.ExtensionStatus
@@ -70,20 +71,18 @@ class SessionsScreenTest {
         // Runtime launchable (even if model auth pending) → no runtime banner.
         assertFalse(
             shouldShowSetupBanner(
-                SetupState(reportWithoutAuthentication(), checkSettled = true),
-                listOf(card),
-                profiles,
+                conversationMode = ConversationMode.DEV,
+                setupState = SetupState(reportWithoutAuthentication(), checkSettled = true),
             ),
         )
         // Not settled yet → no flash.
         assertFalse(
             shouldShowSetupBanner(
-                SetupState(readyReport(), checkSettled = false, isScanning = true),
-                emptyList(),
-                emptyList(),
+                conversationMode = ConversationMode.DEV,
+                setupState = SetupState(readyReport(), checkSettled = false, isScanning = true),
             ),
         )
-        // Settled and runtime cannot launch → show banner.
+        // Settled and runtime cannot launch → show banner in DEV only.
         val broken = SetupState(
             report = EnvironmentReport(
                 readyReport().checks.map { check ->
@@ -96,7 +95,18 @@ class SessionsScreenTest {
             ),
             checkSettled = true,
         )
-        assertTrue(shouldShowSetupBanner(broken, emptyList(), emptyList()))
+        assertTrue(
+            shouldShowSetupBanner(
+                conversationMode = ConversationMode.DEV,
+                setupState = broken,
+            ),
+        )
+        assertFalse(
+            shouldShowSetupBanner(
+                conversationMode = ConversationMode.LIGHT,
+                setupState = broken,
+            ),
+        )
     }
 
     @Test

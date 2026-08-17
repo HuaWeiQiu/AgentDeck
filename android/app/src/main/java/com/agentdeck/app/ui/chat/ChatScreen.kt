@@ -1,5 +1,6 @@
 package com.agentdeck.app.ui.chat
 
+import com.agentdeck.app.ui.theme.AgentDeckTopBar
 import android.Manifest
 import android.content.ClipData
 import android.content.Intent
@@ -79,7 +80,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -96,6 +96,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
@@ -148,6 +149,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+
+/** Shared composer control height so attach / field / mic / send share one vertical center. */
+private val ComposerControlSize = 42.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -204,68 +208,68 @@ fun ChatScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             val settingsAvailable = state.availableModels.isNotEmpty() || showTechnicalDetails
-            TopAppBar(
+            val currentModel = state.selectedModel ?: state.runtimeModel
+            val currentModelLabel = state.availableModels
+                .firstOrNull { it.id == currentModel }
+                ?.displayName
+                ?: currentModel
+                ?: "Codex"
+            AgentDeckTopBar(
+                title = {
+                    Text(
+                        state.card?.name ?: "Codex",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
-                title = {
-                    val currentModel = state.selectedModel ?: state.runtimeModel
-                    val currentModelLabel = state.availableModels
-                        .firstOrNull { it.id == currentModel }
-                        ?.displayName
-                        ?: currentModel
-                        ?: "Codex"
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                actions = {
+                    if (settingsAvailable) {
+                        Surface(
+                            onClick = { chatSettingsVisible = true },
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .widthIn(max = 168.dp),
+                            shape = RoundedCornerShape(999.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    currentModelLabel,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                Icon(
+                                    Icons.Filled.ExpandMore,
+                                    contentDescription = "选择对话模型和权限",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        }
+                    } else {
                         Text(
-                            state.card?.name ?: "Codex",
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.titleLarge,
+                            currentModelLabel,
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .widthIn(max = 168.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Spacer(Modifier.width(8.dp))
-                        if (settingsAvailable) {
-                            Surface(
-                                onClick = { chatSettingsVisible = true },
-                                modifier = Modifier.widthIn(max = 230.dp),
-                                shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        currentModelLabel,
-                                        modifier = Modifier.weight(1f, fill = false),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Spacer(Modifier.width(3.dp))
-                                    Icon(
-                                        Icons.Filled.ExpandMore,
-                                        contentDescription = "选择对话模型和权限",
-                                        modifier = Modifier.size(18.dp),
-                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    )
-                                }
-                            }
-                        } else {
-                            Text(
-                                currentModelLabel,
-                                modifier = Modifier.widthIn(max = 230.dp),
-                                style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
                     }
                 },
             )
@@ -549,7 +553,7 @@ internal fun ChatTranscript(
                             Modifier.testTag(listTestTag)
                         },
                     ),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.Top,
             ) {
             if (transcript.isLoadingOlder) {
@@ -620,14 +624,14 @@ internal fun ChatTranscript(
             }
             if (transcript.isReconnecting) {
                 item(key = "reconnecting", contentType = "banner") {
-                    Box(Modifier.padding(top = 14.dp)) {
+                    Box(Modifier.padding(top = 8.dp)) {
                         ReconnectingBanner(onRetry = onRetry)
                     }
                 }
             }
             transcript.error?.let { error ->
                 item(key = "error", contentType = "banner") {
-                    Box(Modifier.padding(top = 14.dp)) {
+                    Box(Modifier.padding(top = 8.dp)) {
                         ErrorBanner(
                             error = customerFacingChatError(error, showTechnicalDetails),
                             onRetry = onRetry,
@@ -640,7 +644,7 @@ internal fun ChatTranscript(
             ) {
                 item(key = "responding") {
                     Row(
-                        modifier = Modifier.padding(top = 14.dp),
+                        modifier = Modifier.padding(top = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -682,34 +686,6 @@ internal fun ChatTranscript(
     }
 }
 
-@Composable
-private fun ChatMarkdownEnvironment(content: @Composable () -> Unit) {
-    val components = remember {
-        markdownComponents(
-            codeFence = { model ->
-                MarkdownCodeFence(content = model.content, node = model.node) { code, _, _ ->
-                    CodeBlockWithCopy(code = code)
-                }
-            },
-            codeBlock = { model ->
-                MarkdownCodeBlock(content = model.content, node = model.node) { code, _, _ ->
-                    CodeBlockWithCopy(code = code)
-                }
-            },
-        )
-    }
-    val imageTransformer = remember { NoOpImageTransformerImpl() }
-    CompositionLocalProvider(
-        LocalMarkdownColors provides markdownColor(),
-        LocalMarkdownTypography provides markdownTypography(),
-        LocalMarkdownPadding provides markdownPadding(),
-        LocalMarkdownDimens provides markdownDimens(),
-        LocalImageTransformer provides imageTransformer,
-        LocalMarkdownComponents provides components,
-        LocalMarkdownAnimations provides markdownAnimations(animateTextSize = { this }),
-        content = content,
-    )
-}
 
 private fun androidx.compose.foundation.lazy.LazyListState.isNearBottom(): Boolean {
     val layout = layoutInfo
@@ -725,7 +701,7 @@ private fun timelineTopPadding(index: Int, entry: ChatTimelineEntry): androidx.c
     entry is ChatTimelineEntry.AssistantBlock && !entry.isFirst -> 0.dp
     entry is ChatTimelineEntry.ActivityChild -> 0.dp
     entry is ChatTimelineEntry.ActivityHeader -> 0.dp
-    else -> 14.dp
+    else -> 8.dp
 }
 
 internal fun shouldFollowLatest(
@@ -746,10 +722,24 @@ internal fun customerFacingChatError(error: ChatError, showTechnicalDetails: Boo
     if (showTechnicalDetails) return error.raw
     return when (error) {
         is ChatError.Auth -> "未登录模型服务，请到设置完成登录"
-        is ChatError.Model -> "模型连不上，请检查设置后重试"
+        is ChatError.Model -> modelFacingChatError(error.raw)
         is ChatError.Network -> "连接已断开，请重试"
         is ChatError.Attachment -> error.raw
         is ChatError.Unknown -> "回复失败，请重试"
+    }
+}
+
+/**
+ * Prefer protocol-specific copy when Codex hit a chat-only upstream (HTTP 400 on /responses).
+ * Generic model failures keep the short "连不上" message.
+ */
+internal fun modelFacingChatError(raw: String): String {
+    val n = raw.lowercase()
+    return if (ChatError.isResponsesProtocolMismatch(n)) {
+        "此服务多半只支持 Chat Completions，而原生聊天固定走 Responses。" +
+            "可改用 DeepSeek 等兼容服务，或到「设置 → 运行环境 → DeepSeek Harness」用网页助手接入。"
+    } else {
+        "模型连不上，请检查设置后重试"
     }
 }
 
@@ -763,7 +753,9 @@ private fun StreamingAssistantMessage(
     val streamed by streamingText.collectAsStateWithLifecycle()
     Text(
         streamed ?: item.text,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
         style = MaterialTheme.typography.bodyLarge,
     )
 }
@@ -806,15 +798,20 @@ private fun ChatMessage(
             contentAlignment = Alignment.CenterEnd,
         ) {
             Surface(
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(
+                    topStart = 16.dp,
+                    topEnd = 16.dp,
+                    bottomStart = 16.dp,
+                    bottomEnd = 4.dp,
+                ),
                 color = MaterialTheme.colorScheme.primaryContainer,
                 modifier = Modifier
-                    .widthIn(max = maxWidth * 0.86f)
+                    .widthIn(max = maxWidth * 0.88f)
                     .combinedClickable(onClick = {}, onLongClick = onLongPress),
             ) {
                 Text(
                     item.text,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
@@ -833,10 +830,10 @@ private fun ChatMessage(
                 modifier = Modifier
                     .fillMaxWidth()
                     .combinedClickable(onClick = {}, onLongClick = onLongPress)
-                    .padding(vertical = 8.dp),
+                    .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
                 Text(
                     if (waitedLong) "回复已收到，正在整理显示" else "正在排版回复",
@@ -897,6 +894,7 @@ private fun AssistantMarkdownBlock(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(end = 8.dp)
                 .combinedClickable(
                     onClick = {},
                     onLongClick = onLongPress,
@@ -1004,7 +1002,7 @@ private fun ActivityDetailRow(item: ChatItem, showTechnicalDetails: Boolean) {
         else -> "工具"
     }
     Row(
-        modifier = Modifier.padding(vertical = 9.dp),
+        modifier = Modifier.padding(vertical = 5.dp),
         verticalAlignment = Alignment.Top,
     ) {
         Icon(
@@ -1012,10 +1010,10 @@ private fun ActivityDetailRow(item: ChatItem, showTechnicalDetails: Boolean) {
             contentDescription = null,
             modifier = Modifier
                 .padding(top = 2.dp)
-                .size(16.dp),
+                .size(15.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -1286,12 +1284,15 @@ private fun ChatBottomBar(
 ) {
     Surface(
         modifier = modifier,
-        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 6.dp,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
         ) {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+            )
             state.approval?.let {
                 PendingNotice(
                     icon = Icons.Filled.Security,
@@ -1310,8 +1311,8 @@ private fun ChatBottomBar(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 12.dp, end = 12.dp, top = 6.dp),
-                    shape = RoundedCornerShape(8.dp),
+                        .padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.secondaryContainer,
                 ) {
                     Row(
@@ -1340,7 +1341,7 @@ private fun ChatBottomBar(
             if (state.lastTurnTokens != null && showTechnicalDetails) {
                 Text(
                     state.lastTurnTokens,
-                    modifier = Modifier.padding(start = 14.dp, top = 6.dp),
+                    modifier = Modifier.padding(start = 16.dp, top = 6.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1350,7 +1351,7 @@ private fun ChatBottomBar(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     state.attachments.forEach { attachment ->
@@ -1361,49 +1362,35 @@ private fun ChatBottomBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.Bottom,
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 FilledTonalIconButton(
                     onClick = onAddAttachments,
                     enabled = !state.isConnecting && !state.isImportingAttachment &&
                         state.queued == null && state.attachments.size < 4,
-                    modifier = Modifier.size(48.dp),
+                    modifier = Modifier.size(ComposerControlSize),
                 ) {
                     if (state.isImportingAttachment) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     } else {
                         Icon(Icons.Filled.AttachFile, contentDescription = "添加图片或文件")
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-                TextField(
+                ChatComposerTextField(
                     value = state.composer,
                     onValueChange = onComposerChange,
                     modifier = Modifier.weight(1f),
                     enabled = !state.isConnecting && state.queued == null,
-                    placeholder = {
-                        Text(
-                            when {
-                                state.isConnecting -> "正在连接"
-                                state.queued != null -> "请先取消排队消息"
-                                state.userInputRequest != null -> "请先回答 Codex 的问题"
-                                state.isStreaming -> "给 Codex 补充指令"
-                                else -> "发消息给 Codex"
-                            },
-                        )
+                    placeholder = when {
+                        state.isConnecting -> "正在连接"
+                        state.queued != null -> "请先取消排队消息"
+                        state.userInputRequest != null -> "请先回答 Codex 的问题"
+                        state.isStreaming -> "给 Codex 补充指令"
+                        else -> "发消息给 Codex"
                     },
-                    minLines = 1,
-                    maxLines = 5,
-                    shape = RoundedCornerShape(8.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                        focusedIndicatorColor = MaterialTheme.colorScheme.surface.copy(alpha = 0f),
-                        unfocusedIndicatorColor = MaterialTheme.colorScheme.surface.copy(alpha = 0f),
-                        disabledIndicatorColor = MaterialTheme.colorScheme.surface.copy(alpha = 0f),
-                    ),
+                    minHeight = ComposerControlSize,
                 )
                 Spacer(Modifier.width(8.dp))
                 VoiceInputButton(
@@ -1411,7 +1398,7 @@ private fun ChatBottomBar(
                     composer = state.composer,
                     onComposerChange = onComposerChange,
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
                 FilledIconButton(
                     onClick = if (state.isStreaming) {
                         if (state.composer.isNotBlank() || state.attachments.isNotEmpty()) onSend else onStop
@@ -1419,7 +1406,7 @@ private fun ChatBottomBar(
                         onSend
                     },
                     enabled = state.isStreaming || state.canSend,
-                    modifier = Modifier.size(48.dp),
+                    modifier = Modifier.size(ComposerControlSize),
                 ) {
                     Icon(
                         when {
@@ -1646,7 +1633,7 @@ private fun VoiceInputButton(
             }
         },
         enabled = !disabled && !preparing,
-        modifier = Modifier.size(48.dp),
+        modifier = Modifier.size(ComposerControlSize),
     ) {
         if (listening || preparing) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -1832,50 +1819,7 @@ private fun QuestionEditor(
 
 @Composable
 private fun CodeBlockWithCopy(code: String) {
-    val clipboard = LocalClipboard.current
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 12.dp, end = 4.dp, top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Spacer(Modifier.weight(1f))
-                IconButton(
-                    onClick = {
-                        scope.launch {
-                            clipboard.setClipEntry(
-                                ClipEntry(ClipData.newPlainText("AgentDeck code", code.trimEnd())),
-                            )
-                        }
-                        Toast.makeText(context, "已复制代码", Toast.LENGTH_SHORT).show()
-                    },
-                ) {
-                    Icon(
-                        Icons.Filled.ContentCopy,
-                        contentDescription = "复制代码",
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-            }
-            Text(
-                code.trimEnd(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-    }
+    SharedCodeBlockWithCopy(code)
 }
 
 @Composable

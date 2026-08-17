@@ -52,7 +52,9 @@ private val LightColors = lightColorScheme(
 @Composable
 fun AgentDeckTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    // Fixed brand palette: OEM dynamic colors made top bars / lists feel washed-out
+    // and inconsistent across pages. Re-enable only with a user preference later.
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = when {

@@ -13,6 +13,8 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -25,9 +27,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -59,6 +63,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -80,12 +85,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.agentdeck.app.di.ServiceLocator
+import com.agentdeck.app.domain.model.isChatCompletionsCompatible
+import com.agentdeck.app.domain.settings.ConversationMode
 import com.agentdeck.app.domain.model.ProviderAdapterId
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
 import com.agentdeck.app.domain.model.ProviderModel
 import com.agentdeck.app.domain.model.ProviderProfile
 import com.agentdeck.app.ui.common.DEFAULT_MAX_VISIBLE_MODELS
 import com.agentdeck.app.ui.common.filterSelectableModels
+import com.agentdeck.app.ui.theme.AgentDeckTopBar
 import com.agentdeck.app.ui.theme.AppSpacing
 import kotlinx.coroutines.launch
 
@@ -93,10 +102,13 @@ import kotlinx.coroutines.launch
 @Composable
 fun ModelsScreen(
     onBack: () -> Unit,
+    onOpenLightChat: (profileId: String, modelId: String, title: String) -> Unit = { _, _, _ -> },
     vm: ModelsViewModel = viewModel(),
 ) {
     val profiles by vm.profiles.collectAsStateWithLifecycle()
     val accountState by vm.accountState.collectAsStateWithLifecycle()
+    val conversationMode by ServiceLocator.experienceSettings.conversationMode
+        .collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var editor by remember { mutableStateOf<ProviderEditorDraft?>(null) }
@@ -126,8 +138,8 @@ fun ModelsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("模型服务") },
+            AgentDeckTopBar(
+                title = "模型服务",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -255,7 +267,20 @@ fun ModelsScreen(
             }
             item {
                 HorizontalDivider()
-                SectionLabel("第三方 Responses 服务")
+                SectionLabel("第三方模型服务")
+            }
+            item {
+                Text(
+                    when (conversationMode) {
+                        ConversationMode.LIGHT ->
+                            "轻聊主要用 Chat Completions（如 dots）。Responses 可先备着，切到开发模式给 Codex 用。"
+                        ConversationMode.DEV ->
+                            "Responses 给 Codex 原生聊天；Chat Completions 给 pi 与轻聊（如小红书 dots）。"
+                    },
+                    modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = AppSpacing.sm),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             if (profiles.isEmpty()) {
                 item {
@@ -278,7 +303,12 @@ fun ModelsScreen(
                         )
                         Spacer(Modifier.height(AppSpacing.xs))
                         Text(
-                            "Sub2API 是预设；其他服务需兼容 OpenAI Responses，支持 /v1/models 时会自动读取模型",
+                            when (conversationMode) {
+                                ConversationMode.LIGHT ->
+                                    "先添加 Chat Completions 即可开始轻聊。"
+                                ConversationMode.DEV ->
+                                    "Responses 给 Codex；Chat Completions 给 pi / 轻聊。"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -294,6 +324,17 @@ fun ModelsScreen(
                     profile = profile,
                     onEdit = { editor = vm.editDraft(profile) },
                     onDelete = { deleting = profile },
+                    onLightChat = if (profile.adapterId.isChatCompletionsCompatible()) {
+                        {
+                            onOpenLightChat(
+                                profile.id,
+                                profile.defaultModel,
+                                profile.name,
+                            )
+                        }
+                    } else {
+                        null
+                    },
                 )
                 HorizontalDivider()
             }
@@ -473,6 +514,7 @@ private fun ProviderRow(
     profile: ProviderProfile,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onLightChat: (() -> Unit)? = null,
 ) {
     ListItem(
         headlineContent = {
@@ -486,11 +528,11 @@ private fun ProviderRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    (if (profile.adapterId == ProviderAdapterId.SUB2API) {
-                        "Sub2API 预设"
-                    } else {
-                        "Responses"
-                    }) + " · ${profile.defaultModel}",
+                    when (profile.adapterId) {
+                        ProviderAdapterId.SUB2API -> "Sub2API · Codex"
+                        ProviderAdapterId.OPENAI_CHAT_COMPLETIONS -> "Chat · pi/dsh · 可轻量试聊"
+                        else -> "Responses · Codex"
+                    } + " · ${profile.defaultModel}",
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -506,16 +548,25 @@ private fun ProviderRow(
             )
         },
         trailingContent = {
-            // 整行 clickable 已进入编辑，仅保留删除按钮，避免重复焦点
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Filled.Delete, contentDescription = "删除 ${profile.name}")
+            Row {
+                if (onLightChat != null) {
+                    IconButton(onClick = onLightChat) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Chat,
+                            contentDescription = "轻量试聊 ${profile.name}",
+                        )
+                    }
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Filled.Delete, contentDescription = "删除 ${profile.name}")
+                }
             }
         },
         modifier = Modifier.clickable(onClick = onEdit),
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ProviderEditorScreen(
     initial: ProviderEditorDraft,
@@ -542,8 +593,8 @@ private fun ProviderEditorScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(if (draft.id == null) "添加模型服务" else "编辑模型服务") },
+            AgentDeckTopBar(
+                title = if (draft.id == null) "添加模型服务" else "编辑模型服务",
                 navigationIcon = {
                     IconButton(onClick = onBack, enabled = !working) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -557,37 +608,78 @@ private fun ProviderEditorScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .imePadding(),
-            contentPadding = PaddingValues(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                Text(
+                    "协议类型",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     FilterChip(
                         selected = draft.adapterId == ProviderAdapterId.SUB2API,
                         onClick = {
                             draft = draft.selectAdapter(ProviderAdapterId.SUB2API)
                         },
-                        label = { Text("Sub2API 预设") },
+                        label = { Text("Sub2API") },
                     )
                     FilterChip(
                         selected = draft.adapterId == ProviderAdapterId.OPENAI_RESPONSES,
                         onClick = {
                             draft = draft.selectAdapter(ProviderAdapterId.OPENAI_RESPONSES)
                         },
-                        label = { Text("其他 Responses 服务") },
+                        label = { Text("Responses") },
+                    )
+                    FilterChip(
+                        selected = draft.adapterId == ProviderAdapterId.OPENAI_CHAT_COMPLETIONS,
+                        onClick = {
+                            draft = draft.selectAdapter(ProviderAdapterId.OPENAI_CHAT_COMPLETIONS)
+                        },
+                        label = { Text("Chat") },
                     )
                 }
             }
             item {
-                Text(
-                    if (draft.adapterId == ProviderAdapterId.SUB2API) {
-                        "适用于 Sub2API 部署；按 Responses 标准连接，并自动从 /v1/models 读取模型。"
-                    } else {
-                        "适用于 OpenAI Responses 兼容服务；没有 /v1/models 时，验证后可手填模型 ID。"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                        Text(
+                            when (draft.adapterId) {
+                                ProviderAdapterId.OPENAI_CHAT_COMPLETIONS ->
+                                    "Chat Completions · 给 pi / dsh"
+                                ProviderAdapterId.SUB2API ->
+                                    "Sub2API · 给 Codex 原生聊天"
+                                else ->
+                                    "Responses · 给 Codex 原生聊天"
+                            },
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            when (draft.adapterId) {
+                                ProviderAdapterId.SUB2API ->
+                                    "需要 /v1/responses。若上游只有 chat/completions，请改选 Chat。"
+                                ProviderAdapterId.OPENAI_CHAT_COMPLETIONS ->
+                                    "POST /v1/chat/completions（小红书 dots 等）。会话里选 pi 并绑定此服务。"
+                                else ->
+                                    "需要 OpenAI Responses（POST /v1/responses）。chat 网关请改选 Chat。"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
             }
             item {
                 OutlinedTextField(
@@ -612,10 +704,11 @@ private fun ProviderEditorScreen(
                     label = { Text("API Base URL") },
                     placeholder = {
                         Text(
-                            if (draft.adapterId == ProviderAdapterId.SUB2API) {
-                                "https://你的-sub2api-域名/v1"
-                            } else {
-                                "https://api.example.com/v1"
+                            when (draft.adapterId) {
+                                ProviderAdapterId.SUB2API -> "https://你的-sub2api-域名/v1"
+                                ProviderAdapterId.OPENAI_CHAT_COMPLETIONS ->
+                                    "https://note3-prev-api.askdiandian.com/v1"
+                                else -> "https://api.example.com/v1"
                             },
                         )
                     },

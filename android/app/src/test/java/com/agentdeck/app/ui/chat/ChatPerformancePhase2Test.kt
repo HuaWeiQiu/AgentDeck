@@ -17,15 +17,16 @@ import org.junit.Test
 
 class ChatPerformancePhase2Test {
     @Test
-    fun `window keeps at most 8 materialized pages and evicts the oldest`() {
+    fun `window keeps at most DEFAULT_WINDOW_MAX_PAGES materialized pages and evicts the oldest`() {
+        val maxPages = DEFAULT_WINDOW_MAX_PAGES
         val conversation = ChatPerformanceFixtures.conversation(300)
         val repository = ChatTranscriptRepository()
         repository.loadConversation(conversation)
 
         val state = repository.state.value
         assertEquals(11, state.pages.size)
-        assertEquals(11 - 8, state.evictedPageCount)
-        assertEquals(8, state.pages.count { !it.evicted })
+        assertEquals(11 - maxPages, state.evictedPageCount)
+        assertEquals(maxPages, state.pages.count { !it.evicted })
         // The newest page (adjacent to the live tail) is never evicted.
         assertFalse(state.pages.last().evicted)
         // Evicted pages keep their descriptor and drop their items from the flat list.
@@ -35,6 +36,7 @@ class ChatPerformancePhase2Test {
 
     @Test
     fun `visible pages are never eviction candidates`() {
+        val maxPages = DEFAULT_WINDOW_MAX_PAGES
         val conversation = ChatPerformanceFixtures.conversation(300)
         val repository = ChatTranscriptRepository()
         repository.loadConversation(conversation)
@@ -50,17 +52,18 @@ class ChatPerformancePhase2Test {
 
         val state = repository.state.value
         assertFalse(state.pages.first { it.key == target.key }.evicted)
-        assertEquals(8, state.pages.count { !it.evicted })
+        assertEquals(maxPages, state.pages.count { !it.evicted })
         assertTrue(state.evictedPageCount > 0)
     }
 
     @Test
     fun `20 page roundtrip re-fetches every evicted page with identical hashes`() {
+        val maxPages = DEFAULT_WINDOW_MAX_PAGES
         val conversation = ChatPerformanceFixtures.conversation(1000)
         val repository = ChatTranscriptRepository()
         repository.loadConversation(conversation)
 
-        assertEquals(39 - 8, repository.state.value.evictedPageCount)
+        assertEquals(39 - maxPages, repository.state.value.evictedPageCount)
 
         // Walk upward like a user scrolling: refetch the oldest gap, pin it as
         // visible, then continue. Every materialized page must hash identically
@@ -69,10 +72,10 @@ class ChatPerformancePhase2Test {
         repository.state.value.pages.filter { !it.evicted }.forEach { page ->
             seenPageFingerprints += pageFingerprint(repository.state.value.items, page)
         }
-        // The window always keeps 31 pages evicted, so iterate the original gap
-        // set instead of looping until none remain (that condition never holds).
+        // The window always keeps (39 - maxPages) pages evicted, so iterate the
+        // original gap set instead of looping until none remain.
         val gapKeys = repository.state.value.pages.filter { it.evicted }.map { it.key }
-        assertEquals(31, gapKeys.size)
+        assertEquals(39 - maxPages, gapKeys.size)
         gapKeys.forEach { key ->
             val gap = repository.state.value.pages.first { it.key == key }
             assertTrue("gap $key must still be evicted before its turn", gap.evicted)
@@ -87,7 +90,7 @@ class ChatPerformancePhase2Test {
             val restored = state.pages.first { it.key == gap.key }
             assertFalse(restored.evicted)
             seenPageFingerprints += pageFingerprint(state.items, restored)
-            assertTrue(state.pages.count { !it.evicted } <= 8)
+            assertTrue(state.pages.count { !it.evicted } <= maxPages)
             // Present pages stay contiguous in the fixture's global order.
             val expectedIds = state.pages.filter { !it.evicted }.flatMap { it.itemIds }
             assertEquals(expectedIds, state.items.map { it.id })
@@ -126,7 +129,7 @@ class ChatPerformancePhase2Test {
             tailIds = repository.state.value.tailIds,
         )
         val gaps = timeline.filterIsInstance<ChatTimelineEntry.Gap>()
-        assertEquals(3, gaps.size)
+        assertEquals(11 - DEFAULT_WINDOW_MAX_PAGES, gaps.size)
         assertTrue(gaps.none { it.loading })
         assertEquals(repository.state.value.pages.filter { it.evicted }.map { it.key }, gaps.map { it.pageKey })
 

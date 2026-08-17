@@ -32,9 +32,16 @@ internal class EmbeddedProotProcess(
         redirectOutput: File? = null,
         guestEnvironment: Map<String, String> = emptyMap(),
         skillSnapshotKey: String? = null,
+        extraBinds: List<Pair<String, String>> = emptyList(),
     ): Process {
         val builder = ProcessBuilder(
-            buildArguments(command, workingDirectory, guestEnvironment, skillSnapshotKey),
+            buildArguments(
+                command,
+                workingDirectory,
+                guestEnvironment,
+                skillSnapshotKey,
+                extraBinds,
+            ),
         )
             .directory(paths.root)
         builder.environment().apply {
@@ -54,11 +61,31 @@ internal class EmbeddedProotProcess(
         script: String,
         timeoutMillis: Long,
         workingDirectory: String = "/root",
+    ): Result<RuntimeCommandResult> = executeWithExtraBinds(
+        script = script,
+        timeoutMillis = timeoutMillis,
+        workingDirectory = workingDirectory,
+        extraBinds = emptyList(),
+    )
+
+    /**
+     * Like [execute], but mounts additional host directories into the guest
+     * (`hostPath` → `guestPath`) for one-shot install helpers (e.g. dsh npm).
+     */
+    suspend fun executeWithExtraBinds(
+        script: String,
+        timeoutMillis: Long,
+        workingDirectory: String = "/root",
+        extraBinds: List<Pair<String, String>> = emptyList(),
     ): Result<RuntimeCommandResult> = withContext(Dispatchers.IO) {
         var process: Process? = null
         try {
             require(timeoutMillis > 0) { "运行超时必须大于 0" }
-            process = start(script, workingDirectory)
+            process = startExecutable(
+                command = listOf("/usr/bin/bash", "-lc", script),
+                workingDirectory = workingDirectory,
+                extraBinds = extraBinds,
+            )
             val running = process
             val stdout = CompletableFuture.supplyAsync { readBounded(running.inputStream.bufferedReader()) }
             val stderr = CompletableFuture.supplyAsync { readBounded(running.errorStream.bufferedReader()) }
@@ -114,6 +141,7 @@ internal class EmbeddedProotProcess(
         workingDirectory: String,
         guestEnvironment: Map<String, String>,
         skillSnapshotKey: String? = null,
+        extraBinds: List<Pair<String, String>> = emptyList(),
     ): List<String> {
         require(rootfs.isDirectory) { "内嵌 Linux 运行环境尚未安装" }
         require(workingDirectory.startsWith('/') && '\u0000' !in workingDirectory) {
@@ -126,6 +154,16 @@ internal class EmbeddedProotProcess(
         require(skillSnapshotKey == null || skillSnapshotKey.matches(Regex("[a-f0-9]{1,16}"))) {
             "Skill 快照标识无效"
         }
+        require(extraBinds.size <= 8) { "额外挂载过多" }
+        require(
+            extraBinds.all { (host, guest) ->
+                host.isNotBlank() &&
+                    guest.startsWith('/') &&
+                    '\u0000' !in host &&
+                    '\u0000' !in guest &&
+                    guest.matches(Regex("/[A-Za-z0-9._/-]{1,200}"))
+            },
+        ) { "额外挂载路径无效" }
         return buildList {
             add(paths.proot.absolutePath)
             add("-L")
@@ -141,6 +179,9 @@ internal class EmbeddedProotProcess(
             add("--bind=${paths.tempDir.absolutePath}:/tmp")
             add("--bind=${paths.codexHome.absolutePath}:/root/.codex")
             add("--bind=${paths.projectsHome.absolutePath}:/root/projects")
+            extraBinds.forEach { (host, guest) ->
+                add("--bind=$host:$guest")
+            }
             skillSnapshotKey?.let { key ->
                 val snapshot = File(paths.extensionSessionSnapshots, "skills.$key")
                 require(snapshot.isDirectory && snapshot.parentFile == paths.extensionSessionSnapshots) {

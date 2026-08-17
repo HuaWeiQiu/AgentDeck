@@ -30,6 +30,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         deepLink.value = intent.deepLink()
         enableEdgeToEdge()
+        // Keep compositor on GPU; avoid software fallback jank on high-DPI panels.
+        window.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+        )
         setContent {
             val target by deepLink
             AgentDeckTheme {
@@ -39,6 +44,12 @@ class MainActivity : ComponentActivity() {
             }
         }
         maybeRunVoiceSelfTest(intent)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Keep agents warm while the process lives so re-opening chat is instant.
+        // Reclaim only under system memory pressure (see AgentDeckApp.onTrimMemory).
     }
 
     override fun onNewIntent(intent: Intent) {

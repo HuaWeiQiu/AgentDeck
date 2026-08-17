@@ -11,4 +11,10 @@ object AppSpacing {
     val sm = 8.dp
     val md = 12.dp
     val lg = 16.dp
+    val xl = 20.dp
+    val xxl = 24.dp
+    /** Horizontal page gutter for lists / forms. */
+    val page = 16.dp
+    /** Vertical rhythm between major blocks. */
+    val section = 20.dp
 }

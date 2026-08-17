@@ -17,6 +17,8 @@ internal fun isDomesticDownloadUrl(url: String): Boolean {
     return host == "ghfast.top" ||
         host.endsWith(".ghfast.top") ||
         host.contains("ghproxy") ||
+        host == "npmmirror.com" ||
+        host.endsWith(".npmmirror.com") ||
         host.endsWith("tsinghua.edu.cn") ||
         host.endsWith("aliyun.com") ||
         host.endsWith("ustc.edu.cn") ||
@@ -25,6 +27,12 @@ internal fun isDomesticDownloadUrl(url: String): Boolean {
         host.endsWith("huaweicloud.com") ||
         host.endsWith("tencent.com") ||
         host.endsWith("myqcloud.com")
+}
+
+/** npm registry preferred for the region (used by dsh/pi installers). */
+internal fun npmRegistryForRegion(region: NetworkRegion): String = when (region) {
+    NetworkRegion.CHINA -> "https://registry.npmmirror.com"
+    NetworkRegion.OVERSEAS -> "https://registry.npmjs.org"
 }
 
 /**
