@@ -8,7 +8,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import com.agentdeck.app.domain.host.AccessibilityTreeSanitizer
 import com.agentdeck.app.domain.host.HostToolResult
 import com.agentdeck.app.domain.host.LabUiAutomationExecutor
-import com.agentdeck.app.domain.host.NoOpLabUiExecutor
 import com.agentdeck.app.domain.host.RawUiNode
 import com.agentdeck.app.domain.host.SensitiveUiClassifier
 import com.agentdeck.app.domain.host.UiAutomationLimits
@@ -19,13 +18,13 @@ class LabAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
-        LabUiAutomationHolder.executor = ServiceExecutor
+        LabAccessibilityRegistry.a11yExecutor = ServiceExecutor
     }
 
     override fun onDestroy() {
         if (instance === this) {
             instance = null
-            LabUiAutomationHolder.executor = NoOpLabUiExecutor
+            LabAccessibilityRegistry.a11yExecutor = null
         }
         super.onDestroy()
     }

@@ -1,6 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Android 11+ 包可见性：检测 Shizuku 管理器是否安装 -->
+    <queries>
+        <package android:name="maven.shizuku.manager.manager" />
+    </queries>
+
     <application>
+        <!-- Shizuku binder provider；仅 lab flavor 打包 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"
+            tools:ignore="ExportedContentProvider" />
+
         <service
             android:name=".data.host.lab.LabAccessibilityService"
             android:exported="false"
