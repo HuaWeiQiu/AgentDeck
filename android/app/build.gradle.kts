@@ -132,6 +132,10 @@ dependencies {
     implementation("com.alphacephei:vosk-android:0.3.47")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 
+    // Lab flavor only：Shizuku（shell UID）输入后端；secure 不引入。
+    "labImplementation"("dev.rikka.shizuku:api:13.1.5")
+    "labImplementation"("dev.rikka.shizuku:provider:13.1.5")
+
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260719")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
