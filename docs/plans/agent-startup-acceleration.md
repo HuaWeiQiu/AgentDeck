@@ -32,7 +32,7 @@
 实现入口（便于对照）：
 
 - Codex：`CodexBridgeLauncher` → `EmbeddedProotRuntime.launchAppServer`
-- pi：`PiRpcSession.ensureStarted`（当前 `--mode rpc`，且默认 `--no-session`）
+- pi：`PiRpcSession.ensureStarted`（当前 `--mode rpc`）
 - 互斥/热态：`NativeRuntimeBudget`、`ChatSessionRegistry`
 - Markdown 复用：`SharedChatMarkdown`（Codex / pi 共用 parser + LRU）
 

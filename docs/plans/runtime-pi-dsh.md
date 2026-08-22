@@ -1,7 +1,7 @@
 # 计划：pi / dsh（DeepSeek Harness）Runtime 接入
 
-- 状态（2026-08-17）：**D1 dsh 安装 + WebView 已实现**；**D2/D3 pi 安装 + 原生 RPC 聊天已实现**（非终端壳）。
-  代码主要在 **beta.10 标签之后的本地工作区**（见 `docs/HANDOFF.md`），勿假设 GitHub tag 已含。
+- 状态（2026-08-22）：**D1 dsh 安装 + WebView 已实现**；**D2/D3 pi 安装 + 原生 RPC 聊天已实现**（非终端壳）。
+  代码已随 **beta.11**（提交 `3404814`）发布到 `origin/main`，GitHub tag 已包含。
   启动加速 / warm：`docs/plans/agent-startup-acceleration.md`。
 - 通道：Secure 按需下载；宿主 L3/L4 仍只 Lab。
 - 依据（官方）：
@@ -139,7 +139,7 @@ pi RPC 模式 ←→ Android 侧薄客户端
 
 1. recipe `available` 与「新建会话」产品开关对齐（避免误导用户建不可用 recipe）。
 2. 备份元数据「是否装过某 CLI」；**永不**导出 dsh/pi 密钥文件。
-3. pi 磁盘 session（去掉或可选 `--no-session`）— 见启动加速 P1。
+3. pi 磁盘 session（已实现：`PiRpcSession` 不再传 `--no-session`，历史经 `PiChatHistoryStore` 落盘 pi-home）。
 4. dsh 工作区与 `projects/` 深度对齐。
 5. 正式 release 说明与卸载文案（D4）。
 

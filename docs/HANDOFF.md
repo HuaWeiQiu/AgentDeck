@@ -1,11 +1,11 @@
 # AgentDeck 开发交接
 
-- 更新时间：2026-08-17（Asia/Shanghai）— **第二轮**：pi/dsh 原生路径、模型服务 Chat Completions、warm keep-alive、启动加速 P0
+- 更新时间：2026-08-22（Asia/Shanghai）— **第三轮**：beta.11 已发布，历史「本地未提交」能力已全部落库（提交 `3404814`）
 - 主仓库：`HuaWeiQiu/AgentDeck`
 - 主分支：`main`
-- 已发布版本：`v0.2.0-beta.11`（`versionCode=16`，标签 `ba8067a`）
-- 远端 `origin/main` 末条已知：`f50aa50`（Runtime 迁到 `runtimes/codex/`）
-- **本地工作区**：在 `f50aa50` 之上有大量**未提交** Secure 改动（pi/dsh、Chat Completions、内存/启动优化等）。接手时先 `git status` / `git diff`，**不要**假设远端已包含下列能力。
+- 已发布版本：`v0.2.0-beta.11`（`versionCode=16`，标签 `3404814`）
+- 远端 `origin/main` 末条已知：`3404814`（chore: release 0.2.0-beta.11），本地与远端一致
+- **工作区状态**：干净。上述全部能力已在 `3404814` 提交并推送；接手时 `git status` 应为空。
 - 上一发布：`v0.2.0-beta.9`，标签 `38b5965`（不要移动）
 - 当前 Secure 包名仍为 `com.agentdeck.app.debug`；优先 **Secure only**，不主动扩 Lab。
 
@@ -15,10 +15,10 @@
    `origin/channel/secure` / `channel/lab` 继续开发。
 2. 已发布预发布目标 **beta.11**（`versionCode=16`）。不要移动 beta.8–10 标签或替换其资产。
 3. **聊天正文唯一持久化事实源**：Codex = app-server rollout；**禁止 Room 双写消息正文**。
-   pi 会话当前以进程/本地 pi-home 为主，**不要**并进 Codex rollout。
-4. **Runtime 体积拆分 V1–V3 已在远端落地**；本地又推进了 **pi / dsh 真接入**（见下），不再是
+   pi 历史已通过 `PiChatHistoryStore` 落盘到 pi-home，仍不并入 Codex rollout。
+4. **Runtime 体积拆分 V1–V3 已在远端落地**；**pi / dsh 真接入**也已随 beta.11 落地（见下），不再是
    「设置里仅显示即将支持」。
-5. **模型服务双协议**（本地未提交为主）：
+5. **模型服务双协议**：
    - **Responses** → 仅 Codex 原生聊天（ADR-0007 / `wire_api=responses`）。
    - **Chat Completions** → pi / dsh（如小红书 dots）；`ProviderAdapterId.OPENAI_CHAT_COMPLETIONS`。
    - 密钥统一 `ProviderCredentialVault`；**不要**把 dsh/pi 密钥写进 Codex `config.toml`。
@@ -84,7 +84,7 @@ AgentDeck/
 
 ## 最近完成的工作（相对 beta.10 / 旧 HANDOFF）
 
-### A. 模型服务：Chat Completions 一等公民（本地）
+### A. 模型服务：Chat Completions 一等公民（已随 beta.11 发布）
 
 - `OPENAI_CHAT_COMPLETIONS` adapter；UI 短标签「Chat」；dots 默认 URL/模型可填。
 - Codex 启动路径**拒绝** Chat Completions 配置（避免再打 `/v1/responses` 400）。
@@ -93,7 +93,7 @@ AgentDeck/
 - 说明：历史「小红书」若仍存成 Responses，需新建 **Chat Completions** 配置给 pi。
 - 相关：`docs/plans/codex-dots-http-400.md`、`docs/ADR-0007-MANAGED-MODEL-PROVIDERS.md`（Responses 仍只服务 Codex）。
 
-### B. pi / dsh Runtime（本地，远超旧「V4 未做」表述）
+### B. pi / dsh Runtime（已随 beta.11 发布，远超旧「V4 未做」表述）
 
 - 安装：`PiRuntimeInstaller` / `DshRuntimeInstaller`（可复用 dsh Node 给 pi）。
 - 路径单例：`EmbeddedRuntimePaths.shared` / `PiRuntimePaths.shared` / `DshRuntimePaths.shared`。
@@ -101,7 +101,7 @@ AgentDeck/
 - dsh：`DshWebSupervisor` + WebView；Node `--max-old-space-size=160`、`UV_THREADPOOL_SIZE=1`。
 - 计划文档：`docs/plans/runtime-pi-dsh.md`（状态需按本交接理解，已超越 D0 占位）。
 
-### C. 内存与 warm keep-alive（本地）
+### C. 内存与 warm keep-alive（已随 beta.11 发布）
 
 | 策略 | 行为 |
 | --- | --- |
@@ -117,7 +117,7 @@ AgentDeck/
 
 真机（V2301A）曾验证：离开 Codex 后 `codex` PID 可保持；再进 reattach。列表静置 PSS 约 90MB 量级、Codex 打开约 200MB PSS（含 app-server，属能力成本）。
 
-### D. 启动加速 P0+P1（本地）
+### D. 启动加速 P0+P1（已随 beta.11 发布）
 
 见 **`docs/plans/agent-startup-acceleration.md`**（权威）：
 
@@ -156,7 +156,7 @@ cd /Users/tanye/AgentDeck   # 或你的 clone
 git fetch origin
 git status --short --branch
 git log -8 --oneline --decorate
-# 工作区很可能很脏：先分清「已推送 f50aa50」vs「本机未提交的 Secure 增强」
+# 工作区应为干净：本地与 origin/main 一致，HEAD 应为 3404814（chore: release 0.2.0-beta.11）
 
 export JAVA_HOME="/path/to/jdk-17"   # 本机常用 Homebrew openjdk@17
 cd android && ./gradlew :app:assembleSecureBeta
@@ -171,9 +171,8 @@ cd android && ./gradlew :app:assembleSecureBeta
 
 建议优先级：
 
-1. **提交或分拣本地改动**（模型服务 / pi·dsh / 内存·启动），避免交接丢失。
-2. 真机装 Secure Beta：Codex/pi 二次进入、trim 后恢复、Chat Completions 绑 pi。
-3. P1 启动加速或消费级阶段 4 方案（签名），二选一主线，勿并行发散 Lab。
+1. **真机回归 beta.11**：Codex/pi 二次进入 reattach、trim 后恢复、Chat Completions 绑 pi。
+2. P1 启动加速或消费级阶段 4 方案（签名），二选一主线，勿并行发散 Lab。
 
 ## 关键文件
 
@@ -196,10 +195,10 @@ cd android && ./gradlew :app:assembleSecureBeta
 
 ## 明确的已知边界
 
-- 本地增强**尚未**打进已发布 beta.10 tag；用户设备若只装商店/旧 beta，没有 pi Chat Completions。
+- 上述增强已全部包含在已发布的 beta.11（`3404814`）；用户设备若只装商店/更早 beta，仍没有 pi Chat Completions。
 - 正式签名 / 去 `.debug` 未做。
 - x86_64 全路径未闭环；多 OEM / 低内存 soak 仍是稳定版阻塞。
-- pi 仍 `--no-session`（进程级）；磁盘 session 在 acceleration P1。
+- pi 历史已通过 `PiChatHistoryStore` 落盘到 pi-home（`PiRpcSession` 已不再传 `--no-session`）。
 - CRIU / 重度多进程 **不做**为当前加速主路径。
 - dsh 为 developer preview，版本钉死在安装器 manifest。
 
