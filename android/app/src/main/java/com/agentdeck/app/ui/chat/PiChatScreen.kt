@@ -61,6 +61,8 @@ import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.model.isChatCompletionsCompatible
 import com.agentdeck.app.ui.theme.AgentDeckTopBar
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,6 +72,9 @@ private data class PiBubble(
     val role: String, // user | assistant | system | tool | error
     val text: String,
 )
+
+/** Throttle for flushing buffered pi TextDelta appends into bubble state. */
+private const val PI_STREAM_FLUSH_INTERVAL_MS = 64L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,8 +96,34 @@ fun PiChatScreen(
     var status by remember { mutableStateOf("正在启动 pi…") }
     var bindingLabel by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    // Streamed deltas are buffered in a coalescer and flushed on a throttle,
+    // mirroring ChatViewModel: per-token appends never copy the whole bubble text.
+    val deltaCoalescer = remember { StreamingDeltaCoalescer(PI_STREAM_FLUSH_INTERVAL_MS) }
+    var flushJob by remember { mutableStateOf<Job?>(null) }
 
     BackHandler(onBack = onBack)
+
+    fun appendToStreamingBubble(drained: String) {
+        val id = streamingId ?: return
+        val idx = bubbles.indexOfFirst { it.id == id }
+        if (idx >= 0) {
+            bubbles[idx] = bubbles[idx].copy(text = bubbles[idx].text + drained)
+        }
+    }
+    fun scheduleStreamingFlush() {
+        if (flushJob?.isActive == true) return
+        flushJob = scope.launch {
+            delay(PI_STREAM_FLUSH_INTERVAL_MS)
+            val drained = deltaCoalescer.drain() ?: return@launch
+            appendToStreamingBubble(drained)
+        }
+    }
+    /** Drain pending deltas synchronously before a stream ends or state persists. */
+    fun flushPendingStreaming() {
+        flushJob?.cancel()
+        flushJob = null
+        deltaCoalescer.drain()?.let(::appendToStreamingBubble)
+    }
 
     // Soft lifecycle: cancel grace-stop on enter; schedule stop on leave (handfeel + RAM).
     fun persistHistory() {
@@ -169,25 +200,24 @@ fun PiChatScreen(
         session.eventFlow.collectLatest { event ->
             when (event) {
                 is PiRpcEvent.TextDelta -> {
-                    val id = streamingId ?: run {
+                    if (streamingId == null) {
                         val newId = "a-" + System.currentTimeMillis()
                         streamingId = newId
                         bubbles.add(PiBubble(newId, "assistant", ""))
-                        newId
                     }
-                    val idx = bubbles.indexOfFirst { it.id == id }
-                    if (idx >= 0) {
-                        bubbles[idx] = bubbles[idx].copy(text = bubbles[idx].text + event.delta)
-                    }
+                    deltaCoalescer.append(event.delta)
+                    scheduleStreamingFlush()
                     busy = true
                 }
                 is PiRpcEvent.TextEnd -> {
                     val id = streamingId
                     if (id != null) {
+                        // Drain first so a blank final content still keeps buffered deltas.
+                        flushPendingStreaming()
                         val idx = bubbles.indexOfFirst { it.id == id }
                         if (idx >= 0 && event.content.isNotBlank()) {
-                            bubbles[idx] = bubbles[idx].copy(text = event.content)
                             val content = event.content
+                            bubbles[idx] = bubbles[idx].copy(text = content)
                             scope.launch {
                                 val doc = withContext(Dispatchers.Default) {
                                     SharedChatMarkdown.parse(id, content)
@@ -218,6 +248,7 @@ fun PiChatScreen(
                     )
                 }
                 is PiRpcEvent.TurnEnd, is PiRpcEvent.AgentEnd -> {
+                    flushPendingStreaming()
                     busy = false
                     streamingId = null
                     status = "就绪"
@@ -227,6 +258,7 @@ fun PiChatScreen(
                     scope.launch(Dispatchers.IO) { historyStore.save(cardId, snapshot) }
                 }
                 is PiRpcEvent.Error -> {
+                    flushPendingStreaming()
                     busy = false
                     streamingId = null
                     status = event.message
@@ -240,6 +272,7 @@ fun PiChatScreen(
                 }
                 is PiRpcEvent.Raw -> Unit
                 PiRpcEvent.ProcessEnded -> {
+                    flushPendingStreaming()
                     busy = false
                     streamingId = null
                     bindingLabel = ""
