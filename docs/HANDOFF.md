@@ -1,6 +1,6 @@
 # AgentDeck 开发交接
 
-- 更新时间：2026-08-22（Asia/Shanghai）— **第四轮**：beta.11 真机回归通过；新增 rootfs 瘦身、凭据失效恢复、ADR-0014/0015
+- 更新时间：2026-08-22（Asia/Shanghai）— **第四轮**：beta.11 真机回归通过；新增 rootfs 瘦身、凭据失效恢复、ADR-0014/0015；Lab 三级输入后端开工（见文末「进行中」）
 - 主仓库：`HuaWeiQiu/AgentDeck`
 - 主分支：`main`
 - 已发布版本：`v0.2.0-beta.11`（`versionCode=16`，标签 `3404814`）
@@ -218,3 +218,16 @@ cd android && ./gradlew :app:assembleSecureBeta
   Node compile cache 在对应 `runtimes/<cli>/` 下，随 CLI 删除一并清理即可。
 - 不在新 owner 接管事件流时直接取消旧 Channel collector；必须 handoff fence。
 - **禁止 kill `connectedAndroidTest`/macrobenchmark** gradle 任务。
+
+## 进行中：Lab 三级输入后端（阶段 3，未完成）
+
+目标：Lab 屏幕代理不再强依赖无障碍模式，按 Shell(Shizuku) > Accessibility > ReadOnly 三级降级。
+
+- **已完成**：`build.gradle.kts` 已加 `labImplementation` Shizuku api+provider 13.1.5（仅 lab flavor，secure 不引入）——见「WIP shell backend」提交。
+- **待做**（接手直接续）：
+  1. src/lab/ 下新建 `LabShellBackend.kt` 实现 `LabUiAutomationExecutor`：snapshot 走 `uiautomator dump` + 复用 `AccessibilityTreeSanitizer`；click/scroll/back/home 走 `input` 命令；setText 对非 ASCII 返回明确 Error（host_shell_set_text_limited）；密码字段 Denied
+  2. `LabInputBackendRouter.kt` 按 Shell > a11y > read_only 选后端，暴露 `activeBackend()` 供设置页显示；保持 main 经反射加载的兼容（main 不直接依赖 lab 类）
+  3. ReadOnly 兜底返回明确引导文案（"开启无障碍或完成无线调试配对"）
+  4. src/lab/AndroidManifest.xml 加 ShizukuProvider；单测（XML→RawUiNode 解析、转义判断、路由选择）放 src/test/
+- **约束不变**：这些永不进 Secure flavor；不把密钥/正文打进日志。
+- **验收**：`:app:testLabDebugUnitTest` 全绿 + `verify-release.sh` 全绿 + 真机（开无线调试配对）跑一次 snapshot/click/setText。
