@@ -219,15 +219,15 @@ cd android && ./gradlew :app:assembleSecureBeta
 - 不在新 owner 接管事件流时直接取消旧 Channel collector；必须 handoff fence。
 - **禁止 kill `connectedAndroidTest`/macrobenchmark** gradle 任务。
 
-## 进行中：Lab 三级输入后端（阶段 3，未完成）
+## Lab 三级输入后端（阶段 3，代码完成，待真机验收）
 
 目标：Lab 屏幕代理不再强依赖无障碍模式，按 Shell(Shizuku) > Accessibility > ReadOnly 三级降级。
 
-- **已完成**：`build.gradle.kts` 已加 `labImplementation` Shizuku api+provider 13.1.5（仅 lab flavor，secure 不引入）——见「WIP shell backend」提交。
-- **待做**（接手直接续）：
-  1. src/lab/ 下新建 `LabShellBackend.kt` 实现 `LabUiAutomationExecutor`：snapshot 走 `uiautomator dump` + 复用 `AccessibilityTreeSanitizer`；click/scroll/back/home 走 `input` 命令；setText 对非 ASCII 返回明确 Error（host_shell_set_text_limited）；密码字段 Denied
-  2. `LabInputBackendRouter.kt` 按 Shell > a11y > read_only 选后端，暴露 `activeBackend()` 供设置页显示；保持 main 经反射加载的兼容（main 不直接依赖 lab 类）
-  3. ReadOnly 兜底返回明确引导文案（"开启无障碍或完成无线调试配对"）
-  4. src/lab/AndroidManifest.xml 加 ShizukuProvider；单测（XML→RawUiNode 解析、转义判断、路由选择）放 src/test/
+- **已落地**（提交 `2671b46`）：
+  - Shell 后端：Shizuku UserService（lab-only AIDL `IShellCommandService`，daemon=false，读线程防管道阻塞）执行 `uiautomator dump /dev/tty` / `input` / `dumpsys`；snapshot/clickText/setText 复用 `AccessibilityTreeSanitizer` 同一 nodeId 语义；非 ASCII setText 返回 `host_shell_set_text_limited`，密码字段 Denied
+  - `LabInputBackendRouter` 按 shell > accessibility > read_only 每次调用选择后端；a11y service 改注册到 `LabAccessibilityRegistry`，main 反射加载路径不变
+  - ReadOnly 兜底返回恢复指引文案；纯逻辑（`UiAutomatorDumpParser`、`ShellTextInput`）在 main domain/host，JVM 单测覆盖
+  - manifest：lab-only ShizukuProvider + queries 包可见性；`aidl = true`
 - **约束不变**：这些永不进 Secure flavor；不把密钥/正文打进日志。
-- **验收**：`:app:testLabDebugUnitTest` 全绿 + `verify-release.sh` 全绿 + 真机（开无线调试配对）跑一次 snapshot/click/setText。
+- **已验证**：双 flavor 编译 + `:app:testLabDebugUnitTest` 新增测试全绿 + `verify-release.sh` 全绿。
+- **待真机验收**：手机开"无线调试"配对并授权 Shizuku → 设置页确认 activeBackend=shell → 跑一次 snapshot/click/setText；再关 Shizuku 开无障碍确认降级到 a11y；全关确认 read_only 指引。
