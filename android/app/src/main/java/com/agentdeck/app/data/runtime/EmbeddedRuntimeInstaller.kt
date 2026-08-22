@@ -3,6 +3,7 @@ package com.agentdeck.app.data.runtime
 import android.content.Context
 import android.os.StatFs
 import android.system.Os
+import android.util.Log
 import com.agentdeck.app.domain.install.InstallPhase
 import com.agentdeck.app.domain.install.RecipeInstallProgress
 import com.agentdeck.app.domain.install.RecipeInstallation
@@ -86,6 +87,9 @@ internal class EmbeddedRuntimeInstaller(
 
                 progress(InstallPhase.INSTALLING_TOOLS, onProgress)
                 installBaseTools(runtime.androidAbi, region)
+                // 瘦身失败不影响安装结果：记录日志后继续验证与启用。
+                runCatching { pruneRootfsForSize(paths.stagingRootfs) { Log.d(TAG, it) } }
+                    .onFailure { error -> Log.w(TAG, "rootfs 瘦身跳过: ${error.message}") }
 
                 progress(InstallPhase.VERIFYING_RUNTIME, onProgress)
                 verifyStagingRuntime()
@@ -316,6 +320,7 @@ internal class EmbeddedRuntimeInstaller(
     }
 
     companion object {
+        private const val TAG = "EmbeddedRuntimeInstaller"
         private const val CODEX_RECIPE_ID = "recipe_codex"
         // A fresh install peaks near 900 MiB on the ARM64 device once the rootfs,
         // package metadata, Codex binary, and verified download cache coexist.
@@ -462,6 +467,45 @@ private suspend fun <T> withNetworkRetries(block: () -> T): T {
             attempt += 1
         }
     }
+}
+
+/**
+ * 安装完成后的磁盘瘦身：删除 rootfs 内可再生的体积大户。
+ * 只清理 apt 缓存、apt 索引和文档目录（doc/man），不动 locale，
+ * 保留 partial 目录与目录本身，避免破坏 apt/dpkg 结构。
+ * 返回释放的字节数；[log] 用于记录每项清理结果。
+ */
+internal fun pruneRootfsForSize(
+    rootfs: File,
+    log: (String) -> Unit = {},
+): Long {
+    var freedBytes = 0L
+    fun deleteTree(target: File, description: String) {
+        if (!target.exists()) return
+        val size = target.walkTopDown().filter { it.isFile }.sumOf(File::length)
+        check(target.deleteRecursively()) { "无法删除 $description" }
+        freedBytes += size
+        log("已清理 $description，释放 $size 字节")
+    }
+
+    // apt 已下载的 .deb 缓存（正常情况下 apt-get clean 已清，这里兜底）。
+    File(rootfs, "var/cache/apt/archives").listFiles()
+        ?.filter { it.isFile && it.name.endsWith(".deb") }
+        ?.forEach { deb ->
+            val size = deb.length()
+            check(deb.delete()) { "无法删除 apt 缓存 ${deb.name}" }
+            freedBytes += size
+        }
+    // apt 索引（apt-get update 可再生）；partial 目录必须保留。
+    File(rootfs, "var/lib/apt/lists").listFiles()
+        ?.filter { it.name != "partial" }
+        ?.forEach { entry -> deleteTree(entry, "apt 索引 ${entry.name}") }
+    // 文档与手册页不影响运行时；locale 保守起见不清理。
+    listOf("usr/share/doc", "usr/share/man").forEach { relative ->
+        File(rootfs, relative).listFiles()
+            ?.forEach { entry -> deleteTree(entry, "$relative/${entry.name}") }
+    }
+    return freedBytes
 }
 
 internal fun verifyArtifact(file: File, artifact: VerifiedArtifact) {
