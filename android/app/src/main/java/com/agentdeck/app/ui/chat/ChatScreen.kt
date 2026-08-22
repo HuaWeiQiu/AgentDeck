@@ -151,7 +151,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 /** Shared composer control height so attach / field / mic / send share one vertical center. */
-private val ComposerControlSize = 42.dp
+private val ComposerControlSize = 48.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -724,22 +724,36 @@ internal fun customerFacingChatError(error: ChatError, showTechnicalDetails: Boo
         is ChatError.Auth -> "未登录模型服务，请到设置完成登录"
         is ChatError.Model -> modelFacingChatError(error.raw)
         is ChatError.Network -> "连接已断开，请重试"
-        is ChatError.Attachment -> error.raw
+        is ChatError.Attachment ->
+            if (error.raw.isBlank()) "附件处理失败，请重试"
+            else "附件处理失败：${attachmentFacingChatError(error.raw)}"
         is ChatError.Unknown -> "回复失败，请重试"
     }
 }
 
 /**
  * Prefer protocol-specific copy when Codex hit a chat-only upstream (HTTP 400 on /responses).
- * Generic model failures keep the short "连不上" message.
+ * Standard mode keeps ADR-0008 wording: no protocol names, endpoints or settings paths.
  */
 internal fun modelFacingChatError(raw: String): String {
     val n = raw.lowercase()
     return if (ChatError.isResponsesProtocolMismatch(n)) {
-        "此服务多半只支持 Chat Completions，而原生聊天固定走 Responses。" +
-            "可改用 DeepSeek 等兼容服务，或到「设置 → 运行环境 → DeepSeek Harness」用网页助手接入。"
+        "此模型服务暂不兼容，可在设置中更换其他服务后重试。"
     } else {
         "模型连不上，请检查设置后重试"
+    }
+}
+
+/**
+ * Map attachment failures to a bounded customer state (ADR-0008); the raw
+ * reason stays available in advanced/developer surfaces via error.raw.
+ */
+internal fun attachmentFacingChatError(raw: String): String {
+    val n = raw.lowercase()
+    return when {
+        "size" in n || "too large" in n || "过大" in raw -> "文件过大"
+        "read" in n || "parse" in n || "解析" in raw -> "无法读取此文件内容"
+        else -> "请重试或更换附件"
     }
 }
 
@@ -1070,7 +1084,9 @@ private fun ActivityDetailRow(item: ChatItem, showTechnicalDetails: Boolean) {
                 Spacer(Modifier.height(6.dp))
                 Text(
                     if (diffExpanded) "收起修改内容" else "查看修改内容",
-                    modifier = Modifier.clickable { diffExpanded = !diffExpanded },
+                    modifier = Modifier
+                        .heightIn(min = ComposerControlSize)
+                        .clickable { diffExpanded = !diffExpanded },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -1649,7 +1665,7 @@ private fun PendingNotice(icon: ImageVector, text: String, onClick: () -> Unit) 
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 2.dp),
+            .padding(start = 14.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(

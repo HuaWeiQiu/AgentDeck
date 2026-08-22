@@ -43,8 +43,10 @@ class ChatPresentationTest {
                 "{\"error_type\":\"provider.client_bad_request\"," +
                 "\"detail\":\"Invalid provider request\"}"
         val protocolCopy = customerFacingChatError(ChatError.from(protocol400), false)
-        assertTrue(protocolCopy.contains("Chat Completions"))
-        assertTrue(protocolCopy.contains("DeepSeek Harness") || protocolCopy.contains("网页助手"))
+        // ADR-0008: standard mode must not expose protocol names.
+        assertFalse(protocolCopy.contains("Chat Completions"))
+        assertFalse(protocolCopy.contains("DeepSeek Harness"))
+        assertTrue(protocolCopy.contains("暂不兼容"))
         assertEquals(protocol400, customerFacingChatError(ChatError.from(protocol400), true))
     }
 
@@ -56,9 +58,13 @@ class ChatPresentationTest {
 
         assertEquals("文件无法解析；请确认文件未损坏、未加密且包含可读取内容", parsing)
         assertTrue(summary.startsWith("3 个文件未添加："))
+        val facing = customerFacingChatError(ChatError.Attachment(summary), false)
+        // Standard mode maps attachment failures to a bounded state, raw stays advanced-only.
+        assertTrue(facing.startsWith("附件处理失败："))
+        assertFalse(facing.contains(summary))
         assertEquals(
             summary,
-            customerFacingChatError(ChatError.Attachment(summary), false),
+            customerFacingChatError(ChatError.Attachment(summary), true),
         )
     }
 
