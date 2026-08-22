@@ -83,4 +83,22 @@ class EmbeddedProotRuntimeTest {
         assertTrue(options.stop)
         assertNull(options.provider)
     }
+
+    @Test
+    fun `workspace under guest projects maps to host bind source segments`() {
+        assertEquals(emptyList<String>(), workspaceRelativeSegments("/root/projects"))
+        assertEquals(listOf("default"), workspaceRelativeSegments("/root/projects/default"))
+        assertEquals(
+            listOf("team", "app with spaces"),
+            workspaceRelativeSegments("/root/projects/team/app with spaces"),
+        )
+    }
+
+    @Test
+    fun `workspace outside projects or with traversal is not host creatable`() {
+        assertNull(workspaceRelativeSegments("/root"))
+        assertNull(workspaceRelativeSegments("/home/user/project"))
+        assertNull(workspaceRelativeSegments("/root/projects/../etc"))
+        assertNull(workspaceRelativeSegments("/root/projects/safe/../../escape"))
+    }
 }

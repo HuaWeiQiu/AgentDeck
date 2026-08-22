@@ -6,8 +6,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -19,16 +17,18 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal object RuntimeNodePrewarm {
     private const val TAG = "RuntimeNodePrewarm"
     private val started = AtomicBoolean(false)
-    private val mutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun scheduleIfNeeded(context: Context) {
         if (!started.compareAndSet(false, true)) return
         val app = context.applicationContext
         scope.launch {
-            mutex.withLock {
+            // pi and dsh warm independent toolchains; run them in parallel, failures logged only.
+            launch {
                 runCatching { prewarmPi(app) }
                     .onFailure { Log.w(TAG, "pi prewarm skipped: ${it.message}") }
+            }
+            launch {
                 runCatching { prewarmDsh(app) }
                     .onFailure { Log.w(TAG, "dsh prewarm skipped: ${it.message}") }
             }

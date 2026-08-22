@@ -133,7 +133,7 @@ internal class ChatMarkdownCache(
     companion object {
         /** Visible assistant blocks + small prefetch — not full history. */
         const val DEFAULT_MAX_ENTRIES = 16
-        const val DEFAULT_MAX_BYTES = 8 * 1024 * 1024
+        const val DEFAULT_MAX_BYTES = 4 * 1024 * 1024
 
         fun forMemoryClass(memoryClassMb: Int): ChatMarkdownCache =
             ChatMarkdownCache(
@@ -161,4 +161,4 @@ private fun estimateDocumentBytes(content: String, root: ASTNode): Int {
         .toInt()
 }
 
-private const val ESTIMATED_AST_NODE_BYTES = 96L
+private const val ESTIMATED_AST_NODE_BYTES = 160L

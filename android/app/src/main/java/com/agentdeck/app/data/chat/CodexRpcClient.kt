@@ -121,7 +121,7 @@ private class OkHttpCodexTransport(
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
-                    if (text.toByteArray(StandardCharsets.UTF_8).size > CodexRpcClient.MAX_MESSAGE_BYTES) {
+                    if (exceedsMessageLimit(text)) {
                         eventChannel.close(IllegalStateException("Codex 响应超过大小限制"))
                         webSocket.close(1_009, "message too large")
                         return
@@ -197,6 +197,14 @@ private fun deliverDisconnected(
         eventChannel.close(IllegalStateException(event.message, event.cause))
     }
 }
+
+/**
+ * UTF-8 needs at most 3 bytes per Java char (4-byte sequences are surrogate
+ * pairs, i.e. 2 chars), so short strings can skip the encoding entirely.
+ */
+internal fun exceedsMessageLimit(text: String): Boolean =
+    text.length > CodexRpcClient.MAX_MESSAGE_BYTES / 3 &&
+        text.toByteArray(StandardCharsets.UTF_8).size > CodexRpcClient.MAX_MESSAGE_BYTES
 
 class CodexRpcClient internal constructor(
     private val transport: CodexRpcTransport,

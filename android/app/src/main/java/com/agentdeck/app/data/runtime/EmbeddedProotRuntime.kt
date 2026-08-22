@@ -123,11 +123,19 @@ internal class EmbeddedProotRuntime(
                 Os.chmod(credentialTokenFile.absolutePath, 0b110000000)
             }
 
-            val workspaceResult = EmbeddedProotProcess(paths).execute(
-                script = "mkdir -p -- ${shellQuote(options.cwd)}",
-                timeoutMillis = 10_000,
-            ).getOrThrow()
-            check(workspaceResult.commandSucceeded) { "无法创建 Codex 工作目录" }
+            // Guest /root/projects binds to paths.projectsHome, so the workspace can be
+            // created host-side; only unmappable guest paths need a PRoot round-trip.
+            val workspaceSegments = workspaceRelativeSegments(options.cwd)
+            if (workspaceSegments != null) {
+                val workspace = workspaceSegments.fold(paths.projectsHome, ::File)
+                check(workspace.mkdirs() || workspace.isDirectory) { "无法创建 Codex 工作目录" }
+            } else {
+                val workspaceResult = EmbeddedProotProcess(paths).execute(
+                    script = "mkdir -p -- ${shellQuote(options.cwd)}",
+                    timeoutMillis = 10_000,
+                ).getOrThrow()
+                check(workspaceResult.commandSucceeded) { "无法创建 Codex 工作目录" }
+            }
 
             val log = logFile(options.instanceKey).apply {
                 parentFile?.mkdirs()
@@ -455,6 +463,19 @@ internal class EmbeddedProotRuntime(
 
 internal fun hasOwnedMarker(arguments: List<String>, marker: String): Boolean =
     "AGENTDECK_INSTANCE=$marker" in arguments
+
+/**
+ * Maps a guest working directory to path segments under the host bind source of
+ * `/root/projects` ([EmbeddedRuntimePaths.projectsHome]). Returns null when the
+ * directory lives outside that bind, cannot be created safely host-side.
+ */
+internal fun workspaceRelativeSegments(cwd: String): List<String>? {
+    val segments = cwd.split('/').filter(String::isNotEmpty)
+    if (segments.size < 2 || segments[0] != "root" || segments[1] != "projects") return null
+    val relative = segments.drop(2)
+    if (relative.any { it == "." || it == ".." }) return null
+    return relative
+}
 
 internal fun parseParentPid(status: String): Int? = status.lineSequence()
     .firstOrNull { it.startsWith("PPid:") }

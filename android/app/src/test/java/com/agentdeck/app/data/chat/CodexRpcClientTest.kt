@@ -273,6 +273,19 @@ class CodexRpcClientTest {
         Unit
     }
 
+    @Test
+    fun `message limit check skips encoding for short text and still rejects oversized`() {
+        // At or below length/3 chars can never exceed the byte budget.
+        assertTrue(!exceedsMessageLimit("x".repeat(CodexRpcClient.MAX_MESSAGE_BYTES / 3)))
+
+        // Near the threshold the exact UTF-8 size decides (CJK is 3 bytes per char).
+        val oversizedCjk = "中".repeat(350_000) // ~1.05 MB UTF-8
+        assertTrue(exceedsMessageLimit(oversizedCjk))
+
+        val underLimitAscii = "x".repeat(500_000) // 0.5 MB UTF-8 despite long text
+        assertTrue(!exceedsMessageLimit(underLimitAscii))
+    }
+
     private class FakeTransport(
         var sendSucceeds: Boolean = true,
     ) : CodexRpcTransport {
