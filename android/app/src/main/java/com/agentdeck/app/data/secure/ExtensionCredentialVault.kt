@@ -49,11 +49,18 @@ internal class EncryptedExtensionCredentialVault(
     override fun load(credentialRef: String): ByteArray? {
         validateRef(credentialRef)
         val encrypted = store.read(credentialRef) ?: return null
-        return cipher.decrypt(encrypted, aad(credentialRef)).also { secret ->
-            if (secret.isEmpty() || secret.size > MAX_SECRET_BYTES ||
-                secret.any { it == 0.toByte() || it == '\r'.code.toByte() || it == '\n'.code.toByte() }
+        val secret = try {
+            cipher.decrypt(encrypted, aad(credentialRef))
+        } catch (error: Exception) {
+            // 解密失败视为密钥失效：删除失效密文避免反复失败，再向上层抛出明确类型。
+            runCatching { store.delete(credentialRef) }.exceptionOrNull()?.let(error::addSuppressed)
+            throw CredentialInvalidatedException("已保存的 MCP Token 无法解密，请重新配置", error)
+        }
+        return secret.also {
+            if (it.isEmpty() || it.size > MAX_SECRET_BYTES ||
+                it.any { byte -> byte == 0.toByte() || byte == '\r'.code.toByte() || byte == '\n'.code.toByte() }
             ) {
-                secret.fill(0)
+                it.fill(0)
                 error("已保存的 MCP Token 无效")
             }
         }

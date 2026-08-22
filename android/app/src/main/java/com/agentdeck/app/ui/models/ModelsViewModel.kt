@@ -8,6 +8,7 @@ import com.agentdeck.app.data.chat.CodexAccountProtocol
 import com.agentdeck.app.data.chat.CodexDeviceLogin
 import com.agentdeck.app.data.chat.CodexInbound
 import com.agentdeck.app.data.provider.ProviderDiscoveryException
+import com.agentdeck.app.data.secure.CredentialInvalidatedException
 import com.agentdeck.app.di.ServiceLocator
 import com.agentdeck.app.domain.model.ProviderAdapterId
 import com.agentdeck.app.domain.model.ProviderConnectionStatus
@@ -293,7 +294,17 @@ class ModelsViewModel : ViewModel() {
         val credentialRef = existing?.credentialRef
         val secret = when {
             draft.apiKey.isNotBlank() -> draft.apiKey.toByteArray(StandardCharsets.UTF_8)
-            credentialRef != null -> credentials.load(credentialRef)
+            credentialRef != null -> try {
+                credentials.load(credentialRef)
+            } catch (error: CredentialInvalidatedException) {
+                // Keystore 密钥失效：密文已自动清理，引导用户重新验证/导入而不是报裸错误
+                return draft.copy(
+                    hasStoredCredential = false,
+                    validated = false,
+                    status = ProviderConnectionStatus.CREDENTIAL_REJECTED,
+                    error = "模型连接已失效，请重新验证或重新导入 API Key",
+                )
+            }
             else -> null
         } ?: return draft.copy(
             validated = false,

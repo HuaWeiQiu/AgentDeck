@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import javax.crypto.AEADBadTagException
 
 class ExtensionCredentialVaultTest {
     @Test
@@ -67,6 +68,29 @@ class ExtensionCredentialVaultTest {
 
         assertTrue(vault.contains(kept))
         assertFalse(vault.contains(orphan))
+    }
+
+    @Test
+    fun `undecryptable extension credential is reported as invalidated and purged`() {
+        val store = ExtensionMemoryStore()
+        val ref = "extcred_99999999999999999999999999999999"
+        val writer = EncryptedExtensionCredentialVault(ExtensionTestCipher(), store)
+        writer.save(ref, "mcp-token".toByteArray())
+        val keystoreLostCipher = object : CredentialCipher {
+            override fun encrypt(plaintext: ByteArray, aad: ByteArray) =
+                EncryptedCredential(ByteArray(12), plaintext.copyOf())
+
+            override fun decrypt(encrypted: EncryptedCredential, aad: ByteArray): ByteArray =
+                throw AEADBadTagException("keystore key was invalidated")
+        }
+        val vault = EncryptedExtensionCredentialVault(keystoreLostCipher, store)
+
+        val error = runCatching { vault.load(ref) }.exceptionOrNull()
+
+        assertTrue(error is CredentialInvalidatedException)
+        assertTrue((error as CredentialInvalidatedException).cause is AEADBadTagException)
+        assertFalse(store.contains(ref))
+        assertNull(vault.load(ref))
     }
 }
 

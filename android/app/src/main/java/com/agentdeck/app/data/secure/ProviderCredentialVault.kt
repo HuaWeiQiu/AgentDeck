@@ -25,8 +25,16 @@ interface ProviderCredentialVault {
     fun delete(credentialRef: String)
 }
 
-class CredentialVaultException(message: String, cause: Throwable? = null) :
+open class CredentialVaultException(message: String, cause: Throwable? = null) :
     IllegalStateException(message, cause)
+
+/**
+ * 已保存的密文无法解密（如 Keystore 密钥被清除、AEADBadTagException）。
+ * 抛出前对应的失效密文已被自动清理；与返回 null 的「无凭据」区分开，
+ * 上层应引导用户重新验证或重新导入。
+ */
+class CredentialInvalidatedException(message: String, cause: Throwable? = null) :
+    CredentialVaultException(message, cause)
 
 internal data class EncryptedCredential(
     val iv: ByteArray,
@@ -77,7 +85,7 @@ internal class EncryptedProviderCredentialVault(
         val plaintext = try {
             cipher.decrypt(encrypted, aad(credentialRef))
         } catch (error: Exception) {
-            throw CredentialVaultException("已保存的 API Key 无法解密，请重新配置", error)
+            invalidate(credentialRef, "已保存的 API Key 无法解密，请重新配置", error)
         }
         return try {
                 require(plaintext.isNotEmpty() && plaintext.size <= MAX_SECRET_BYTES) {
@@ -91,8 +99,18 @@ internal class EncryptedProviderCredentialVault(
                 plaintext
         } catch (error: Exception) {
             plaintext.fill(0)
-            throw CredentialVaultException("已保存的 API Key 无法解密，请重新配置", error)
+            invalidate(credentialRef, "已保存的 API Key 无法解密，请重新配置", error)
         }
+    }
+
+    /** 解密失败视为密钥失效：删除失效密文避免反复失败，再向上层抛出明确类型。 */
+    private fun invalidate(
+        credentialRef: String,
+        message: String,
+        cause: Throwable,
+    ): Nothing {
+        runCatching { store.delete(credentialRef) }.exceptionOrNull()?.let(cause::addSuppressed)
+        throw CredentialInvalidatedException(message, cause)
     }
 
     override fun contains(credentialRef: String): Boolean {

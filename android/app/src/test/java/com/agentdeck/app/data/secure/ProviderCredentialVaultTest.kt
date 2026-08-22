@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.security.SecureRandom
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
@@ -59,6 +60,34 @@ class ProviderCredentialVaultTest {
         vault.save("credential_1", "valid-key".toByteArray())
 
         assertTrue(runCatching { vault.load("credential_1") }.exceptionOrNull() is CredentialVaultException)
+    }
+
+    @Test
+    fun `undecryptable credential is reported as invalidated and purged`() {
+        val store = MemoryBlobStore()
+        val writer = EncryptedProviderCredentialVault(JvmGcmCipher(), store)
+        writer.save("credential_1", "valid-key".toByteArray())
+        val brokenKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val random = SecureRandom()
+        val keystoreLostCipher = object : CredentialCipher {
+            override fun encrypt(plaintext: ByteArray, aad: ByteArray): EncryptedCredential {
+                val iv = ByteArray(12).also(random::nextBytes)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.ENCRYPT_MODE, brokenKey, GCMParameterSpec(128, iv))
+                return EncryptedCredential(iv, cipher.doFinal(plaintext))
+            }
+
+            override fun decrypt(encrypted: EncryptedCredential, aad: ByteArray): ByteArray =
+                throw AEADBadTagException("keystore key was invalidated")
+        }
+        val vault = EncryptedProviderCredentialVault(keystoreLostCipher, store)
+
+        val error = runCatching { vault.load("credential_1") }.exceptionOrNull()
+
+        assertTrue(error is CredentialInvalidatedException)
+        assertTrue((error as CredentialInvalidatedException).cause is AEADBadTagException)
+        assertFalse(store.contains("credential_1"))
+        assertNull(vault.load("credential_1"))
     }
 }
 
