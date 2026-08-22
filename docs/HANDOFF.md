@@ -1,11 +1,11 @@
 # AgentDeck 开发交接
 
-- 更新时间：2026-08-22（Asia/Shanghai）— **第三轮**：beta.11 已发布，历史「本地未提交」能力已全部落库（提交 `3404814`）
+- 更新时间：2026-08-22（Asia/Shanghai）— **第四轮**：beta.11 真机回归通过；新增 rootfs 瘦身、凭据失效恢复、ADR-0014/0015
 - 主仓库：`HuaWeiQiu/AgentDeck`
 - 主分支：`main`
 - 已发布版本：`v0.2.0-beta.11`（`versionCode=16`，标签 `3404814`）
-- 远端 `origin/main` 末条已知：`3404814`（chore: release 0.2.0-beta.11），本地与远端一致
-- **工作区状态**：干净。上述全部能力已在 `3404814` 提交并推送；接手时 `git status` 应为空。
+- 远端 `origin/main` 末条已知：`47c0e31` 之前请先 `git fetch`；本地含 beta.11 之后的增强提交
+  （`80a1667` rootfs 瘦身、`dc449c6` 凭据失效恢复、`a052282` ADR-0014/0015）
 - 上一发布：`v0.2.0-beta.9`，标签 `38b5965`（不要移动）
 - 当前 Secure 包名仍为 `com.agentdeck.app.debug`；优先 **Secure only**，不主动扩 Lab。
 
@@ -29,6 +29,12 @@
    - **未做（P2）**：erofs 镜像、`:agent` 多进程、评估去掉 largeHeap。
 7. **消费级 1–3 / Lab U0–U4 / Runtime 契约** 仍有效；阶段 4 正式签名、Lab U5 未做。
 8. **禁止 kill 正在跑的 `connectedAndroidTest`/macrobenchmark**（会卸包装用户数据）。
+9. **beta.11 真机回归**（V2301A，2026-08-22）：安装、冷启动、轻聊 Chat Completions
+   发送/流式回复、历史加载均通过；`verify-release.sh` 与 `verify-stability-matrix.sh` 全绿。
+   Codex 二次进入 reattach、低内存 trim 恢复仍未自动化，需真机手工验证。
+10. **ADR-0014/0015** 已定稿：rootfs 安全补丁走 rootfs 内 apt（显式触发）；app-server
+    协议升级须 RPC 场景全绿。凭据失效现在会清理密文并抛 `CredentialInvalidatedException`
+    （UI 显示"重新验证/导入"，不再静默）。
 
 ## 文档索引（本轮对齐）
 
